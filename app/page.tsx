@@ -285,6 +285,68 @@ export default function Home() {
 
   </div>
 </section>
+<section className="section">
+  <h2 className="section-title">AI COO Experience</h2>
+
+  <div className="ai-coo-experience">
+    <div className="priority-grid">
+      <div className="priority-card">
+        <h3>Today&apos;s Priorities</h3>
+
+        <div className="priority-item">
+          <span>QCR filing due</span>
+          <strong>4 days</strong>
+        </div>
+
+        <div className="priority-item">
+          <span>LP queries pending</span>
+          <strong>12</strong>
+        </div>
+
+        <div className="priority-item">
+          <span>Expected distribution</span>
+          <strong>₹41 Cr</strong>
+        </div>
+
+        <div className="priority-item">
+          <span>Portfolio company alert</span>
+          <strong>High</strong>
+        </div>
+
+        <div className="recommendation">
+          AI Recommendation: Start QCR preparation today and send an investor
+          update before the distribution notice is released.
+        </div>
+      </div>
+
+      <div className="priority-card">
+        <h3>Recommended Actions</h3>
+
+        <a className="action-button" href="#">
+          Generate Compliance Pack
+        </a>
+
+        <br />
+
+        <a className="action-button" href="#">
+          Draft LP Update
+        </a>
+
+        <br />
+
+        <a className="action-button" href="#">
+          Review Portfolio Risk
+        </a>
+
+        <br />
+
+        <a className="action-button" href="#">
+          Prepare Fund Snapshot
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
         <footer className="footer">
           © 2026 VENTIQ — AI Powered Operating System for Private Capital
         </footer>
