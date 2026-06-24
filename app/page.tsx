@@ -449,6 +449,117 @@ export default function Home() {
   </div>
 
 </section>
+<section className="section">
+  <h2 className="section-title">Finance Head Workspace</h2>
+
+  <div className="workspace">
+    <div className="workspace-header">
+      <div>
+        <h3>Today&apos;s Fund Operations</h3>
+        <p>
+          Automate the work that finance and compliance teams manually track
+          every quarter.
+        </p>
+      </div>
+
+      <div className="status-pill">12 tasks need attention</div>
+    </div>
+
+    <div className="workflow-grid">
+      <div className="workflow-card">
+        <h3>Bank Reconciliation Queue</h3>
+
+        <div className="workflow-row">
+          <span>Transactions imported</span>
+          <strong>184</strong>
+        </div>
+
+        <div className="workflow-row">
+          <span>Auto-mapped</span>
+          <strong>171</strong>
+        </div>
+
+        <div className="workflow-row">
+          <span>Needs review</span>
+          <strong>13</strong>
+        </div>
+
+        <a className="workflow-action" href="#">
+          Review Transactions
+        </a>
+      </div>
+
+      <div className="workflow-card">
+        <h3>Compliance Tracker</h3>
+
+        <div className="workflow-row">
+          <span>QCR</span>
+          <strong>Due in 4 days</strong>
+        </div>
+
+        <div className="workflow-row">
+          <span>Form 64C</span>
+          <strong>Pending data</strong>
+        </div>
+
+        <div className="workflow-row">
+          <span>GIFT City filing</span>
+          <strong>On track</strong>
+        </div>
+
+        <a className="workflow-action" href="#">
+          Open Compliance Hub
+        </a>
+      </div>
+
+      <div className="workflow-card">
+        <h3>Capital Call Workflow</h3>
+
+        <div className="workflow-row">
+          <span>Draft notices</span>
+          <strong>22</strong>
+        </div>
+
+        <div className="workflow-row">
+          <span>Institutional format</span>
+          <strong>Required</strong>
+        </div>
+
+        <div className="workflow-row">
+          <span>Expected call amount</span>
+          <strong>₹25 Cr</strong>
+        </div>
+
+        <a className="workflow-action" href="#">
+          Generate Capital Call
+        </a>
+      </div>
+
+      <div className="workflow-card">
+        <h3>Investor Communications</h3>
+
+        <div className="workflow-row">
+          <span>Quarterly SOAs</span>
+          <strong>Ready</strong>
+        </div>
+
+        <div className="workflow-row">
+          <span>Distribution notices</span>
+          <strong>Drafted</strong>
+        </div>
+
+        <div className="workflow-row">
+          <span>Emails pending</span>
+          <strong>48</strong>
+        </div>
+
+        <a className="workflow-action" href="#">
+          Send Communications
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
         <footer className="footer">
           © 2026 VENTIQ — AI Powered Operating System for Private Capital
         </footer>
