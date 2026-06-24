@@ -149,6 +149,142 @@ export default function Home() {
     </div>
   </div>
 </section>
+<section className="section">
+  <h2 className="section-title">
+    Fund Intelligence Platform
+  </h2>
+
+  <div className="feature-grid">
+
+    <div className="feature-card">
+      <div className="badge">Compliance</div>
+
+      <h3>Compliance Command Center</h3>
+
+      <p>
+        QCR, TCR, Form 64C, Form 64D,
+        SEBI filings, Gift City compliance
+        and custom compliance workflows.
+      </p>
+    </div>
+
+    <div className="feature-card">
+      <div className="badge">Economics</div>
+
+      <h3>Fee & Carry Engine</h3>
+
+      <p>
+        Track management fees,
+        carry accruals, waterfall calculations,
+        GP commitments and revenue.
+      </p>
+    </div>
+
+    <div className="feature-card">
+      <div className="badge">Portfolio</div>
+
+      <h3>Portfolio Intelligence</h3>
+
+      <p>
+        Track valuation changes,
+        revenue growth,
+        exits and portfolio alerts.
+      </p>
+    </div>
+
+  </div>
+</section>
+
+<section className="section">
+  <h2 className="section-title">
+    Managing Partner Dashboard
+  </h2>
+
+  <div className="dashboard-card">
+
+    <div className="dashboard-row">
+
+      <div className="mini-card">
+        <h4>24.3%</h4>
+        <p>Fund IRR</p>
+      </div>
+
+      <div className="mini-card">
+        <h4>1.8x</h4>
+        <p>DPI</p>
+      </div>
+
+      <div className="mini-card">
+        <h4>2.7x</h4>
+        <p>TVPI</p>
+      </div>
+
+      <div className="mini-card">
+        <h4>₹118 Cr</h4>
+        <p>Uncalled Capital</p>
+      </div>
+
+    </div>
+
+    <div className="alert-list">
+      <p>🟢 Expected Distribution: ₹41 Cr</p>
+      <p>🟡 QCR due in 4 days</p>
+      <p>🔴 ABC Logistics revenue down 12%</p>
+      <p>🟢 Carry Generated: ₹6 Cr</p>
+    </div>
+
+  </div>
+</section>
+
+<section className="section">
+  <h2 className="section-title">
+    Quarter-on-Quarter Intelligence
+  </h2>
+
+  <div className="feature-grid">
+
+    <div className="feature-card">
+      <h3>IRR Trend</h3>
+      <p>
+        Compare quarterly IRR performance
+        across all funds.
+      </p>
+    </div>
+
+    <div className="feature-card">
+      <h3>Valuation Changes</h3>
+      <p>
+        Monitor fair value movements
+        across portfolio companies.
+      </p>
+    </div>
+
+    <div className="feature-card">
+      <h3>Fund Benchmarking</h3>
+      <p>
+        Compare IRR, DPI, TVPI and MOIC
+        across multiple funds.
+      </p>
+    </div>
+
+  </div>
+</section>
+
+<section className="section">
+  <h2 className="section-title">
+    GIFT City Ready
+  </h2>
+
+  <div className="dashboard-card">
+
+    <p>✓ IFSCA Compliance Tracking</p>
+    <p>✓ FATCA & CRS Monitoring</p>
+    <p>✓ International Investor Reporting</p>
+    <p>✓ AML & KYC Management</p>
+    <p>✓ Regulatory Calendar</p>
+
+  </div>
+</section>
         <footer className="footer">
           © 2026 VENTIQ — AI Powered Operating System for Private Capital
         </footer>

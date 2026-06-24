@@ -195,4 +195,64 @@ a {
 .user-card li {
   margin-bottom: 8px;
   color: #cbd5e1;
+}.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.feature-card {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 16px;
+  padding: 24px;
+}
+
+.feature-card h3 {
+  margin-bottom: 12px;
+}
+
+.feature-card p {
+  color: #cbd5e1;
+  font-size: 14px;
+}
+
+.badge {
+  display: inline-block;
+  background: #2563eb;
+  padding: 6px 12px;
+  border-radius: 999px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.dashboard-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.mini-card {
+  background: #111827;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid #1f2937;
+}
+
+.mini-card h4 {
+  font-size: 22px;
+  margin-bottom: 8px;
+}
+
+.mini-card p {
+  color: #94a3b8;
+}
+
+.alert-list {
+  margin-top: 20px;
+}
+
+.alert-list p {
+  margin-bottom: 10px;
 }
