@@ -347,6 +347,108 @@ export default function Home() {
     </div>
   </div>
 </section>
+<section className="section">
+
+  <h2 className="section-title">
+    Interactive Fund Manager Dashboard
+  </h2>
+
+  <div className="chart-card">
+
+    <div className="chart-title">
+      Fund IRR Trend
+    </div>
+
+    <div className="chart-bars">
+
+      <div
+        className="bar"
+        style={{ height: "90px" }}
+      >
+        <span>Q1</span>
+      </div>
+
+      <div
+        className="bar"
+        style={{ height: "110px" }}
+      >
+        <span>Q2</span>
+      </div>
+
+      <div
+        className="bar"
+        style={{ height: "140px" }}
+      >
+        <span>Q3</span>
+      </div>
+
+      <div
+        className="bar"
+        style={{ height: "170px" }}
+      >
+        <span>Q4</span>
+      </div>
+
+    </div>
+
+    <div className="progress-section">
+
+      <h3>
+        Deployment Progress
+      </h3>
+
+      <br />
+
+      <div className="progress-track">
+        <div className="progress-fill"></div>
+      </div>
+
+      <p
+        style={{
+          marginTop: "12px"
+        }}
+      >
+        ₹410 Cr deployed out of ₹500 Cr
+      </p>
+
+    </div>
+
+  </div>
+
+</section>
+
+<section className="section">
+
+  <h2 className="section-title">
+    Fund Health Snapshot
+  </h2>
+
+  <div className="health-grid">
+
+    <div className="health-card">
+      <div className="health-number">
+        98%
+      </div>
+      Compliance Health
+    </div>
+
+    <div className="health-card">
+      <div className="health-number">
+        18
+      </div>
+      Healthy Investments
+    </div>
+
+    <div className="health-card">
+      <div className="health-number">
+        ₹6 Cr
+      </div>
+      Carry Generated
+    </div>
+
+  </div>
+
+</section>
         <footer className="footer">
           © 2026 VENTIQ — AI Powered Operating System for Private Capital
         </footer>
