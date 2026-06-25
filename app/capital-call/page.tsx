@@ -9,7 +9,8 @@ const investors = [
     initialFee: 1,
     batch: "May 2026 investors",
     preference: "Excel + PDF",
-    eligibility: "Eligible",
+    risk: "Low",
+    expectedCollection: "2 days",
   },
   {
     name: "SBI",
@@ -17,7 +18,8 @@ const investors = [
     initialFee: 0.8,
     batch: "May 2026 investors",
     preference: "Institutional PDF",
-    eligibility: "Eligible",
+    risk: "Low",
+    expectedCollection: "3 days",
   },
   {
     name: "HDFC Life",
@@ -25,7 +27,8 @@ const investors = [
     initialFee: 0.7,
     batch: "June 2026 investors",
     preference: "PDF + Email Body",
-    eligibility: "Eligible",
+    risk: "Medium",
+    expectedCollection: "5 days",
   },
   {
     name: "ICICI Prudential",
@@ -33,7 +36,8 @@ const investors = [
     initialFee: 0.6,
     batch: "June 2026 investors",
     preference: "Excel Working",
-    eligibility: "Eligible",
+    risk: "Medium",
+    expectedCollection: "6 days",
   },
   {
     name: "Family Office Investor",
@@ -41,7 +45,8 @@ const investors = [
     initialFee: 0.4,
     batch: "July 2026 investors",
     preference: "Standard Notice",
-    eligibility: "Deal Opt-out",
+    risk: "High",
+    expectedCollection: "Excluded",
   },
 ];
 
@@ -92,7 +97,6 @@ export default function CapitalCallPage() {
       return {
         ...investor,
         isEligible,
-        basis,
         ratio,
         investorCall,
       };
@@ -110,12 +114,12 @@ export default function CapitalCallPage() {
       <section className="app-shell">
         <div className="app-header">
           <div>
-            <p className="eyebrow">Finance Workspace</p>
-            <h1>Capital Call Workspace</h1>
+            <p className="eyebrow">VENTIQ Finance</p>
+            <h1>AI Capital Calls</h1>
             <p>
-              Live allocation engine with investor preferences, eligibility
-              rules, approval workflow, output queue, audit trail and AI
-              explanations.
+              AI-assisted capital call planning, LP allocation, approval,
+              notices, payment tracking, accounting impact and downstream fund
+              workflows.
             </p>
           </div>
 
@@ -124,12 +128,95 @@ export default function CapitalCallPage() {
           </a>
         </div>
 
+        <div className="preview-card">
+          <h2>AI Capital Call Recommendation</h2>
+
+          <div className="explain-box">
+            VENTIQ recommends raising ₹{callAmount.toFixed(2)} Cr today.
+            Confidence: 98%. Reason: current deployable cash will fall below the
+            minimum liquidity buffer after upcoming investments, management fees
+            and operating reserves.
+          </div>
+        </div>
+
+        <div className="impact-grid">
+          <div className="impact-card">
+            <h3>₹{callAmount.toFixed(2)} Cr</h3>
+            <p>Recommended call</p>
+          </div>
+
+          <div className="impact-card">
+            <h3>98%</h3>
+            <p>AI confidence</p>
+          </div>
+
+          <div className="impact-card">
+            <h3>{eligibleCount}</h3>
+            <p>Eligible LPs</p>
+          </div>
+
+          <div className="impact-card">
+            <h3>92%</h3>
+            <p>Expected collection</p>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>How AI Reached This Decision</h2>
+
+          <div className="decision-tree">
+            <div className="decision-node">
+              <h3>Current Cash Position</h3>
+              <p>₹81 Cr</p>
+            </div>
+
+            <div className="decision-arrow">↓</div>
+
+            <div className="decision-node">
+              <h3>Approved Investments</h3>
+              <p>₹63 Cr</p>
+            </div>
+
+            <div className="decision-arrow">↓</div>
+
+            <div className="decision-node">
+              <h3>Management Fees Due</h3>
+              <p>₹8 Cr</p>
+            </div>
+
+            <div className="decision-arrow">↓</div>
+
+            <div className="decision-node">
+              <h3>Liquidity Buffer Required</h3>
+              <p>₹10 Cr</p>
+            </div>
+
+            <div className="decision-arrow">↓</div>
+
+            <div className="decision-node highlight-node">
+              <h3>AI Decision</h3>
+              <p>Raise ₹{callAmount.toFixed(2)} Cr</p>
+              <span className="small-pill">98% Confidence</span>
+            </div>
+          </div>
+
+          <div className="decision-summary">
+            <strong>Why?</strong>
+            <p>
+              VENTIQ analysed cash runway, approved deployments, management fee
+              schedule, liquidity buffer, investor commitments and historical LP
+              payment behaviour. Based on this, AI recommends initiating the
+              capital call today.
+            </p>
+          </div>
+        </div>
+
         <div className="workflow-progress">
           <h2>Capital Call Progress</h2>
 
           <div className="progress-steps">
             <div className="progress-step active">✓ Fund Selected</div>
-            <div className="progress-step active">✓ Amount Entered</div>
+            <div className="progress-step active">✓ AI Recommendation</div>
             <div className="progress-step active">✓ Allocation Generated</div>
             <div className="progress-step active">◐ Approval Pending</div>
             <div className="progress-step">○ Notices Pending</div>
@@ -171,9 +258,7 @@ export default function CapitalCallPage() {
               onChange={(event) => setAllocationMethod(event.target.value)}
             >
               <option>Pro-rata based on committed capital</option>
-              <option>
-                Pro-rata based on commitment net of initial fees
-              </option>
+              <option>Pro-rata based on commitment net of initial fees</option>
             </select>
 
             <label>Investor Batch</label>
@@ -206,7 +291,7 @@ export default function CapitalCallPage() {
           </div>
 
           <div className="preview-card">
-            <h2>Live Allocation Preview</h2>
+            <h2>AI Allocation Preview</h2>
 
             <table className="investor-table">
               <thead>
@@ -215,6 +300,7 @@ export default function CapitalCallPage() {
                   <th>Preference</th>
                   <th>Basis</th>
                   <th>Call</th>
+                  <th>Risk</th>
                   <th>Eligibility</th>
                 </tr>
               </thead>
@@ -230,6 +316,7 @@ export default function CapitalCallPage() {
                         : "Excluded"}
                     </td>
                     <td>₹{investor.investorCall.toFixed(2)} Cr</td>
+                    <td>{investor.risk}</td>
                     <td>
                       <span className="small-pill">
                         {investor.isEligible ? "🟢 Eligible" : "🟡 Opt-out"}
@@ -272,20 +359,76 @@ export default function CapitalCallPage() {
             <h2>VENTIQ AI</h2>
 
             <div className="ai-insight">
-              ✓ Call amount is ready for allocation across eligible LPs.
+              ✓ AI recommends this call based on cash runway and upcoming
+              deployment.
             </div>
 
             <div className="ai-insight">
-              ✓ {excludedCount} investor excluded from this call.
+              ✓ {excludedCount} investor excluded from the eligible commitment
+              base.
             </div>
 
             <div className="ai-insight">
-              ✓ Notices should be generated in investor-specific formats.
+              ✓ Investor-specific formats detected for institutional LPs.
             </div>
 
             <div className="ai-insight">
-              Recommendation: Send this call for Finance Head approval before
-              generating investor communications.
+              Recommendation: Send for Finance Head approval before releasing LP
+              communications.
+            </div>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>AI Collection Forecast</h2>
+
+          <table className="investor-table">
+            <thead>
+              <tr>
+                <th>Investor</th>
+                <th>Call Amount</th>
+                <th>Collection Probability</th>
+                <th>Expected Timing</th>
+                <th>Risk</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {calculatedInvestors.map((investor) => (
+                <tr key={investor.name}>
+                  <td>{investor.name}</td>
+                  <td>₹{investor.investorCall.toFixed(2)} Cr</td>
+                  <td>{investor.isEligible ? "92%" : "Excluded"}</td>
+                  <td>{investor.expectedCollection}</td>
+                  <td>{investor.risk}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="preview-card">
+          <h2>Capital Call Simulator</h2>
+
+          <div className="impact-grid">
+            <div className="impact-card">
+              <h3>₹15 Cr</h3>
+              <p>High liquidity risk · possible deployment delay</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>₹{callAmount.toFixed(0)} Cr</h3>
+              <p>Best option · runway protected</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>₹35 Cr</h3>
+              <p>Idle cash risk · higher LP burden</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>61 days</h3>
+              <p>Projected runway after collection</p>
             </div>
           </div>
         </div>
@@ -303,67 +446,51 @@ export default function CapitalCallPage() {
         </div>
 
         <div className="preview-card">
-          <h2>Production Queue</h2>
+          <h2>Downstream Workflow Automation</h2>
 
           <div className="queue-grid">
-            <div className="queue-item">✅ Capital Call Notices</div>
-            <div className="queue-item">✅ Investor-wise Excel</div>
-            <div className="queue-item">✅ Email Drafts</div>
-            <div className="queue-item">✅ Institutional Formats</div>
-            <div className="queue-item">○ Investor Portal Update</div>
-            <div className="queue-item">○ WhatsApp Alerts</div>
-            <div className="queue-item">○ Accounting JV</div>
-            <div className="queue-item">○ Approval Log</div>
-          </div>
-
-          <div className="action-row">
-            <button>Generate All</button>
-            <button>Send for Approval</button>
-            <button>Preview Investor Experience</button>
+            <div className="queue-item">Approve Capital Call</div>
+            <div className="queue-item">Generate Notices</div>
+            <div className="queue-item">Send Emails</div>
+            <div className="queue-item">Update Investor Portal</div>
+            <div className="queue-item">Create Receivable JV</div>
+            <div className="queue-item">Start Bank Receipt Watch</div>
+            <div className="queue-item">Update NAV</div>
+            <div className="queue-item">Create Activity Engine Event</div>
           </div>
         </div>
-<div className="preview-card">
-  <h2>AI Validation</h2>
 
-  <div className="validation-grid">
-    <div className="validation-item">✓ Total allocation matches ₹{callAmount.toFixed(2)} Cr</div>
-    <div className="validation-item">✓ No investor exceeds remaining commitment</div>
-    <div className="validation-item">✓ {excludedCount} investor exclusion applied</div>
-    <div className="validation-item">✓ Notice dates ready for approval</div>
-    <div className="validation-item">✓ Accounting entry is balanced</div>
-    <div className="validation-item">✓ Investor-specific formats detected</div>
-  </div>
+        <div className="preview-card">
+          <h2>AI Validation</h2>
 
-  <div className="explain-box">
-    <strong>Explain Allocation:</strong> ₹{callAmount.toFixed(2)} Cr is allocated across {eligibleCount} eligible LPs using {allocationMethod}. The excluded investor is removed from the eligible commitment base, so remaining investors receive proportionate allocations.
-  </div>
-</div>
+          <div className="validation-grid">
+            <div className="validation-item">
+              ✓ Total allocation matches ₹{callAmount.toFixed(2)} Cr
+            </div>
+            <div className="validation-item">
+              ✓ No investor exceeds remaining commitment
+            </div>
+            <div className="validation-item">
+              ✓ {excludedCount} investor exclusion applied
+            </div>
+            <div className="validation-item">
+              ✓ Notice dates ready for approval
+            </div>
+            <div className="validation-item">✓ Accounting entry is balanced</div>
+            <div className="validation-item">
+              ✓ Investor-specific formats detected
+            </div>
+          </div>
 
-<div className="preview-card">
-  <h2>Impact Analysis</h2>
+          <div className="explain-box">
+            <strong>Explain Allocation:</strong> ₹{callAmount.toFixed(2)} Cr is
+            allocated across {eligibleCount} eligible LPs using{" "}
+            {allocationMethod}. Excluded investors are removed from the eligible
+            commitment base, so remaining investors receive proportionate
+            allocations.
+          </div>
+        </div>
 
-  <div className="impact-grid">
-    <div className="impact-card">
-      <h3>₹{callAmount.toFixed(2)} Cr</h3>
-      <p>Cash inflow expected</p>
-    </div>
-
-    <div className="impact-card">
-      <h3>24</h3>
-      <p>Investor notifications</p>
-    </div>
-
-    <div className="impact-card">
-      <h3>96</h3>
-      <p>Documents generated</p>
-    </div>
-
-    <div className="impact-card">
-      <h3>6 min</h3>
-      <p>Estimated completion</p>
-    </div>
-  </div>
-</div>
         <div className="preview-card">
           <h2>Expected Accounting Entry</h2>
 
@@ -386,27 +513,32 @@ export default function CapitalCallPage() {
         </div>
 
         <div className="preview-card">
-          <h2>Audit Timeline</h2>
+          <h2>AI Timeline</h2>
 
           <div className="audit-timeline">
             <div className="audit-item">
-              <strong>09:30</strong> Fund selected
+              <strong>09:30</strong> ✓ Cash forecast reviewed
             </div>
 
             <div className="audit-item">
-              <strong>09:35</strong> ₹{callAmount.toFixed(2)} Cr entered
+              <strong>09:32</strong> ✓ AI recommended ₹{callAmount.toFixed(2)} Cr
+              call
             </div>
 
             <div className="audit-item">
-              <strong>09:36</strong> Investor exclusions applied
+              <strong>09:35</strong> ✓ Investor exclusions applied
             </div>
 
             <div className="audit-item">
-              <strong>09:37</strong> Allocation generated
+              <strong>09:37</strong> ✓ Allocation generated
             </div>
 
             <div className="audit-item">
-              <strong>09:40</strong> Sent for Finance Head review
+              <strong>09:38</strong> ✓ Notices and Excel workings drafted
+            </div>
+
+            <div className="audit-item">
+              <strong>09:40</strong> Waiting Finance Head approval
             </div>
           </div>
         </div>
