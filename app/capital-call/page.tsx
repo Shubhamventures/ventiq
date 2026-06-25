@@ -322,7 +322,48 @@ export default function CapitalCallPage() {
             <button>Preview Investor Experience</button>
           </div>
         </div>
+<div className="preview-card">
+  <h2>AI Validation</h2>
 
+  <div className="validation-grid">
+    <div className="validation-item">✓ Total allocation matches ₹{callAmount.toFixed(2)} Cr</div>
+    <div className="validation-item">✓ No investor exceeds remaining commitment</div>
+    <div className="validation-item">✓ {excludedCount} investor exclusion applied</div>
+    <div className="validation-item">✓ Notice dates ready for approval</div>
+    <div className="validation-item">✓ Accounting entry is balanced</div>
+    <div className="validation-item">✓ Investor-specific formats detected</div>
+  </div>
+
+  <div className="explain-box">
+    <strong>Explain Allocation:</strong> ₹{callAmount.toFixed(2)} Cr is allocated across {eligibleCount} eligible LPs using {allocationMethod}. The excluded investor is removed from the eligible commitment base, so remaining investors receive proportionate allocations.
+  </div>
+</div>
+
+<div className="preview-card">
+  <h2>Impact Analysis</h2>
+
+  <div className="impact-grid">
+    <div className="impact-card">
+      <h3>₹{callAmount.toFixed(2)} Cr</h3>
+      <p>Cash inflow expected</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>24</h3>
+      <p>Investor notifications</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>96</h3>
+      <p>Documents generated</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>6 min</h3>
+      <p>Estimated completion</p>
+    </div>
+  </div>
+</div>
         <div className="preview-card">
           <h2>Expected Accounting Entry</h2>
 

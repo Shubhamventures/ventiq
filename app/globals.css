@@ -753,4 +753,60 @@ select {
   border-bottom: 1px solid #1f2937;
   padding: 12px 0;
   color: #cbd5e1;
+}.validation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.validation-item {
+  background: #020617;
+  border: 1px solid #1f2937;
+  border-radius: 14px;
+  padding: 14px;
+  color: #dbeafe;
+}
+
+.impact-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.impact-card {
+  background: #020617;
+  border: 1px solid #1f2937;
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.impact-card h3 {
+  margin-bottom: 8px;
+}
+
+.explain-box {
+  background: rgba(37, 99, 235, 0.12);
+  border: 1px solid rgba(37, 99, 235, 0.45);
+  border-radius: 18px;
+  padding: 20px;
+  margin-top: 18px;
+  color: #dbeafe;
+  line-height: 1.6;
+}
+
+.preference-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preference-badge {
+  background: #020617;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #cbd5e1;
 }
