@@ -4,13 +4,14 @@ export default function FinancePage() {
       <section className="app-shell">
         <div className="app-header">
           <div>
-            <p className="eyebrow">Finance Workspace</p>
-            <h1>Mission Control</h1>
-            <p>
-              One daily dashboard for fund finance, compliance, investor
-              reporting, cash movement, valuation and AI-driven priority
-              management.
-            </p>
+<p className="eyebrow">VENTIQ Finance</p>
+
+<h1>Mission Control</h1>
+
+<p>
+AI-first operating center for fund finance, compliance,
+investor reporting, valuation and cash intelligence.
+</p>
           </div>
 
           <a className="back-link" href="/">
@@ -18,62 +19,49 @@ export default function FinancePage() {
           </a>
         </div>
 
-        <div className="workflow-progress">
-          <h2>Today&apos;s Finance Priorities</h2>
-
-          <div className="progress-steps">
-            <div className="progress-step active">QCR due in 4 days</div>
-            <div className="progress-step active">13 bank items pending</div>
-            <div className="progress-step active">48 LP emails pending</div>
-            <div className="progress-step active">64C data pending</div>
-            <div className="progress-step">NAV review pending</div>
-            <div className="progress-step">Audit query open</div>
-            <div className="progress-step">GIFT filing review</div>
-          </div>
-        </div>
-
         <div className="preview-card">
-          <h2>AI Daily Brief</h2>
+          <h2>Good Morning, Shubham 👋</h2>
 
           <div className="explain-box">
-            VENTIQ recommends starting with bank reconciliation because 13
-            transactions are unmapped. This may impact NAV, QCR and investor
-            reporting if not closed today.
+            VENTIQ has reviewed today&apos;s fund operations. There are 2
+            critical items, 4 compliance deadlines this week, ₹81.4 Cr current
+            cash, and ₹25 Cr expected inflow from approved capital calls.
           </div>
         </div>
 
         <div className="impact-grid">
           <div className="impact-card">
+            <h3>96%</h3>
+            <p>Finance Health Score</p>
+          </div>
+
+          <div className="impact-card">
+            <h3>₹81.4 Cr</h3>
+            <p>Current Cash</p>
+          </div>
+
+          <div className="impact-card">
             <h3>₹25 Cr</h3>
-            <p>Capital call under approval</p>
+            <p>Expected Inflow</p>
           </div>
 
           <div className="impact-card">
-            <h3>13</h3>
-            <p>Bank transactions need review</p>
-          </div>
-
-          <div className="impact-card">
-            <h3>4 days</h3>
-            <p>QCR filing due</p>
-          </div>
-
-          <div className="impact-card">
-            <h3>48</h3>
-            <p>Investor emails pending</p>
+            <h3>93%</h3>
+            <p>AI Automation Rate</p>
           </div>
         </div>
 
         <div className="knowledge-grid">
           <div className="preview-card">
-            <h2>Fund Operations Queue</h2>
+            <h2>AI Recommended Actions</h2>
 
             <div className="recommended-actions">
               <div className="recommended-action-card primary">
                 <div>
-                  <h3>🏦 Bank Reconciliation</h3>
+                  <h3>⭐ Review Bank Reconciliation</h3>
                   <p>
-                    184 transactions imported, 171 auto-mapped, 13 need review.
+                    13 unmatched transactions may impact NAV, QCR and investor
+                    reporting.
                   </p>
                 </div>
                 <span className="recommended-action-link">Review →</span>
@@ -81,68 +69,127 @@ export default function FinancePage() {
 
               <div className="recommended-action-card">
                 <div>
-                  <h3>💰 Capital Call</h3>
+                  <h3>💰 Approve Capital Call</h3>
                   <p>
-                    ₹25 Cr call is awaiting Finance Head review before notices
-                    are generated.
+                    ₹25 Cr capital call is awaiting approval. 48 LP
+                    communications depend on this.
                   </p>
                 </div>
-                <span className="recommended-action-link">Open →</span>
+                <span className="recommended-action-link">Approve →</span>
               </div>
 
               <div className="recommended-action-card">
                 <div>
-                  <h3>📩 Investor Communications</h3>
+                  <h3>📊 Review Valuation Pack</h3>
                   <p>
-                    SOA and distribution notice emails are drafted for 48 LPs.
-                  </p>
-                </div>
-                <span className="recommended-action-link">Send →</span>
-              </div>
-
-              <div className="recommended-action-card">
-                <div>
-                  <h3>📊 Valuation Pack</h3>
-                  <p>
-                    Quarterly fair value comparison needs final finance review.
+                    Quarterly fair value comparison is pending before reporting
+                    close.
                   </p>
                 </div>
                 <span className="recommended-action-link">Review →</span>
+              </div>
+
+              <div className="recommended-action-card">
+                <div>
+                  <h3>🛡 Prepare QCR Filing</h3>
+                  <p>
+                    QCR is due in 4 days and requires final NAV and investor
+                    data.
+                  </p>
+                </div>
+                <span className="recommended-action-link">Prepare →</span>
               </div>
             </div>
           </div>
 
           <div className="ai-chat-panel">
-            <h2>VENTIQ AI</h2>
+            <h2>VENTIQ AI Copilot</h2>
 
             <div className="chat-message">
               Ask: “What should I complete first today?”
             </div>
 
             <div className="chat-message">
-              Ask: “Which tasks impact QCR?”
+              Ask: “Which items will delay QCR?”
             </div>
 
             <div className="chat-message">
-              Ask: “Show investor emails pending approval.”
+              Ask: “Prepare my finance head summary.”
             </div>
 
             <div className="chat-message">
-              Ask: “Prepare today&apos;s finance summary.”
+              Ask: “Show cash movement for next 30 days.”
             </div>
           </div>
         </div>
 
         <div className="preview-card">
-          <h2>Compliance Tracker</h2>
+          <h2>Cash Intelligence</h2>
+
+          <div className="impact-grid">
+            <div className="impact-card">
+              <h3>₹81.4 Cr</h3>
+              <p>Available cash</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>₹25 Cr</h3>
+              <p>Expected inflow</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>₹17 Cr</h3>
+              <p>Expected outflow</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>52 days</h3>
+              <p>Cash runway</p>
+            </div>
+          </div>
+
+          <div className="explain-box">
+            AI Forecast: Cash is sufficient for current commitments, but QCR and
+            NAV closure depend on completing bank reconciliation today.
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>AI Risk Radar</h2>
 
           <div className="queue-grid">
-            <div className="queue-item">QCR — Due in 4 days</div>
-            <div className="queue-item">TCR — On track</div>
-            <div className="queue-item">Form 64C — Pending data</div>
-            <div className="queue-item">Form 64D — Drafting</div>
-            <div className="queue-item">GIFT City — Review required</div>
-            <div className="queue-item">FATCA / CRS — Scheduled</div>
+            <div className="queue-item">🔴 NAV close blocked by bank items</div>
+            <div className="queue-item">🟠 Capital call approval overdue</div>
+            <div className="queue-item">🟡 QCR deadline approaching</div>
+            <div className="queue-item">🟢 Investor SOAs ready</div>
+            <div className="queue-item">🟢 Audit trail updated</div>
+            <div className="queue-item">🟡 64C data pending</div>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>Workflow Pipeline</h2>
+
+          <div className="queue-grid">
+            <div className="queue-item">Bank → 93% matched</div>
+            <div className="queue-item">Accounting → Pending review</div>
+            <div className="queue-item">Valuation → 78% complete</div>
+            <div className="queue-item">Investor Reporting → Drafted</div>
+            <div className="queue-item">Compliance → QCR pending</div>
+            <div className="queue-item">Audit → No blocker</div>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>Team Activity</h2>
+
+          <div className="queue-grid">
+            <div className="queue-item">Shubham — Capital Call Review</div>
+            <div className="queue-item">Finance Team — Bank Mapping</div>
+            <div className="queue-item">Compliance — QCR Preparation</div>
+            <div className="queue-item">VENTIQ AI — 37 documents generated</div>
+            <div className="queue-item">Investor Relations — 48 emails drafted</div>
+            <div className="queue-item">Auditors — 2 queries open</div>
           </div>
         </div>
 
@@ -160,27 +207,57 @@ export default function FinancePage() {
         </div>
 
         <div className="preview-card">
-          <h2>Finance Audit Trail</h2>
+          <h2>AI Efficiency Insights</h2>
+
+          <div className="impact-grid">
+            <div className="impact-card">
+              <h3>6 hrs</h3>
+              <p>Manual reconciliation time</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>38 min</h3>
+              <p>AI predicted completion</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>89%</h3>
+              <p>Time saved</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>37</h3>
+              <p>Documents generated</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>Recent Finance Activity</h2>
 
           <div className="audit-timeline">
             <div className="audit-item">
-              <strong>09:15</strong> Bank statement imported
+              <strong>09:14</strong> AI matched 171 bank entries
             </div>
 
             <div className="audit-item">
-              <strong>09:18</strong> 171 transactions auto-mapped
+              <strong>09:20</strong> Capital call moved to approval
             </div>
 
             <div className="audit-item">
-              <strong>09:24</strong> QCR checklist updated
+              <strong>09:31</strong> Investor notices created in draft
             </div>
 
             <div className="audit-item">
-              <strong>09:31</strong> Capital call allocation sent for approval
+              <strong>09:35</strong> 64C data imported
             </div>
 
             <div className="audit-item">
-              <strong>09:40</strong> Investor communication drafts generated
+              <strong>09:42</strong> NAV recalculation queued
+            </div>
+
+            <div className="audit-item">
+              <strong>09:48</strong> Audit log updated
             </div>
           </div>
         </div>
