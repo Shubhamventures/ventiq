@@ -7,8 +7,9 @@ export default function BankReconciliationPage() {
             <p className="eyebrow">VENTIQ Finance</p>
             <h1>AI Bank Reconciliation</h1>
             <p>
-              Import bank statements, auto-match transactions, review exceptions,
-              generate accounting entries and close reconciliation with AI.
+              AI-powered reconciliation that reads bank statements, explains
+              matches, prepares journal entries and updates downstream fund
+              workflows.
             </p>
           </div>
 
@@ -18,12 +19,26 @@ export default function BankReconciliationPage() {
         </div>
 
         <div className="preview-card">
-          <h2>Upload Bank Statement</h2>
+          <h2>AI Processing Center</h2>
 
           <div className="explain-box">
-            Drop bank statement here or import from connected bank account.
-            VENTIQ AI will read transactions, match ledger entries and flag
-            exceptions.
+            ████████████████████░ 96% complete
+            <br />
+            ✓ Bank statement imported
+            <br />
+            ✓ Reading narrations
+            <br />
+            ✓ Matching investor receipts
+            <br />
+            ✓ Comparing historical entries
+            <br />
+            ✓ Validating opening balance
+            <br />
+            ⏳ Preparing journal entries
+            <br />
+            <br />
+            184 transactions processed • 171 auto-matched • 13 require review •
+            estimated finish 38 seconds
           </div>
         </div>
 
@@ -35,17 +50,43 @@ export default function BankReconciliationPage() {
 
           <div className="impact-card">
             <h3>171</h3>
-            <p>Auto-matched</p>
+            <p>AI auto-matched</p>
           </div>
 
           <div className="impact-card">
             <h3>13</h3>
-            <p>Need review</p>
+            <p>Review queue</p>
           </div>
 
           <div className="impact-card">
-            <h3>93%</h3>
-            <p>AI match accuracy</p>
+            <h3>98%</h3>
+            <p>AI confidence</p>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>AI Confidence</h2>
+
+          <div className="impact-grid">
+            <div className="impact-card">
+              <h3>98%</h3>
+              <p>Overall confidence</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>✓</h3>
+              <p>Narration match</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>✓</h3>
+              <p>Amount match</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>✓</h3>
+              <p>Investor history</p>
+            </div>
           </div>
         </div>
 
@@ -58,8 +99,9 @@ export default function BankReconciliationPage() {
                 <div>
                   <h3>⭐ Investor Capital Call Receipt</h3>
                   <p>
-                    ₹5 Cr received from SIDBI. AI matched this against Capital
-                    Call #CC-2026-07.
+                    AI Confidence: 98%. Matched because narration contains
+                    SIDBI, amount equals Capital Call #CC-2026-07, and the same
+                    LP paid from this account last quarter.
                   </p>
                 </div>
                 <span className="recommended-action-link">Approve →</span>
@@ -69,8 +111,8 @@ export default function BankReconciliationPage() {
                 <div>
                   <h3>🏦 Bank Interest Income</h3>
                   <p>
-                    ₹12.4 L interest credited. Suggested ledger: Interest
-                    Income.
+                    AI Confidence: 94%. Interest narration matched previous 11
+                    months. Suggested ledger: Interest Income.
                   </p>
                 </div>
                 <span className="recommended-action-link">Approve →</span>
@@ -80,8 +122,8 @@ export default function BankReconciliationPage() {
                 <div>
                   <h3>💸 Management Fee Payment</h3>
                   <p>
-                    ₹18 L paid to investment manager. Suggested ledger:
-                    Management Fees.
+                    AI Confidence: 82%. Vendor recognised, but amount differs by
+                    ₹5,000 from prior month. Needs finance review.
                   </p>
                 </div>
                 <span className="recommended-action-link">Review →</span>
@@ -91,7 +133,8 @@ export default function BankReconciliationPage() {
                 <div>
                   <h3>⚠️ Unidentified Receipt</h3>
                   <p>
-                    ₹42 L receipt detected. No confident ledger match found.
+                    AI Confidence: 51%. Possible LP contribution, but no
+                    matching capital call or historical pattern found.
                   </p>
                 </div>
                 <span className="recommended-action-link">Investigate →</span>
@@ -100,22 +143,22 @@ export default function BankReconciliationPage() {
           </div>
 
           <div className="ai-chat-panel">
-            <h2>VENTIQ AI Reconciliation</h2>
+            <h2>VENTIQ AI</h2>
 
             <div className="chat-message">
               Ask: “Why was this transaction unmatched?”
             </div>
 
             <div className="chat-message">
-              Ask: “Show all capital call receipts.”
-            </div>
-
-            <div className="chat-message">
-              Ask: “Create journal entries for approved matches.”
+              Ask: “Show AI reasoning for SIDBI receipt.”
             </div>
 
             <div className="chat-message">
               Ask: “Which transactions impact NAV?”
+            </div>
+
+            <div className="chat-message">
+              Ask: “Create journal entries for approved matches.”
             </div>
           </div>
         </div>
@@ -176,22 +219,19 @@ export default function BankReconciliationPage() {
         </div>
 
         <div className="preview-card">
-          <h2>AI Validation</h2>
-
-          <div className="queue-grid">
-            <div className="queue-item">✓ Opening balance matched</div>
-            <div className="queue-item">✓ Closing balance reconciled</div>
-            <div className="queue-item">✓ 171 transactions auto-mapped</div>
-            <div className="queue-item">⚠ 13 transactions require review</div>
-            <div className="queue-item">✓ Capital call receipts identified</div>
-            <div className="queue-item">⚠ One unidentified receipt found</div>
-          </div>
-        </div>
-
-        <div className="preview-card">
-          <h2>Journal Entry Preview</h2>
+          <h2>Generated Journal Entry</h2>
 
           <div className="journal-preview">
+            <div className="journal-row">
+              <span>Source</span>
+              <strong>Investor Capital Call Receipt</strong>
+            </div>
+
+            <div className="journal-row">
+              <span>AI Confidence</span>
+              <strong>98%</strong>
+            </div>
+
             <div className="journal-row">
               <span>Dr Bank</span>
               <strong>₹5.00 Cr</strong>
@@ -203,8 +243,52 @@ export default function BankReconciliationPage() {
             </div>
 
             <div className="journal-row">
+              <span>AI Validation</span>
+              <strong>Amount, narration and ledger verified</strong>
+            </div>
+
+            <div className="journal-row">
               <span>Status</span>
               <strong>Ready for approval</strong>
+            </div>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>AI Validation Summary</h2>
+
+          <div className="queue-grid">
+            <div className="queue-item">✓ Opening balance verified</div>
+            <div className="queue-item">✓ Closing balance reconciled</div>
+            <div className="queue-item">✓ Capital call receipts identified</div>
+            <div className="queue-item">✓ Interest income classified</div>
+            <div className="queue-item">✓ 171 journal entries prepared</div>
+            <div className="queue-item">⚠ 13 exceptions await review</div>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>AI Learning</h2>
+
+          <div className="impact-grid">
+            <div className="impact-card">
+              <h3>4</h3>
+              <p>Patterns learned today</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>SIDBI</h3>
+              <p>Capital call receipt pattern</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>94% → 99%</h3>
+              <p>Future receipt confidence</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>11</h3>
+              <p>Interest patterns matched</p>
             </div>
           </div>
         </div>
@@ -236,28 +320,45 @@ export default function BankReconciliationPage() {
         </div>
 
         <div className="preview-card">
-          <h2>Audit Trail</h2>
+          <h2>AI Timeline</h2>
 
           <div className="audit-timeline">
             <div className="audit-item">
-              <strong>10:02</strong> Bank statement imported
+              <strong>10:02</strong> ✓ Bank statement imported
             </div>
 
             <div className="audit-item">
-              <strong>10:03</strong> AI read 184 transactions
+              <strong>10:03</strong> ✓ AI extracted 184 transactions
             </div>
 
             <div className="audit-item">
-              <strong>10:04</strong> 171 transactions auto-matched
+              <strong>10:04</strong> ✓ AI matched 171 entries
             </div>
 
             <div className="audit-item">
-              <strong>10:05</strong> 13 exceptions sent to review queue
+              <strong>10:05</strong> ✓ AI generated journal entries
             </div>
 
             <div className="audit-item">
-              <strong>10:07</strong> Journal entries prepared in draft
+              <strong>10:06</strong> ⚠ Unknown receipt detected
             </div>
+
+            <div className="audit-item">
+              <strong>10:07</strong> Waiting finance approval
+            </div>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>AI Processing Summary</h2>
+
+          <div className="queue-grid">
+            <div className="queue-item">184 imported</div>
+            <div className="queue-item">171 auto-matched</div>
+            <div className="queue-item">13 exceptions</div>
+            <div className="queue-item">4 journal entries generated</div>
+            <div className="queue-item">1 unknown receipt</div>
+            <div className="queue-item">Ready for finance approval</div>
           </div>
         </div>
       </section>
