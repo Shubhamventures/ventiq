@@ -86,9 +86,26 @@ export default function DatabaseTestPage() {
             </div>
           )}
 
-          {!loading && !errorMessage && (
-            <div className="investor-table">
-              <div className="investor-row investor-head">
+          {!loading && !errorMessage && funds.length > 0 && (
+            <div
+              style={{
+                display: "grid",
+                gap: "12px",
+                marginTop: "24px",
+              }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "2fr 1.2fr 1fr 1fr 0.8fr",
+                  gap: "16px",
+                  padding: "16px 18px",
+                  borderRadius: "14px",
+                  background: "rgba(255, 255, 255, 0.04)",
+                  color: "#9fb4d1",
+                  fontWeight: 700,
+                }}
+              >
                 <span>Fund</span>
                 <span>Type</span>
                 <span>Committed</span>
@@ -97,7 +114,19 @@ export default function DatabaseTestPage() {
               </div>
 
               {funds.map((fund) => (
-                <div className="investor-row" key={fund.id}>
+                <div
+                  key={fund.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "2fr 1.2fr 1fr 1fr 0.8fr",
+                    gap: "16px",
+                    padding: "18px",
+                    border: "1px solid rgba(120, 150, 200, 0.22)",
+                    borderRadius: "14px",
+                    background: "rgba(3, 8, 18, 0.45)",
+                    alignItems: "center",
+                  }}
+                >
                   <span>{fund.name}</span>
                   <span>{fund.fund_type}</span>
                   <span>{formatAmount(fund.committed_capital)}</span>
