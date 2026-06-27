@@ -1498,4 +1498,17 @@ button.action-button {
   .demo-modal-header {
     align-items: flex-start;
   }
+}.demo-modal-actions .btn {
+  margin-top: 0;
+  height: 58px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.demo-modal-actions .demo-secondary-button {
+  height: 58px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
