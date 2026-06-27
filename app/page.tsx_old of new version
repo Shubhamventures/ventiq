@@ -1,0 +1,306 @@
+export default function HomePage() {
+  return (
+    <main className="app-page">
+      <section className="app-shell">
+        <div className="app-header">
+          <div>
+            <p className="eyebrow">VENTIQ AI Operating System</p>
+            <h1>AI Command Center</h1>
+            <p>
+              One intelligent control room for finance, compliance, investment
+              decisions, fundraising, investor reporting and firm-wide execution.
+            </p>
+          </div>
+
+          <a className="back-link" href="/investor-portal">
+            Investor View
+          </a>
+        </div>
+
+        <div className="preview-card">
+          <h2>Good Morning, Shubham 👋</h2>
+
+          <div className="explain-box">
+            VENTIQ reviewed your investment firm overnight. 5 AI teams analysed
+            4 active funds, 187 transactions, 14 deals, 6 compliance workflows
+            and ₹640 Cr of fundraising pipeline. 7 items need your attention
+            today.
+          </div>
+
+          <div className="action-row">
+            <button>Start My Day</button>
+            <button>Ask VENTIQ AI</button>
+          </div>
+        </div>
+
+        <div className="impact-grid">
+          <div className="impact-card">
+            <h3>94%</h3>
+            <p>Firm health score</p>
+          </div>
+
+          <div className="impact-card">
+            <h3>5</h3>
+            <p>AI teams active</p>
+          </div>
+
+          <div className="impact-card">
+            <h3>7</h3>
+            <p>Priority actions</p>
+          </div>
+
+          <div className="impact-card">
+            <h3>2h 18m</h3>
+            <p>Estimated work today</p>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>AI Executive Summary</h2>
+
+          <div className="queue-grid">
+            <div className="queue-item">
+              💰 <strong>Finance AI</strong>
+              <br />
+              ₹18.5 Cr distribution ready and 2 capital call approvals pending.
+            </div>
+
+            <div className="queue-item">
+              🛡️ <strong>Compliance AI</strong>
+              <br />
+              QCR is due in 4 days and Form 64C draft should be prepared today.
+            </div>
+
+            <div className="queue-item">
+              📈 <strong>Investment AI</strong>
+              <br />3 IC-ready deals and 2 valuation gaps require review.
+            </div>
+
+            <div className="queue-item">
+              👔 <strong>Managing Partner AI</strong>
+              <br />
+              Fund III has ₹214 Cr dry powder and 3 portfolio risks.
+            </div>
+
+            <div className="queue-item">
+              🤝 <strong>Fundraising AI</strong>
+              <br />
+              Sovereign Fund has 82% close probability for Fund IV.
+            </div>
+
+            <div className="queue-item">
+              👥 <strong>Investor AI</strong>
+              <br />
+              SIDBI has ₹38 Cr remaining commitment and one notice due.
+            </div>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>AI Employees</h2>
+
+          <div className="queue-grid">
+            <a className="queue-item" href="/finance-head-ai">
+              <strong>AI Finance Head</strong>
+              <br />
+              2 approvals pending
+              <br />
+              4 bank exceptions
+              <br />
+              Open Workspace →
+            </a>
+
+            <a className="queue-item" href="/managing-partner-ai">
+              <strong>AI Managing Partner</strong>
+              <br />
+              ₹214 Cr dry powder
+              <br />
+              3 portfolio risks
+              <br />
+              Open Workspace →
+            </a>
+
+            <a className="queue-item" href="/compliance-ai">
+              <strong>AI Compliance Officer</strong>
+              <br />
+              QCR due in 4 days
+              <br />
+              Audit evidence 91%
+              <br />
+              Open Workspace →
+            </a>
+
+            <a className="queue-item" href="/investment-team-ai">
+              <strong>AI Investment Team</strong>
+              <br />
+              14 active deals
+              <br />
+              3 IC-ready deals
+              <br />
+              Open Workspace →
+            </a>
+
+            <a className="queue-item" href="/fundraising-ai">
+              <strong>AI Fundraising & IR</strong>
+              <br />
+              ₹640 Cr soft commitments
+              <br />
+              3 DDQs pending
+              <br />
+              Open Workspace →
+            </a>
+
+            <a className="queue-item" href="/investor-portal">
+              <strong>AI Investor Portal</strong>
+              <br />
+              ₹120 Cr commitment
+              <br />
+              18.4% portfolio IRR
+              <br />
+              Open Workspace →
+            </a>
+          </div>
+        </div>
+
+        <div className="knowledge-grid">
+          <div className="preview-card">
+            <h2>AI Collaboration Feed</h2>
+
+            <div className="journal-preview">
+              <div className="journal-row">
+                <span>Finance AI → Compliance AI</span>
+                <strong>Bank exceptions may delay QCR filing</strong>
+              </div>
+
+              <div className="journal-row">
+                <span>Investment AI → Managing Partner AI</span>
+                <strong>Exit opportunity may improve TVPI to 2.42x</strong>
+              </div>
+
+              <div className="journal-row">
+                <span>Fundraising AI → Managing Partner AI</span>
+                <strong>Sovereign Fund requested updated LP deck</strong>
+              </div>
+
+              <div className="journal-row">
+                <span>Distribution AI → Investor AI</span>
+                <strong>₹3.8 Cr distribution ready for LP communication</strong>
+              </div>
+
+              <div className="journal-row">
+                <span>Compliance AI → Finance AI</span>
+                <strong>Form 64C requires investor allocation data</strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="ai-side-panel">
+            <h2>Ask VENTIQ AI</h2>
+
+            <div className="chat-message">
+              Ask: “What should I focus on today?”
+            </div>
+
+            <div className="chat-message">
+              Ask: “Which items can delay NAV close?”
+            </div>
+
+            <div className="chat-message">
+              Ask: “Generate Fund IV LP deck.”
+            </div>
+
+            <div className="chat-message">
+              Ask: “Show portfolio companies below plan.”
+            </div>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>Quick Actions</h2>
+
+          <div className="queue-grid">
+            <a className="queue-item" href="/capital-call">
+              Generate Capital Call
+            </a>
+            <a className="queue-item" href="/distribution-waterfall">
+              Run Distribution Waterfall
+            </a>
+            <a className="queue-item" href="/compliance-ai">
+              Generate QCR Draft
+            </a>
+            <a className="queue-item" href="/investment-team-ai">
+              Generate IC Memo
+            </a>
+            <a className="queue-item" href="/fundraising-ai">
+              Generate DDQ Pack
+            </a>
+            <a className="queue-item" href="/managing-partner-ai">
+              Run Exit Simulation
+            </a>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>Firm Health Breakdown</h2>
+
+          <div className="journal-preview">
+            <div className="journal-row">
+              <span>Finance</span>
+              <strong>98% healthy</strong>
+            </div>
+
+            <div className="journal-row">
+              <span>Compliance</span>
+              <strong>92% healthy</strong>
+            </div>
+
+            <div className="journal-row">
+              <span>Portfolio</span>
+              <strong>89% healthy</strong>
+            </div>
+
+            <div className="journal-row">
+              <span>Fundraising</span>
+              <strong>91% healthy</strong>
+            </div>
+
+            <div className="journal-row">
+              <span>Investor Reporting</span>
+              <strong>96% healthy</strong>
+            </div>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>Recent AI Activity</h2>
+
+          <div className="audit-timeline">
+            <div className="audit-item">
+              <strong>09:02</strong> Finance AI matched 183 bank transactions
+            </div>
+
+            <div className="audit-item">
+              <strong>09:07</strong> Compliance AI prepared Form 64C working
+            </div>
+
+            <div className="audit-item">
+              <strong>09:11</strong> Investment AI generated IC memo draft
+            </div>
+
+            <div className="audit-item">
+              <strong>09:16</strong> Fundraising AI drafted DDQ responses
+            </div>
+
+            <div className="audit-item">
+              <strong>09:18</strong> Managing Partner AI updated TVPI forecast
+            </div>
+
+            <div className="audit-item">
+              <strong>09:21</strong> Investor AI prepared SIDBI response
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}

@@ -1026,4 +1026,192 @@ line-height:1.7;
   background: #132347;
   border: 1px solid #2956b8;
   line-height: 1.7;
+}/* ===============================
+   VENTIQ Homepage Compact Spacing
+   =============================== */
+
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px 32px 56px;
+}
+
+.navbar {
+  margin-bottom: 40px;
+}
+
+.hero {
+  padding: 56px 0 48px;
+  min-height: auto;
+}
+
+.hero h1 {
+  margin-bottom: 18px;
+}
+
+.hero p {
+  margin-bottom: 28px;
+}
+
+.metrics {
+  margin: 24px 0 48px;
+  gap: 20px;
+}
+
+.container > .section {
+  padding: 54px 0 !important;
+  margin: 0 !important;
+  min-height: auto !important;
+}
+
+.container > .section + .section {
+  margin-top: 0 !important;
+}
+
+.section-title {
+  margin-bottom: 32px !important;
+  line-height: 1.1;
+}
+
+.dashboard-card {
+  padding: 34px !important;
+}
+
+.dashboard-title {
+  margin-bottom: 18px;
+}
+
+.dashboard-grid {
+  margin: 28px 0 30px;
+  gap: 24px;
+}
+
+.dashboard-metric {
+  padding: 18px;
+}
+
+.alert-box {
+  margin-top: 26px;
+  padding: 22px;
+}
+
+.feature-grid {
+  gap: 22px !important;
+}
+
+.feature-card {
+  padding: 28px !important;
+  min-height: 220px;
+}
+
+.grid {
+  gap: 20px !important;
+}
+
+.card {
+  padding: 24px !important;
+}
+
+.three-users,
+.priority-grid,
+.workflow-grid,
+.health-grid {
+  gap: 22px !important;
+}
+
+.user-card,
+.priority-card,
+.workflow-card,
+.health-card,
+.chart-card {
+  padding: 28px !important;
+}/* ===============================
+   VENTIQ Homepage V1.2 Polish
+   =============================== */
+
+.section-title {
+  font-size: clamp(36px, 4vw, 56px) !important;
+  line-height: 1.08 !important;
+  letter-spacing: -1.4px;
+}
+
+.dashboard-card,
+.workspace {
+  max-width: 1100px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.feature-card,
+.user-card,
+.workflow-card,
+priority-card {
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.feature-card:hover,
+.user-card:hover,
+.workflow-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(47, 107, 255, 0.65);
+}
+
+.nav-links a,
+.feature-card a,
+.workflow-action,
+.action-button {
+  text-decoration: none;
+}/* ===============================
+   VENTIQ Final CTA Polish
+   =============================== */
+
+.final-cta-card {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 48px 40px;
+  text-align: center;
+  border: 1px solid rgba(120, 150, 200, 0.28);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top, rgba(47, 107, 255, 0.16), transparent 34%),
+    rgba(15, 24, 41, 0.82);
+}
+
+.final-cta-card h2 {
+  max-width: 760px;
+  margin: 0 auto;
+  font-size: clamp(30px, 3vw, 44px);
+  line-height: 1.12;
+  letter-spacing: -0.8px;
+}
+
+.final-cta-card p {
+  max-width: 780px;
+  margin: 18px auto 0;
+  color: #b8c7dd;
+}
+
+.final-cta-actions {
+  margin-top: 30px;
+  display: flex;
+  justify-content: center;
+}
+
+.final-primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 280px;
+  padding: 16px 28px;
+  border-radius: 14px;
+  background: #2f6bff;
+  color: white;
+  font-weight: 600;
+  text-decoration: none;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.final-primary-button:hover {
+  transform: translateY(-3px);
+  background: #4f82ff;
 }
