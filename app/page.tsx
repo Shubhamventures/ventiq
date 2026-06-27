@@ -26,9 +26,12 @@ export default function Home() {
             modern VC, PE, Debt Funds, AIFs and GIFT City managers.
           </p>
 
-          <a className="btn" href="#contact">
-            Request Demo
-          </a>
+         <a
+  className="btn"
+  href="mailto:shubham81079@gmail.com?subject=VENTIQ Demo Request"
+>
+  Request Demo
+</a>
         </section>
 
         <section className="metrics">
@@ -310,7 +313,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="section" id="about">
+      <section className="section" id="platform">
           <h2 className="section-title">
             Fund Intelligence Platform
           </h2>
@@ -595,7 +598,44 @@ export default function Home() {
             </div>
           </div>
         </section>
+        <section className="section" id="about">
+          <div className="about-ventiq-card">
+            <div>
+              <p className="about-label">About VENTIQ</p>
 
+              <h2>
+                Built for private capital teams that need one intelligent
+                operating system.
+              </h2>
+
+              <p>
+                VENTIQ is building an AI operating system for VC, PE, Debt
+                Funds, AIFs and GIFT City managers — helping teams run fund
+                operations, compliance, investor reporting, portfolio
+                intelligence and fundraising from one unified platform.
+              </p>
+            </div>
+
+            <div className="founder-card">
+              <p className="about-label">Founder</p>
+
+              <h3>Shubham Jain, CA</h3>
+
+              <p>
+                Chartered Accountant with experience across alternative
+                investment funds, fund operations, investor reporting and
+                private capital workflows.
+              </p>
+
+              <a
+                className="action-button"
+                href="mailto:shubham81079@gmail.com?subject=VENTIQ Demo Request"
+              >
+                Contact Founder →
+              </a>
+            </div>
+          </div>
+        </section>
         <section className="section" id="contact">
           <div className="final-cta-card">
             <h2>
