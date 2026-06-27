@@ -10,7 +10,7 @@ const investors = [
     batch: "May 2026 investors",
     preference: "Excel + PDF",
     risk: "Low",
-    expectedCollection: "2 days",
+    eta: "2 days",
   },
   {
     name: "SBI",
@@ -19,7 +19,7 @@ const investors = [
     batch: "May 2026 investors",
     preference: "Institutional PDF",
     risk: "Low",
-    expectedCollection: "3 days",
+    eta: "3 days",
   },
   {
     name: "HDFC Life",
@@ -28,7 +28,7 @@ const investors = [
     batch: "June 2026 investors",
     preference: "PDF + Email Body",
     risk: "Medium",
-    expectedCollection: "5 days",
+    eta: "5 days",
   },
   {
     name: "ICICI Prudential",
@@ -37,7 +37,7 @@ const investors = [
     batch: "June 2026 investors",
     preference: "Excel Working",
     risk: "Medium",
-    expectedCollection: "6 days",
+    eta: "6 days",
   },
   {
     name: "Family Office Investor",
@@ -46,7 +46,7 @@ const investors = [
     batch: "July 2026 investors",
     preference: "Standard Notice",
     risk: "High",
-    expectedCollection: "Excluded",
+    eta: "Excluded",
   },
 ];
 
@@ -60,7 +60,7 @@ export default function CapitalCallPage() {
   const [excludedInvestor, setExcludedInvestor] = useState(
     "Family Office Investor"
   );
-
+const [isApproved, setIsApproved] = useState(false);
   const calculatedInvestors = useMemo(() => {
     const eligibleInvestors = investors.filter((investor) => {
       const batchMatch =
@@ -92,13 +92,13 @@ export default function CapitalCallPage() {
           : investor.commitment;
 
       const ratio = isEligible && totalBasis > 0 ? basis / totalBasis : 0;
-      const investorCall = callAmount * ratio;
 
       return {
         ...investor,
         isEligible,
+        basis,
         ratio,
-        investorCall,
+        investorCall: callAmount * ratio,
       };
     });
   }, [allocationMethod, callAmount, excludedInvestor, investorBatch]);
@@ -129,85 +129,104 @@ export default function CapitalCallPage() {
         </div>
 
         <div className="preview-card">
-          <h2>AI Capital Call Recommendation</h2>
+          <h2>AI Morning Brief</h2>
 
           <div className="explain-box">
-            VENTIQ recommends raising ₹{callAmount.toFixed(2)} Cr today.
-            Confidence: 98%. Reason: current deployable cash will fall below the
-            minimum liquidity buffer after upcoming investments, management fees
-            and operating reserves.
+            <strong>Good Morning.</strong>
+            <br />
+            <br />
+            VENTIQ analysed all active funds overnight.
+            <br />
+            <br />✓ <strong>Growth Fund II</strong> — Liquidity healthy
+            <br />⚠ <strong>Venture Debt Fund III</strong> — Capital call
+            recommended
+            <br />✓ <strong>GIFT City Fund I</strong> — No funding action
+            required
+            <br />
+            <br />
+            <strong>Today&apos;s Priority</strong>
+            <br />
+            Raise <strong>₹{callAmount.toFixed(2)} Cr</strong>
+            <br />
+            Confidence: <strong>98%</strong>
+            <br />
+            Expected Collection: <strong>92% within 7 days</strong>
+            <br />
+            <br />
+            <strong>Reason</strong>
+            <br />
+            Based on overnight cash forecasting, approved investments,
+            management fee schedule and the fund&apos;s minimum liquidity
+            policy, VENTIQ recommends initiating a capital call today.
           </div>
         </div>
 
         <div className="impact-grid">
           <div className="impact-card">
+            <h3>3</h3>
+            <p>Funds analysed</p>
+          </div>
+
+          <div className="impact-card">
             <h3>₹{callAmount.toFixed(2)} Cr</h3>
-            <p>Recommended call</p>
-          </div>
-
-          <div className="impact-card">
-            <h3>98%</h3>
-            <p>AI confidence</p>
-          </div>
-
-          <div className="impact-card">
-            <h3>{eligibleCount}</h3>
-            <p>Eligible LPs</p>
+            <p>Capital required</p>
           </div>
 
           <div className="impact-card">
             <h3>92%</h3>
             <p>Expected collection</p>
           </div>
+
+          <div className="impact-card">
+            <h3>LOW</h3>
+            <p>Liquidity risk after call</p>
+          </div>
         </div>
 
         <div className="preview-card">
-          <h2>How AI Reached This Decision</h2>
+          <h2>AI Financial Reasoning</h2>
 
-          <div className="decision-tree">
-            <div className="decision-node">
-              <h3>Current Cash Position</h3>
-              <p>₹81 Cr</p>
+          <div className="journal-preview">
+            <div className="journal-row">
+              <span>Current Deployable Cash</span>
+              <strong>₹81 Cr</strong>
             </div>
 
-            <div className="decision-arrow">↓</div>
-
-            <div className="decision-node">
-              <h3>Approved Investments</h3>
-              <p>₹63 Cr</p>
+            <div className="journal-row">
+              <span>Less: Approved Investments</span>
+              <strong>(₹63 Cr)</strong>
             </div>
 
-            <div className="decision-arrow">↓</div>
-
-            <div className="decision-node">
-              <h3>Management Fees Due</h3>
-              <p>₹8 Cr</p>
+            <div className="journal-row">
+              <span>Less: Management Fees Due</span>
+              <strong>(₹8 Cr)</strong>
             </div>
 
-            <div className="decision-arrow">↓</div>
-
-            <div className="decision-node">
-              <h3>Liquidity Buffer Required</h3>
-              <p>₹10 Cr</p>
+            <div className="journal-row">
+              <span>Less: Liquidity Buffer Required</span>
+              <strong>(₹10 Cr)</strong>
             </div>
 
-            <div className="decision-arrow">↓</div>
+            <div className="journal-row">
+              <span>Projected Available Cash</span>
+              <strong>₹0 Cr</strong>
+            </div>
 
-            <div className="decision-node highlight-node">
-              <h3>AI Decision</h3>
-              <p>Raise ₹{callAmount.toFixed(2)} Cr</p>
-              <span className="small-pill">98% Confidence</span>
+            <div className="journal-row">
+              <span>AI Recommendation</span>
+              <strong>Raise ₹{callAmount.toFixed(2)} Cr</strong>
+            </div>
+
+            <div className="journal-row">
+              <span>Confidence</span>
+              <strong>98%</strong>
             </div>
           </div>
 
-          <div className="decision-summary">
-            <strong>Why?</strong>
-            <p>
-              VENTIQ analysed cash runway, approved deployments, management fee
-              schedule, liquidity buffer, investor commitments and historical LP
-              payment behaviour. Based on this, AI recommends initiating the
-              capital call today.
-            </p>
+          <div className="explain-box">
+            <strong>Why?</strong> Without this capital call, scheduled
+            deployments and fund expenses will reduce deployable cash below the
+            minimum liquidity threshold.
           </div>
         </div>
 
@@ -225,213 +244,127 @@ export default function CapitalCallPage() {
           </div>
         </div>
 
-        <div className="workspace-three">
-          <div className="form-card">
-            <h2>Setup</h2>
+       <div className="preview-card">
+  <h2>AI Generated Capital Call</h2>
 
-            <label>Fund Type</label>
-            <select
-              value={fundType}
-              onChange={(event) => setFundType(event.target.value)}
-            >
-              <option>Close-ended Fund</option>
-              <option>Open-ended Fund</option>
-            </select>
+  <div className="impact-grid">
+    <div className="impact-card">
+      <h3>Venture Debt Fund III</h3>
+      <p>Fund selected by AI</p>
+    </div>
 
-            <label>Fund</label>
-            <select>
-              <option>Venture Debt Fund III</option>
-              <option>Growth Fund II</option>
-              <option>GIFT City Fund I</option>
-            </select>
+    <div className="impact-card">
+      <h3>₹{callAmount.toFixed(2)} Cr</h3>
+      <p>Recommended amount</p>
+    </div>
 
-            <label>Capital Call Amount (₹ Cr)</label>
-            <input
-              type="number"
-              value={callAmount}
-              onChange={(event) => setCallAmount(Number(event.target.value))}
-            />
+    <div className="impact-card">
+      <h3>{eligibleCount}</h3>
+      <p>Eligible LPs</p>
+    </div>
 
-            <label>Allocation Method</label>
-            <select
-              value={allocationMethod}
-              onChange={(event) => setAllocationMethod(event.target.value)}
-            >
-              <option>Pro-rata based on committed capital</option>
-              <option>Pro-rata based on commitment net of initial fees</option>
-            </select>
+    <div className="impact-card">
+      <h3>98%</h3>
+      <p>AI confidence</p>
+    </div>
+  </div>
 
-            <label>Investor Batch</label>
-            <select
-              value={investorBatch}
-              onChange={(event) => setInvestorBatch(event.target.value)}
-            >
-              <option>All investors</option>
-              <option>May 2026 investors</option>
-              <option>June 2026 investors</option>
-              <option>July 2026 investors</option>
-            </select>
+  <div className="form-card">
+    <p className="eyebrow">
+      Prepared automatically by VENTIQ AI — editable before approval
+    </p>
 
-            <label>Exclude Investor</label>
-            <select
-              value={excludedInvestor}
-              onChange={(event) => setExcludedInvestor(event.target.value)}
-            >
-              <option>None</option>
-              {investors.map((investor) => (
-                <option key={investor.name}>{investor.name}</option>
-              ))}
-            </select>
+    <label>Fund Type</label>
+    <select value={fundType} onChange={(event) => setFundType(event.target.value)}>
+      <option>Close-ended Fund</option>
+      <option>Open-ended Fund</option>
+    </select>
 
-            <div className="logic-note">
-              {fundType === "Close-ended Fund"
-                ? "Close-ended funds call all eligible investors based on commitment or net commitment."
-                : "Open-ended funds call selected investor batches because investors enter periodically."}
-            </div>
-          </div>
+    <label>Capital Call Amount (₹ Cr)</label>
+    <input
+      type="number"
+      value={callAmount}
+      onChange={(event) => setCallAmount(Number(event.target.value))}
+    />
 
-          <div className="preview-card">
-            <h2>AI Allocation Preview</h2>
+    <label>Allocation Method</label>
+    <select
+      value={allocationMethod}
+      onChange={(event) => setAllocationMethod(event.target.value)}
+    >
+      <option>Pro-rata based on committed capital</option>
+      <option>Pro-rata based on commitment net of initial fees</option>
+    </select>
 
-            <table className="investor-table">
-              <thead>
-                <tr>
-                  <th>Investor</th>
-                  <th>Preference</th>
-                  <th>Basis</th>
-                  <th>Call</th>
-                  <th>Risk</th>
-                  <th>Eligibility</th>
-                </tr>
-              </thead>
+    <label>Investor Batch</label>
+    <select value={investorBatch} onChange={(event) => setInvestorBatch(event.target.value)}>
+      <option>All investors</option>
+      <option>May 2026 investors</option>
+      <option>June 2026 investors</option>
+      <option>July 2026 investors</option>
+    </select>
 
-              <tbody>
-                {calculatedInvestors.map((investor) => (
-                  <tr key={investor.name}>
-                    <td>{investor.name}</td>
-                    <td>{investor.preference}</td>
-                    <td>
-                      {investor.isEligible
-                        ? `${(investor.ratio * 100).toFixed(2)}%`
-                        : "Excluded"}
-                    </td>
-                    <td>₹{investor.investorCall.toFixed(2)} Cr</td>
-                    <td>{investor.risk}</td>
-                    <td>
-                      <span className="small-pill">
-                        {investor.isEligible ? "🟢 Eligible" : "🟡 Opt-out"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+    <label>Exclude Investor</label>
+    <select
+      value={excludedInvestor}
+      onChange={(event) => setExcludedInvestor(event.target.value)}
+    >
+      <option>None</option>
+      {investors.map((investor) => (
+        <option key={investor.name}>{investor.name}</option>
+      ))}
+    </select>
 
-            <div className="output-grid">
-              <div>
-                <h3>Total Call</h3>
-                <p>₹{callAmount.toFixed(2)} Cr</p>
-              </div>
+    <div className="logic-note">
+      VENTIQ pre-filled this capital call based on cash runway, approved
+      deployments, liquidity policy and historical LP payment behaviour.
+    </div>
 
-              <div>
-                <h3>Eligible LPs</h3>
-                <p>{eligibleCount}</p>
-              </div>
+    <div className="action-row">
+  <button onClick={() => setIsApproved(true)}>
+    {isApproved ? "✓ Approval Complete" : "Approve Capital Call"}
+  </button>
 
-              <div>
-                <h3>Excluded LPs</h3>
-                <p>{excludedCount}</p>
-              </div>
+  <button>Save Draft</button>
+</div>
+  </div>
+</div>
 
-              <div>
-                <h3>Basis</h3>
-                <p>
-                  {allocationMethod ===
-                  "Pro-rata based on commitment net of initial fees"
-                    ? "Net commitment"
-                    : "Commitment"}
-                </p>
-              </div>
-            </div>
-          </div>
+<div className="preview-card">
+  <h2>AI Allocation Preview</h2>
 
-          <div className="ai-side-panel">
-            <h2>VENTIQ AI</h2>
+  <table className="investor-table">
+    <thead>
+      <tr>
+        <th>Investor</th>
+        <th>Preference</th>
+        <th>Basis</th>
+        <th>Call</th>
+        <th>Risk</th>
+        <th>ETA</th>
+        <th>Status</th>
+      </tr>
+    </thead>
 
-            <div className="ai-insight">
-              ✓ AI recommends this call based on cash runway and upcoming
-              deployment.
-            </div>
-
-            <div className="ai-insight">
-              ✓ {excludedCount} investor excluded from the eligible commitment
-              base.
-            </div>
-
-            <div className="ai-insight">
-              ✓ Investor-specific formats detected for institutional LPs.
-            </div>
-
-            <div className="ai-insight">
-              Recommendation: Send for Finance Head approval before releasing LP
-              communications.
-            </div>
-          </div>
-        </div>
-
-        <div className="preview-card">
-          <h2>AI Collection Forecast</h2>
-
-          <table className="investor-table">
-            <thead>
-              <tr>
-                <th>Investor</th>
-                <th>Call Amount</th>
-                <th>Collection Probability</th>
-                <th>Expected Timing</th>
-                <th>Risk</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {calculatedInvestors.map((investor) => (
-                <tr key={investor.name}>
-                  <td>{investor.name}</td>
-                  <td>₹{investor.investorCall.toFixed(2)} Cr</td>
-                  <td>{investor.isEligible ? "92%" : "Excluded"}</td>
-                  <td>{investor.expectedCollection}</td>
-                  <td>{investor.risk}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="preview-card">
-          <h2>Capital Call Simulator</h2>
-
-          <div className="impact-grid">
-            <div className="impact-card">
-              <h3>₹15 Cr</h3>
-              <p>High liquidity risk · possible deployment delay</p>
-            </div>
-
-            <div className="impact-card">
-              <h3>₹{callAmount.toFixed(0)} Cr</h3>
-              <p>Best option · runway protected</p>
-            </div>
-
-            <div className="impact-card">
-              <h3>₹35 Cr</h3>
-              <p>Idle cash risk · higher LP burden</p>
-            </div>
-
-            <div className="impact-card">
-              <h3>61 days</h3>
-              <p>Projected runway after collection</p>
-            </div>
-          </div>
-        </div>
+    <tbody>
+      {calculatedInvestors.map((investor) => (
+        <tr key={investor.name}>
+          <td>{investor.name}</td>
+          <td>{investor.preference}</td>
+          <td>{investor.isEligible ? `${(investor.ratio * 100).toFixed(2)}%` : "Excluded"}</td>
+          <td>₹{investor.investorCall.toFixed(2)} Cr</td>
+          <td>{investor.risk}</td>
+          <td>{investor.isEligible ? investor.eta : "Excluded"}</td>
+          <td>
+            <span className="small-pill">
+              {investor.isEligible ? "Ready" : "Skipped"}
+            </span>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
 
         <div className="preview-card">
           <h2>Approval Workflow</h2>
@@ -444,56 +377,108 @@ export default function CapitalCallPage() {
             <div className="approval-step">Posted</div>
           </div>
         </div>
+<div className="preview-card">
+  <h2>Post-Approval Automation</h2>
 
+  <div className="impact-grid">
+    <div className="impact-card">
+      <h3>📄 Documents</h3>
+      <p>Notices, Excel, emails and accounting entry prepared</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>📘 Accounting</h3>
+
+<p>
+Journal generated and
+validated by AI
+</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>📲 Investor Updates</h3>
+      <p>Portal, email and WhatsApp communication queued</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>⚙️ AI Timeline</h3>
+      <p>Execution log created for audit trail</p>
+    </div>
+  </div>
+
+  <div className="queue-grid">
+    <div className="queue-item">✓ Capital Call Notice PDF</div>
+    <div className="queue-item">✓ LP-wise Excel Working</div>
+    <div className="queue-item">✓ 4 Investor Email Drafts</div>
+    <div className="queue-item">✓ Accounting Journal Drafted</div>
+<div className="queue-item">
+  {isApproved ? "✓ Investor Portal Update" : "○ Investor Portal Update"}
+</div>
+
+<div className="queue-item">
+  {isApproved ? "✓ WhatsApp Alerts Scheduled" : "○ WhatsApp Alerts"}
+</div>
+
+<div className="queue-item">
+  {isApproved ? "✓ Bank Receipt Watch Started" : "○ Bank Receipt Watch"}
+</div>
+
+<div className="queue-item">
+  {isApproved ? "✓ Activity Engine Event Created" : "○ Activity Engine Event"}
+</div>
+  </div>
+
+  <div className="journal-preview">
+    <div className="journal-row">
+      <span>Dr Capital Receivable</span>
+      <strong>₹{callAmount.toFixed(2)} Cr</strong>
+    </div>
+
+    <div className="journal-row">
+      <span>Cr LP Capital Contribution</span>
+      <strong>₹{callAmount.toFixed(2)} Cr</strong>
+    </div>
+
+    <div className="journal-row">
+      <span>Dispatch Status</span>
+      <strong>Waiting for Finance Head approval</strong>
+    </div>
+  </div>
+
+  <div className="explain-box">
+    Once approved, VENTIQ will generate investor notices, prepare LP-wise
+    workings, draft emails, queue portal updates, create the accounting entry and
+    start bank receipt tracking automatically.
+  </div>
+</div>
         <div className="preview-card">
           <h2>Downstream Workflow Automation</h2>
-
+<p className="eyebrow">
+  8 automation tasks generated • 4 completed automatically • 4 waiting for approval
+</p>
           <div className="queue-grid">
-            <div className="queue-item">Approve Capital Call</div>
-            <div className="queue-item">Generate Notices</div>
-            <div className="queue-item">Send Emails</div>
-            <div className="queue-item">Update Investor Portal</div>
-            <div className="queue-item">Create Receivable JV</div>
-            <div className="queue-item">Start Bank Receipt Watch</div>
-            <div className="queue-item">Update NAV</div>
-            <div className="queue-item">Create Activity Engine Event</div>
+          <div className="queue-item">🟢 Capital Call Notice Generated</div>
+<div className="queue-item">🟢 LP Allocation Workbook Ready</div>
+<div className="queue-item">🟢 Investor Email Drafts Ready</div>
+<div className="queue-item">🟢 Institutional Notice Ready</div>
+<div className="queue-item">🟡 Investor Portal Update</div>
+<div className="queue-item">🟡 WhatsApp Alerts</div>
+<div className="queue-item">🟡 Accounting Entry</div>
+<div className="queue-item">🟡 Activity Engine Event</div>
+          </div>
+
+          <div className="action-row">
+           <button>Generate Documents</button>
+<button>Request Approval</button>
+<button>Preview LP Notice</button>
           </div>
         </div>
 
         <div className="preview-card">
-          <h2>AI Validation</h2>
-
-          <div className="validation-grid">
-            <div className="validation-item">
-              ✓ Total allocation matches ₹{callAmount.toFixed(2)} Cr
-            </div>
-            <div className="validation-item">
-              ✓ No investor exceeds remaining commitment
-            </div>
-            <div className="validation-item">
-              ✓ {excludedCount} investor exclusion applied
-            </div>
-            <div className="validation-item">
-              ✓ Notice dates ready for approval
-            </div>
-            <div className="validation-item">✓ Accounting entry is balanced</div>
-            <div className="validation-item">
-              ✓ Investor-specific formats detected
-            </div>
-          </div>
-
-          <div className="explain-box">
-            <strong>Explain Allocation:</strong> ₹{callAmount.toFixed(2)} Cr is
-            allocated across {eligibleCount} eligible LPs using{" "}
-            {allocationMethod}. Excluded investors are removed from the eligible
-            commitment base, so remaining investors receive proportionate
-            allocations.
-          </div>
-        </div>
-
-        <div className="preview-card">
-          <h2>Expected Accounting Entry</h2>
-
+         <h2>Accounting Journal Preview</h2>
+<p className="eyebrow">
+Generated automatically by the VENTIQ Accounting Engine
+</p>
           <div className="journal-preview">
             <div className="journal-row">
               <span>Dr Capital Receivable</span>
@@ -509,6 +494,25 @@ export default function CapitalCallPage() {
               <span>Status</span>
               <strong>Pending Approval</strong>
             </div>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>What Happens If You Ignore This Recommendation?</h2>
+
+          <div className="validation-grid">
+            <div className="validation-item">⚠ Liquidity policy breach likely</div>
+            <div className="validation-item">⚠ Investment deployment may delay</div>
+            <div className="validation-item">⚠ NAV close may be impacted</div>
+            <div className="validation-item">⚠ Investor communication delayed</div>
+            <div className="validation-item">⚠ Cash forecast turns negative</div>
+            <div className="validation-item">⚠ Management review escalated</div>
+          </div>
+
+          <div className="explain-box">
+            Without this capital call, projected available cash falls to ₹0 Cr
+            after approved investments, fees and the required liquidity buffer.
+            VENTIQ estimates liquidity stress within 18 days.
           </div>
         </div>
 
