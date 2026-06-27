@@ -1,4 +1,41 @@
+"use client";
+
+import { type FormEvent, useState } from "react";
 export default function Home() {
+  const [isDemoOpen, setIsDemoOpen] = useState(false);
+
+  const [demoForm, setDemoForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    company: "",
+    role: "",
+    message: "",
+  });
+
+  function handleDemoSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const subject = encodeURIComponent("VENTIQ Demo Request");
+
+    const body = encodeURIComponent(
+      `New VENTIQ demo request:
+
+Name: ${demoForm.name}
+Email: ${demoForm.email}
+Phone: ${demoForm.phone}
+Company / Fund: ${demoForm.company}
+Role: ${demoForm.role}
+
+Message:
+${demoForm.message}
+
+Source: useventiq.com`
+    );
+
+    window.location.href = `mailto:shubham81079@gmail.com?subject=${subject}&body=${body}`;
+    setIsDemoOpen(false);
+  }
   return (
     <main>
       <div className="container">
@@ -9,9 +46,13 @@ export default function Home() {
             <a href="#solutions">Solutions</a>
 <a href="#all-workspaces">Modules</a>
             <a href="#about">About</a>
-<a href="mailto:shubham81079@gmail.com?subject=VENTIQ Demo Request">
+<button
+  className="nav-link-button"
+  type="button"
+  onClick={() => setIsDemoOpen(true)}
+>
   Contact
-</a>
+</button>
           </div>
         </nav>
 
@@ -28,12 +69,13 @@ export default function Home() {
             modern VC, PE, Debt Funds, AIFs and GIFT City managers.
           </p>
 
-         <a
+<button
   className="btn"
-  href="mailto:shubham81079@gmail.com?subject=VENTIQ Demo Request"
+  type="button"
+  onClick={() => setIsDemoOpen(true)}
 >
   Request Demo
-</a>
+</button>
         </section>
 
         <section className="metrics">
@@ -629,12 +671,13 @@ export default function Home() {
                 private capital workflows.
               </p>
 
-              <a
-                className="action-button"
-                href="mailto:shubham81079@gmail.com?subject=VENTIQ Demo Request"
-              >
-                Contact Founder →
-              </a>
+              <button
+  className="action-button"
+  type="button"
+  onClick={() => setIsDemoOpen(true)}
+>
+  Contact Founder →
+</button>
             </div>
           </div>
         </section>
@@ -659,7 +702,126 @@ export default function Home() {
         <footer className="footer">
           © 2026 VENTIQ — AI Powered Operating System for Private Capital
         </footer>
-      </div>
+            </div>
+
+      {isDemoOpen && (
+        <div className="demo-modal-overlay">
+          <div className="demo-modal">
+            <div className="demo-modal-header">
+              <div>
+                <p className="about-label">Request Demo</p>
+
+                <h2>See how VENTIQ can run your private capital workflows.</h2>
+
+                <p>
+                  Share your details and we will reach out with a product
+                  walkthrough.
+                </p>
+              </div>
+
+              <button
+                className="demo-close-button"
+                type="button"
+                onClick={() => setIsDemoOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+
+            <form className="demo-form" onSubmit={handleDemoSubmit}>
+              <div className="demo-form-grid">
+                <label>
+                  Name *
+                  <input
+                    required
+                    type="text"
+                    placeholder="Your name"
+                    value={demoForm.name}
+                    onChange={(event) =>
+                      setDemoForm({ ...demoForm, name: event.target.value })
+                    }
+                  />
+                </label>
+
+                <label>
+                  Email *
+                  <input
+                    required
+                    type="email"
+                    placeholder="you@example.com"
+                    value={demoForm.email}
+                    onChange={(event) =>
+                      setDemoForm({ ...demoForm, email: event.target.value })
+                    }
+                  />
+                </label>
+
+                <label>
+                  Phone Number *
+                  <input
+                    required
+                    type="tel"
+                    placeholder="+91 98765 43210"
+                    value={demoForm.phone}
+                    onChange={(event) =>
+                      setDemoForm({ ...demoForm, phone: event.target.value })
+                    }
+                  />
+                </label>
+
+                <label>
+                  Company / Fund
+                  <input
+                    type="text"
+                    placeholder="Fund, company or firm name"
+                    value={demoForm.company}
+                    onChange={(event) =>
+                      setDemoForm({ ...demoForm, company: event.target.value })
+                    }
+                  />
+                </label>
+
+                <label>
+                  Role
+                  <input
+                    type="text"
+                    placeholder="Finance Head, Founder, Partner, IR..."
+                    value={demoForm.role}
+                    onChange={(event) =>
+                      setDemoForm({ ...demoForm, role: event.target.value })
+                    }
+                  />
+                </label>
+
+                <label className="demo-message-field">
+                  Message
+                  <textarea
+                    placeholder="Tell us what you want to explore in VENTIQ"
+                    value={demoForm.message}
+                    onChange={(event) =>
+                      setDemoForm({ ...demoForm, message: event.target.value })
+                    }
+                  />
+                </label>
+              </div>
+
+              <div className="demo-modal-actions">
+                <button className="btn" type="submit">
+                  Submit Request
+                </button>
+
+                <button
+                  className="demo-secondary-button"
+                  type="button"
+                  onClick={() => setIsDemoOpen(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

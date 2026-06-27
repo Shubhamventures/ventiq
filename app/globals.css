@@ -1353,4 +1353,149 @@ priority-card {
   .about-ventiq-card {
     grid-template-columns: 1fr;
   }
+}/* ===============================
+   VENTIQ Demo Request Modal
+   =============================== */
+
+.nav-link-button {
+  border: none;
+  background: transparent;
+  color: #ffffff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.nav-link-button:hover {
+  color: #7fb0ff;
+}
+
+.demo-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(3, 8, 18, 0.78);
+  backdrop-filter: blur(14px);
+}
+
+.demo-modal {
+  width: min(760px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 34px;
+  border: 1px solid rgba(120, 150, 200, 0.3);
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at top left, rgba(47, 107, 255, 0.18), transparent 34%),
+    #0b1324;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5);
+}
+
+.demo-modal-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.demo-modal-header h2 {
+  max-width: 580px;
+  margin-bottom: 12px;
+  font-size: clamp(28px, 3vw, 42px);
+  line-height: 1.08;
+  letter-spacing: -0.8px;
+}
+
+.demo-modal-header p {
+  color: #b8c7dd;
+}
+
+.demo-close-button {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(120, 150, 200, 0.3);
+  border-radius: 999px;
+  background: rgba(8, 15, 28, 0.72);
+  color: #ffffff;
+  font-size: 26px;
+  cursor: pointer;
+}
+
+.demo-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.demo-form label {
+  display: grid;
+  gap: 8px;
+  color: #dbe7ff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.demo-form input,
+.demo-form textarea {
+  width: 100%;
+  border: 1px solid rgba(120, 150, 200, 0.28);
+  border-radius: 14px;
+  background: rgba(3, 8, 18, 0.7);
+  color: #ffffff;
+  padding: 14px 15px;
+  font: inherit;
+  outline: none;
+}
+
+.demo-form input:focus,
+.demo-form textarea:focus {
+  border-color: #2f6bff;
+}
+
+.demo-form textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.demo-message-field {
+  grid-column: 1 / -1;
+}
+
+.demo-modal-actions {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-top: 24px;
+}
+
+.demo-secondary-button {
+  border: 1px solid rgba(120, 150, 200, 0.28);
+  border-radius: 14px;
+  background: transparent;
+  color: #ffffff;
+  padding: 14px 22px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.action-button {
+  border: none;
+  cursor: pointer;
+}
+
+@media (max-width: 700px) {
+  .demo-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .demo-modal {
+    padding: 24px;
+  }
+
+  .demo-modal-header {
+    align-items: flex-start;
+  }
 }
