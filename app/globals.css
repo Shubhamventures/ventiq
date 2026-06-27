@@ -1214,4 +1214,80 @@ priority-card {
 .final-primary-button:hover {
   transform: translateY(-3px);
   background: #4f82ff;
+}/* ===============================
+   VENTIQ Homepage V1.3 Workspaces
+   =============================== */
+
+.workspace-library-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.workspace-link-card {
+  display: block;
+  min-height: 170px;
+  padding: 24px;
+  border: 1px solid rgba(120, 150, 200, 0.2);
+  border-radius: 20px;
+  background: rgba(15, 24, 41, 0.82);
+  color: white;
+  text-decoration: none;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.workspace-link-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(47, 107, 255, 0.75);
+  background: rgba(20, 32, 55, 0.95);
+}
+
+.workspace-link-card span {
+  display: inline-flex;
+  margin-bottom: 14px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: #2f6bff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.workspace-link-card strong {
+  display: block;
+  font-size: 20px;
+  margin-bottom: 10px;
+}
+
+.workspace-link-card p {
+  color: #b8c7dd;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+@media (max-width: 1100px) {
+  .workspace-library-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .workspace-library-grid {
+    grid-template-columns: 1fr;
+  }
+}/* ===============================
+   VENTIQ Homepage V1.3 Final Polish
+   =============================== */
+
+.section-title {
+  font-size: clamp(34px, 3.4vw, 50px) !important;
+  line-height: 1.08 !important;
+  letter-spacing: -1.2px !important;
+}
+
+.hero h1 {
+  letter-spacing: -2.4px;
+}
+
+.final-cta-card h2 {
+  font-size: clamp(32px, 3vw, 48px) !important;
 }

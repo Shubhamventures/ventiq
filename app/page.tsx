@@ -7,7 +7,7 @@ export default function Home() {
 
           <div className="nav-links">
             <a href="#solutions">Solutions</a>
-            <a href="#modules">Modules</a>
+<a href="#all-workspaces">Modules</a>
             <a href="#about">About</a>
             <a href="#contact">Contact</a>
           </div>
@@ -187,7 +187,85 @@ export default function Home() {
             </div>
           </div>
         </section>
+        <section className="section" id="all-workspaces">
+          <h2 className="section-title">
+            Explore All VENTIQ Workspaces
+          </h2>
 
+          <div className="workspace-library-grid">
+            <a className="workspace-link-card" href="/finance-head-ai">
+              <span>Finance AI</span>
+              <strong>AI Finance Head</strong>
+              <p>Fund operations, reconciliations, workflows and approvals.</p>
+            </a>
+
+            <a className="workspace-link-card" href="/managing-partner-ai">
+              <span>Executive AI</span>
+              <strong>AI Managing Partner</strong>
+              <p>Firm health, fund performance, exits and LP storytelling.</p>
+            </a>
+
+            <a className="workspace-link-card" href="/compliance-ai">
+              <span>Compliance AI</span>
+              <strong>AI Compliance Officer</strong>
+              <p>QCR, Form 64C, audit readiness and regulatory tracking.</p>
+            </a>
+
+            <a className="workspace-link-card" href="/investment-team-ai">
+              <span>Investment AI</span>
+              <strong>AI Investment Team</strong>
+              <p>Deal pipeline, diligence, IC memos and valuation insights.</p>
+            </a>
+
+            <a className="workspace-link-card" href="/fundraising-ai">
+              <span>Fundraising AI</span>
+              <strong>AI Fundraising & IR</strong>
+              <p>LP pipeline, DDQs, fundraising decks and investor follow-ups.</p>
+            </a>
+
+            <a className="workspace-link-card" href="/investor-portal">
+              <span>Investor AI</span>
+              <strong>AI Investor Portal</strong>
+              <p>LP view for commitments, distributions, notices and documents.</p>
+            </a>
+
+            <a className="workspace-link-card" href="/capital-call">
+              <span>Workflow Engine</span>
+              <strong>AI Capital Calls</strong>
+              <p>Generate allocations, approval flows, notices and journals.</p>
+            </a>
+
+            <a className="workspace-link-card" href="/distribution-waterfall">
+              <span>Workflow Engine</span>
+              <strong>Distribution Waterfall</strong>
+              <p>Model distributable cash, waterfalls, carry and LP payouts.</p>
+            </a>
+
+            <a className="workspace-link-card" href="/bank-reconciliation">
+              <span>Accounting AI</span>
+              <strong>Bank Reconciliation</strong>
+              <p>Match transactions, review exceptions and create accounting entries.</p>
+            </a>
+
+            <a className="workspace-link-card" href="/knowledge-hub">
+              <span>Knowledge AI</span>
+              <strong>Knowledge Hub AI</strong>
+              <p>Search regulations, circulars, fund documents and internal policies.</p>
+            </a>
+
+            <a className="workspace-link-card" href="/activity-engine">
+              <span>Activity AI</span>
+              <strong>AI Activity Engine</strong>
+              <p>Track AI actions, workflow dependencies and system activity.</p>
+            </a>
+
+            <a className="workspace-link-card" href="/finance">
+              <span>Mission Control</span>
+              <strong>Finance Mission Control</strong>
+              <p>Monitor finance workflows, priorities, risk and fund operations.</p>
+            </a>
+          </div>
+        </section>
         <section className="section" id="solutions">
           <h2 className="section-title">
             One Platform. Three Experiences.
@@ -530,8 +608,8 @@ export default function Home() {
             </p>
 
             <div className="final-cta-actions">
-              <a className="final-primary-button" href="/finance-head-ai">
-                Explore VENTIQ Workspaces →
+              <a className="final-primary-button" href="/#all-workspaces">
+                Explore All Workspaces →
               </a>
             </div>
           </div>
