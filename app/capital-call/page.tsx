@@ -102,6 +102,8 @@ export default function CapitalCallPage() {
   const [investorBatch, setInvestorBatch] = useState("All investors");
   const [excludedInvestor, setExcludedInvestor] = useState("None");
   const [isApproved, setIsApproved] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+const [saveMessage, setSaveMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingCommitments, setLoadingCommitments] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -178,9 +180,11 @@ export default function CapitalCallPage() {
     return commitments.map((commitment) => {
       const investor = getInvestor(commitment.investors);
 
-      return {
-        id: commitment.id,
-        name: investor?.name ?? "Unknown Investor",
+     return {
+  id: commitment.id,
+  commitmentId: commitment.id,
+  investorId: commitment.investor_id,
+  name: investor?.name ?? "Unknown Investor",
         investorType: investor?.investor_type ?? "Investor",
         commitment: toCr(commitment.commitment_amount),
         calledTillDate: toCr(commitment.called_amount),
@@ -263,7 +267,86 @@ export default function CapitalCallPage() {
   );
 
   const selectedFundName = cleanFundName(selectedFund?.name);
+async function handleSaveDraft() {
+  if (!supabase) {
+    setSaveMessage("Supabase is not configured.");
+    return;
+  }
 
+  if (!selectedFundId) {
+    setSaveMessage("Please select a fund before saving.");
+    return;
+  }
+
+  if (calculatedInvestors.length === 0) {
+    setSaveMessage("No investor allocation found to save.");
+    return;
+  }
+
+  setSavingDraft(true);
+  setSaveMessage("");
+
+ const callName = `${selectedFundName} Capital Call - ${new Date().toLocaleDateString(
+  "en-IN"
+)}`;
+const callDate = new Date().toISOString().slice(0, 10);
+const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+  .toISOString()
+  .slice(0, 10);
+const { data: savedCall, error: callError } = await supabase
+  .from("capital_calls")
+ .insert({
+  call_name: callName,
+  call_date: callDate,
+  due_date: dueDate,
+  fund_id: selectedFundId,
+    call_amount: callAmount * 10000000,
+    status: isApproved ? "approved" : "draft",
+    allocation_method: allocationMethod,
+    investor_batch: investorBatch,
+    excluded_investor: excludedInvestor === "None" ? null : excludedInvestor,
+    created_by: "VENTIQ AI Finance Head",
+  })
+  .select("id")
+  .single();
+
+  if (callError || !savedCall?.id) {
+    setSaveMessage(
+      `Could not save capital call draft: ${
+        callError?.message ?? "Missing saved capital call ID"
+      }`
+    );
+    setSavingDraft(false);
+    return;
+  }
+
+  const investorPayload = calculatedInvestors.map((investor) => ({
+  capital_call_id: savedCall.id,
+  commitment_id: investor.commitmentId,
+  investor_id: investor.investorId,
+  call_amount: investor.investorCall * 10000000,
+  allocation_amount: investor.investorCall * 10000000,
+  allocation_percentage: Number((investor.ratio * 100).toFixed(4)),
+  status: investor.isEligible ? "ready" : "skipped",
+}));
+
+  const { error: investorError } = await supabase
+    .from("capital_call_investors")
+    .insert(investorPayload);
+
+  if (investorError) {
+    setSaveMessage(
+      `Capital call saved, but investor allocation failed: ${investorError.message}`
+    );
+    setSavingDraft(false);
+    return;
+  }
+
+  setSaveMessage(
+    `Draft saved successfully for ${selectedFundName}. ${eligibleCount} investor allocations stored.`
+  );
+  setSavingDraft(false);
+}
   return (
     <main className="app-page">
       <section className="app-shell">
@@ -568,8 +651,14 @@ export default function CapitalCallPage() {
                     {isApproved ? "✓ Approval Complete" : "Approve Capital Call"}
                   </button>
 
-                  <button>Save Draft</button>
-                </div>
+                <button
+  type="button"
+  onClick={handleSaveDraft}
+  disabled={savingDraft || calculatedInvestors.length === 0}
+>
+  {savingDraft ? "Saving..." : "Save Draft"}
+</button>                </div>
+{saveMessage && <div className="logic-note">{saveMessage}</div>}
               </div>
             </div>
 
