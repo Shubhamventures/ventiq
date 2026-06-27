@@ -9,7 +9,9 @@ export default function Home() {
             <a href="#solutions">Solutions</a>
 <a href="#all-workspaces">Modules</a>
             <a href="#about">About</a>
-            <a href="#contact">Contact</a>
+<a href="mailto:shubham81079@gmail.com?subject=VENTIQ Demo Request">
+  Contact
+</a>
           </div>
         </nav>
 
