@@ -302,6 +302,24 @@ const distributionAmount = Number(distributionAmountInput || 0);
   const preferredReturn = Math.min(Math.max(distributionAmount - 12, 0), 4);
   const gpCatchup = Math.min(Math.max(distributionAmount - 16, 0), 1);
   const carriedInterest = Math.max(distributionAmount - 17, 0);
+  const activeDistributionAmount = selectedSavedDistribution
+  ? toCr(selectedSavedDistribution.distribution_amount)
+  : distributionAmount;
+
+const activeDistributionName =
+  selectedSavedDistribution?.distribution_name ??
+  `${selectedFundName} Distribution Preview`;
+
+const isDistributionApproved =
+  selectedSavedDistribution?.status === "approved";
+
+const approvedInvestorCount = savedDistributionAllocations.filter(
+  (allocation) => allocation.status === "approved"
+).length;
+
+const readyInvestorCount = savedDistributionAllocations.filter(
+  (allocation) => allocation.status === "ready"
+).length;
 
   async function loadSavedDistributions() {
     if (!supabase) return;
@@ -883,6 +901,131 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
           </tbody>
         </table>
       )}
+  </div>
+)}
+{selectedSavedDistribution && (
+  <div className="preview-card">
+    <h2>Distribution Accounting & Investor Updates</h2>
+
+    <p className="eyebrow">
+      Post-approval automation preview for the selected distribution draft
+    </p>
+
+    <div className="impact-grid">
+      <div className="impact-card">
+        <h3>{isDistributionApproved ? "Approved" : "Pending"}</h3>
+        <p>Distribution status</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{formatCr(activeDistributionAmount)}</h3>
+        <p>Accounting amount</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{savedDistributionAllocations.length}</h3>
+        <p>LP allocation rows</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{isDistributionApproved ? approvedInvestorCount : readyInvestorCount}</h3>
+        <p>{isDistributionApproved ? "Approved LP rows" : "Ready LP rows"}</p>
+      </div>
+    </div>
+
+    <div className="journal-preview">
+      <div className="journal-row">
+        <span>Selected Distribution</span>
+        <strong>{activeDistributionName}</strong>
+      </div>
+
+      <div className="journal-row">
+        <span>Dr LP Distribution Payable</span>
+        <strong>{formatCr(activeDistributionAmount)}</strong>
+      </div>
+
+      <div className="journal-row">
+        <span>Cr Bank / Cash</span>
+        <strong>{formatCr(activeDistributionAmount)}</strong>
+      </div>
+
+      <div className="journal-row">
+        <span>Accounting Status</span>
+        <strong>
+          {isDistributionApproved
+            ? "Approved and ready for posting"
+            : "Waiting for distribution approval"}
+        </strong>
+      </div>
+    </div>
+
+    <div className="queue-grid">
+      <div className="queue-item">
+        {isDistributionApproved ? "🟢" : "🟡"} LP-wise distribution statement
+      </div>
+
+      <div className="queue-item">
+        {isDistributionApproved ? "🟢" : "🟡"} Investor email drafts
+      </div>
+
+      <div className="queue-item">
+        {isDistributionApproved ? "🟢" : "🟡"} Investor portal update
+      </div>
+
+      <div className="queue-item">
+        {isDistributionApproved ? "🟢" : "🟡"} WhatsApp notification queue
+      </div>
+
+      <div className="queue-item">
+        {isDistributionApproved ? "🟢" : "🟡"} Accounting journal validation
+      </div>
+
+      <div className="queue-item">
+        {isDistributionApproved ? "🟢" : "🟡"} Bank payment instruction file
+      </div>
+
+      <div className="queue-item">
+        {isDistributionApproved ? "🟢" : "🟡"} Audit trail event
+      </div>
+
+      <div className="queue-item">
+        {isDistributionApproved ? "🟢" : "🟡"} Compliance review log
+      </div>
+    </div>
+
+    <div className="audit-timeline">
+      <div className="audit-item">
+        <strong>09:30</strong> ✓ Distribution draft selected
+      </div>
+
+      <div className="audit-item">
+        <strong>09:32</strong> ✓ LP-wise allocation loaded from Supabase
+      </div>
+
+      <div className="audit-item">
+        <strong>09:34</strong> ✓ Accounting journal prepared
+      </div>
+
+      <div className="audit-item">
+        <strong>09:36</strong>{" "}
+        {isDistributionApproved
+          ? "Distribution approved — investor updates ready"
+          : "Waiting for approval before investor dispatch"}
+      </div>
+
+      <div className="audit-item">
+        <strong>09:38</strong>{" "}
+        {isDistributionApproved
+          ? "Portal, email and payment workflows queued"
+          : "Automation paused until approval"}
+      </div>
+    </div>
+
+    <div className="explain-box">
+      Once the distribution draft is approved, VENTIQ prepares the accounting
+      entry, LP-wise distribution statements, investor emails, portal updates,
+      WhatsApp notifications, bank payment instruction file and audit trail.
+    </div>
   </div>
 )}
             <div className="preview-card">
