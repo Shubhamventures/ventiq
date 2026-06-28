@@ -34,6 +34,19 @@ type Commitment = {
   investors: Investor | Investor[] | null;
 };
 
+type SavedDistribution = {
+  id: string;
+  distribution_name: string | null;
+  distribution_date: string | null;
+  payment_date: string | null;
+  distribution_amount: number | null;
+  distribution_type: string | null;
+  waterfall_method: string | null;
+  status: string | null;
+  created_at: string | null;
+  funds: { name: string } | { name: string }[] | null;
+};
+
 function getInvestor(value: Investor | Investor[] | null | undefined) {
   if (Array.isArray(value)) return value[0] ?? null;
   return value ?? null;
@@ -49,6 +62,21 @@ function formatCr(value: number) {
 
 function cleanFundName(name?: string | null) {
   return name?.replace("VENTIQ ", "") ?? "Selected Fund";
+}
+
+function getSavedDistributionFundName(value: SavedDistribution["funds"]) {
+  if (Array.isArray(value)) return value[0]?.name ?? "Unknown Fund";
+  return value?.name ?? "Unknown Fund";
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return "-";
+
+  return new Date(value).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function getInvestorPreference(investor: Investor | null) {
@@ -74,12 +102,17 @@ export default function DistributionWaterfallPage() {
   const [funds, setFunds] = useState<Fund[]>([]);
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [selectedFundId, setSelectedFundId] = useState("");
-  const [distributionAmount, setDistributionAmount] = useState(18.5);
+  const [distributionAmountInput, setDistributionAmountInput] = useState("18.5");
   const [distributionType, setDistributionType] = useState("Exit Proceeds");
   const [waterfallMethod, setWaterfallMethod] = useState("European Waterfall");
   const [excludedInvestor, setExcludedInvestor] = useState("None");
   const [savingDraft, setSavingDraft] = useState(false);
-const [saveMessage, setSaveMessage] = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
+  const [savedDistributions, setSavedDistributions] = useState<
+    SavedDistribution[]
+  >([]);
+  const [loadingSavedDistributions, setLoadingSavedDistributions] =
+    useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingCommitments, setLoadingCommitments] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -150,18 +183,22 @@ const [saveMessage, setSaveMessage] = useState("");
     loadCommitments();
   }, [selectedFundId]);
 
+  useEffect(() => {
+    loadSavedDistributions();
+  }, []);
+
   const selectedFund = funds.find((fund) => fund.id === selectedFundId);
   const selectedFundName = cleanFundName(selectedFund?.name);
-
+const distributionAmount = Number(distributionAmountInput || 0);
   const investorRows = useMemo(() => {
     return commitments.map((commitment) => {
       const investor = getInvestor(commitment.investors);
 
-     return {
-  id: commitment.id,
-  commitmentId: commitment.id,
-  investorId: commitment.investor_id,
-  name: investor?.name ?? "Unknown Investor",
+      return {
+        id: commitment.id,
+        commitmentId: commitment.id,
+        investorId: commitment.investor_id,
+        name: investor?.name ?? "Unknown Investor",
         investorType: investor?.investor_type ?? "Investor",
         commitment: toCr(commitment.commitment_amount),
         calledTillDate: toCr(commitment.called_amount),
@@ -194,7 +231,12 @@ const [saveMessage, setSaveMessage] = useState("");
 
   const totalDistributionBasis =
     eligibleInvestors.reduce((sum, investor) => {
-      return sum + (investor.calledTillDate > 0 ? investor.calledTillDate : investor.commitment);
+      return (
+        sum +
+        (investor.calledTillDate > 0
+          ? investor.calledTillDate
+          : investor.commitment)
+      );
     }, 0) || 0;
 
   const calculatedInvestors = investorRows.map((investor) => {
@@ -226,90 +268,114 @@ const [saveMessage, setSaveMessage] = useState("");
   const preferredReturn = Math.min(Math.max(distributionAmount - 12, 0), 4);
   const gpCatchup = Math.min(Math.max(distributionAmount - 16, 0), 1);
   const carriedInterest = Math.max(distributionAmount - 17, 0);
-async function handleSaveDistributionDraft() {
-  if (!supabase) {
-    setSaveMessage("Supabase is not configured.");
-    return;
+
+  async function loadSavedDistributions() {
+    if (!supabase) return;
+
+    setLoadingSavedDistributions(true);
+
+    const { data, error } = await supabase
+      .from("distributions")
+      .select(
+        "id, distribution_name, distribution_date, payment_date, distribution_amount, distribution_type, waterfall_method, status, created_at, funds(name)"
+      )
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    if (!error) {
+      setSavedDistributions((data as unknown as SavedDistribution[]) ?? []);
+    }
+
+    setLoadingSavedDistributions(false);
   }
 
-  if (!selectedFundId) {
-    setSaveMessage("Please select a fund before saving.");
-    return;
-  }
+  async function handleSaveDistributionDraft() {
+    if (!supabase) {
+      setSaveMessage("Supabase is not configured.");
+      return;
+    }
 
-  if (calculatedInvestors.length === 0) {
-    setSaveMessage("No investor allocation found to save.");
-    return;
-  }
+    if (!selectedFundId) {
+      setSaveMessage("Please select a fund before saving.");
+      return;
+    }
 
-  setSavingDraft(true);
-  setSaveMessage("");
+    if (calculatedInvestors.length === 0) {
+      setSaveMessage("No investor allocation found to save.");
+      return;
+    }
 
-  const distributionName = `${selectedFundName} Distribution - ${new Date().toLocaleDateString(
-    "en-IN"
-  )}`;
+    setSavingDraft(true);
+    setSaveMessage("");
 
-  const distributionDate = new Date().toISOString().slice(0, 10);
+    const distributionName = `${selectedFundName} Distribution - ${new Date().toLocaleDateString(
+      "en-IN"
+    )}`;
 
-  const paymentDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .slice(0, 10);
+    const distributionDate = new Date().toISOString().slice(0, 10);
 
-  const { data: savedDistribution, error: distributionError } = await supabase
-    .from("distributions")
-    .insert({
-      distribution_name: distributionName,
-      distribution_date: distributionDate,
-      payment_date: paymentDate,
-      fund_id: selectedFundId,
-      distribution_amount: distributionAmount * 10000000,
-      distribution_type: distributionType,
-      waterfall_method: waterfallMethod,
-      excluded_investor: excludedInvestor === "None" ? null : excludedInvestor,
-      status: "draft",
-      created_by: "VENTIQ AI Finance Head",
-    })
-    .select("id")
-    .single();
+    const paymentDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
 
-  if (distributionError || !savedDistribution?.id) {
+    const { data: savedDistribution, error: distributionError } = await supabase
+      .from("distributions")
+      .insert({
+        distribution_name: distributionName,
+        distribution_date: distributionDate,
+        payment_date: paymentDate,
+        fund_id: selectedFundId,
+        distribution_amount: distributionAmount * 10000000,
+        distribution_type: distributionType,
+        waterfall_method: waterfallMethod,
+        excluded_investor: excludedInvestor === "None" ? null : excludedInvestor,
+        status: "draft",
+        created_by: "VENTIQ AI Finance Head",
+      })
+      .select("id")
+      .single();
+
+    if (distributionError || !savedDistribution?.id) {
+      setSaveMessage(
+        `Could not save distribution draft: ${
+          distributionError?.message ?? "Missing saved distribution ID"
+        }`
+      );
+      setSavingDraft(false);
+      return;
+    }
+
+    const investorPayload = calculatedInvestors.map((investor) => ({
+      distribution_id: savedDistribution.id,
+      commitment_id: investor.commitmentId,
+      investor_id: investor.investorId,
+      distribution_amount: investor.distributionShare * 10000000,
+      allocation_amount: investor.distributionShare * 10000000,
+      allocation_percentage: Number((investor.ratio * 100).toFixed(4)),
+      status: investor.isEligible ? "ready" : "skipped",
+    }));
+
+    const { error: investorError } = await supabase
+      .from("distribution_investors")
+      .insert(investorPayload);
+
+    if (investorError) {
+      setSaveMessage(
+        `Distribution saved, but investor allocation failed: ${investorError.message}`
+      );
+      setSavingDraft(false);
+      return;
+    }
+
+    await loadSavedDistributions();
+
     setSaveMessage(
-      `Could not save distribution draft: ${
-        distributionError?.message ?? "Missing saved distribution ID"
-      }`
+      `Distribution draft saved successfully for ${selectedFundName}. ${eligibleCount} investor allocations stored.`
     );
+
     setSavingDraft(false);
-    return;
   }
 
-  const investorPayload = calculatedInvestors.map((investor) => ({
-    distribution_id: savedDistribution.id,
-    commitment_id: investor.commitmentId,
-    investor_id: investor.investorId,
-    distribution_amount: investor.distributionShare * 10000000,
-    allocation_amount: investor.distributionShare * 10000000,
-    allocation_percentage: Number((investor.ratio * 100).toFixed(4)),
-    status: investor.isEligible ? "ready" : "skipped",
-  }));
-
-  const { error: investorError } = await supabase
-    .from("distribution_investors")
-    .insert(investorPayload);
-
-  if (investorError) {
-    setSaveMessage(
-      `Distribution saved, but investor allocation failed: ${investorError.message}`
-    );
-    setSavingDraft(false);
-    return;
-  }
-
-  setSaveMessage(
-    `Distribution draft saved successfully for ${selectedFundName}. ${eligibleCount} investor allocations stored.`
-  );
-
-  setSavingDraft(false);
-}
   return (
     <main className="app-page">
       <section className="app-shell">
@@ -380,6 +446,77 @@ async function handleSaveDistributionDraft() {
                 <h3>{formatCr(totalUnfunded)}</h3>
                 <p>Unfunded commitments</p>
               </div>
+            </div>
+
+            <div className="preview-card">
+              <h2>Saved Distribution Drafts</h2>
+
+              <p className="eyebrow">
+                Latest saved distribution drafts from Supabase
+              </p>
+
+              {loadingSavedDistributions && (
+                <p>Loading saved distributions...</p>
+              )}
+
+              {!loadingSavedDistributions &&
+                savedDistributions.length === 0 && (
+                  <div className="explain-box">
+                    No saved distribution drafts found yet. Click Save Draft to
+                    create the first saved distribution workflow.
+                  </div>
+                )}
+
+              {!loadingSavedDistributions &&
+                savedDistributions.length > 0 && (
+                  <table className="investor-table">
+                    <thead>
+                      <tr>
+                        <th>Draft Name</th>
+                        <th>Fund</th>
+                        <th>Amount</th>
+                        <th>Distribution Date</th>
+                        <th>Payment Date</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {savedDistributions.map((distribution) => (
+                        <tr key={distribution.id}>
+                          <td>
+                            {distribution.distribution_name ??
+                              "VENTIQ Distribution Draft"}
+                          </td>
+                          <td>
+                            {getSavedDistributionFundName(
+                              distribution.funds
+                            )}
+                          </td>
+                          <td>
+                            {formatCr(
+                              toCr(distribution.distribution_amount)
+                            )}
+                          </td>
+                          <td>
+                            {formatDate(distribution.distribution_date)}
+                          </td>
+                          <td>{formatDate(distribution.payment_date)}</td>
+                          <td>
+                            {distribution.distribution_type ??
+                              "Distribution"}
+                          </td>
+                          <td>
+                            <span className="small-pill">
+                              {distribution.status ?? "draft"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
             </div>
 
             <div className="preview-card">
@@ -504,12 +641,10 @@ async function handleSaveDistributionDraft() {
 
                 <label>Distribution Amount (₹ Cr)</label>
                 <input
-                  type="number"
-                  value={distributionAmount}
-                  onChange={(event) =>
-                    setDistributionAmount(Number(event.target.value))
-                  }
-                />
+  type="number"
+  value={distributionAmountInput}
+  onChange={(event) => setDistributionAmountInput(event.target.value)}
+/>
 
                 <label>Distribution Type</label>
                 <select
@@ -551,18 +686,18 @@ async function handleSaveDistributionDraft() {
                 </div>
 
                 <div className="action-row">
-  <button>Approve Recommendation</button>
+                  <button>Approve Recommendation</button>
 
-  <button
-    type="button"
-    onClick={handleSaveDistributionDraft}
-    disabled={savingDraft || calculatedInvestors.length === 0}
-  >
-    {savingDraft ? "Saving..." : "Save Draft"}
-  </button>
-</div>
+                  <button
+                    type="button"
+                    onClick={handleSaveDistributionDraft}
+                    disabled={savingDraft || calculatedInvestors.length === 0}
+                  >
+                    {savingDraft ? "Saving..." : "Save Draft"}
+                  </button>
+                </div>
 
-{saveMessage && <div className="logic-note">{saveMessage}</div>}
+                {saveMessage && <div className="logic-note">{saveMessage}</div>}
               </div>
             </div>
 
