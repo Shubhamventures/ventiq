@@ -78,6 +78,8 @@ export default function DistributionWaterfallPage() {
   const [distributionType, setDistributionType] = useState("Exit Proceeds");
   const [waterfallMethod, setWaterfallMethod] = useState("European Waterfall");
   const [excludedInvestor, setExcludedInvestor] = useState("None");
+  const [savingDraft, setSavingDraft] = useState(false);
+const [saveMessage, setSaveMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingCommitments, setLoadingCommitments] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -155,9 +157,11 @@ export default function DistributionWaterfallPage() {
     return commitments.map((commitment) => {
       const investor = getInvestor(commitment.investors);
 
-      return {
-        id: commitment.id,
-        name: investor?.name ?? "Unknown Investor",
+     return {
+  id: commitment.id,
+  commitmentId: commitment.id,
+  investorId: commitment.investor_id,
+  name: investor?.name ?? "Unknown Investor",
         investorType: investor?.investor_type ?? "Investor",
         commitment: toCr(commitment.commitment_amount),
         calledTillDate: toCr(commitment.called_amount),
@@ -222,7 +226,90 @@ export default function DistributionWaterfallPage() {
   const preferredReturn = Math.min(Math.max(distributionAmount - 12, 0), 4);
   const gpCatchup = Math.min(Math.max(distributionAmount - 16, 0), 1);
   const carriedInterest = Math.max(distributionAmount - 17, 0);
+async function handleSaveDistributionDraft() {
+  if (!supabase) {
+    setSaveMessage("Supabase is not configured.");
+    return;
+  }
 
+  if (!selectedFundId) {
+    setSaveMessage("Please select a fund before saving.");
+    return;
+  }
+
+  if (calculatedInvestors.length === 0) {
+    setSaveMessage("No investor allocation found to save.");
+    return;
+  }
+
+  setSavingDraft(true);
+  setSaveMessage("");
+
+  const distributionName = `${selectedFundName} Distribution - ${new Date().toLocaleDateString(
+    "en-IN"
+  )}`;
+
+  const distributionDate = new Date().toISOString().slice(0, 10);
+
+  const paymentDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+
+  const { data: savedDistribution, error: distributionError } = await supabase
+    .from("distributions")
+    .insert({
+      distribution_name: distributionName,
+      distribution_date: distributionDate,
+      payment_date: paymentDate,
+      fund_id: selectedFundId,
+      distribution_amount: distributionAmount * 10000000,
+      distribution_type: distributionType,
+      waterfall_method: waterfallMethod,
+      excluded_investor: excludedInvestor === "None" ? null : excludedInvestor,
+      status: "draft",
+      created_by: "VENTIQ AI Finance Head",
+    })
+    .select("id")
+    .single();
+
+  if (distributionError || !savedDistribution?.id) {
+    setSaveMessage(
+      `Could not save distribution draft: ${
+        distributionError?.message ?? "Missing saved distribution ID"
+      }`
+    );
+    setSavingDraft(false);
+    return;
+  }
+
+  const investorPayload = calculatedInvestors.map((investor) => ({
+    distribution_id: savedDistribution.id,
+    commitment_id: investor.commitmentId,
+    investor_id: investor.investorId,
+    distribution_amount: investor.distributionShare * 10000000,
+    allocation_amount: investor.distributionShare * 10000000,
+    allocation_percentage: Number((investor.ratio * 100).toFixed(4)),
+    status: investor.isEligible ? "ready" : "skipped",
+  }));
+
+  const { error: investorError } = await supabase
+    .from("distribution_investors")
+    .insert(investorPayload);
+
+  if (investorError) {
+    setSaveMessage(
+      `Distribution saved, but investor allocation failed: ${investorError.message}`
+    );
+    setSavingDraft(false);
+    return;
+  }
+
+  setSaveMessage(
+    `Distribution draft saved successfully for ${selectedFundName}. ${eligibleCount} investor allocations stored.`
+  );
+
+  setSavingDraft(false);
+}
   return (
     <main className="app-page">
       <section className="app-shell">
@@ -464,9 +551,18 @@ export default function DistributionWaterfallPage() {
                 </div>
 
                 <div className="action-row">
-                  <button>Approve Recommendation</button>
-                  <button>Save Draft</button>
-                </div>
+  <button>Approve Recommendation</button>
+
+  <button
+    type="button"
+    onClick={handleSaveDistributionDraft}
+    disabled={savingDraft || calculatedInvestors.length === 0}
+  >
+    {savingDraft ? "Saving..." : "Save Draft"}
+  </button>
+</div>
+
+{saveMessage && <div className="logic-note">{saveMessage}</div>}
               </div>
             </div>
 
