@@ -169,6 +169,8 @@ const [savedDraftAllocations, setSavedDraftAllocations] = useState<
 >([]);
 const [loadingDraftAllocation, setLoadingDraftAllocation] = useState(false);
 const [draftAllocationMessage, setDraftAllocationMessage] = useState("");
+const [deletingDraftId, setDeletingDraftId] = useState("");
+const [draftActionMessage, setDraftActionMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingCommitments, setLoadingCommitments] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -388,6 +390,58 @@ async function handleOpenSavedDraft(draft: SavedCapitalCall) {
 
   setLoadingDraftAllocation(false);
 }
+async function handleDeleteSavedDraft(draft: SavedCapitalCall) {
+  if (!supabase) {
+    setDraftActionMessage("Supabase is not configured.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Delete this saved draft?\n\n${draft.call_name ?? "VENTIQ Capital Call Draft"}`
+  );
+
+  if (!confirmed) return;
+
+  setDeletingDraftId(draft.id);
+  setDraftActionMessage("");
+  setDraftAllocationMessage("");
+
+  const { error: investorDeleteError } = await supabase
+    .from("capital_call_investors")
+    .delete()
+    .eq("capital_call_id", draft.id);
+
+  if (investorDeleteError) {
+    setDraftActionMessage(
+      `Could not delete investor allocations: ${investorDeleteError.message}`
+    );
+    setDeletingDraftId("");
+    return;
+  }
+
+  const { error: draftDeleteError } = await supabase
+    .from("capital_calls")
+    .delete()
+    .eq("id", draft.id);
+
+  if (draftDeleteError) {
+    setDraftActionMessage(
+      `Could not delete saved draft: ${draftDeleteError.message}`
+    );
+    setDeletingDraftId("");
+    return;
+  }
+
+  if (selectedSavedDraft?.id === draft.id) {
+    setSelectedSavedDraft(null);
+    setSavedDraftAllocations([]);
+  }
+
+  await loadSavedDrafts();
+
+  setDraftActionMessage("Saved draft deleted successfully.");
+  setDeletingDraftId("");
+}
 async function handleSaveDraft() {
   if (!supabase) {
     setSaveMessage("Supabase is not configured.");
@@ -402,39 +456,7 @@ async function handleSaveDraft() {
   if (calculatedInvestors.length === 0) {
     setSaveMessage("No investor allocation found to save.");
     return;
-  }
-async function handleOpenSavedDraft(draft: SavedCapitalCall) {
-  if (!supabase) {
-    setDraftAllocationMessage("Supabase is not configured.");
-    return;
-  }
 
-  setSelectedSavedDraft(draft);
-  setSavedDraftAllocations([]);
-  setDraftAllocationMessage("");
-  setLoadingDraftAllocation(true);
-
-  const { data, error } = await supabase
-    .from("capital_call_investors")
-    .select(
-      "id, capital_call_id, investor_id, commitment_id, call_amount, allocation_amount, allocation_percentage, status, investors(name, investor_type, email, country, kyc_status), commitments(commitment_amount)"
-    )
-    .eq("capital_call_id", draft.id)
-    .order("allocation_amount", { ascending: false });
-
-  if (error) {
-    setDraftAllocationMessage(
-      `Could not load saved allocation: ${error.message}`
-    );
-    setLoadingDraftAllocation(false);
-    return;
-  }
-
-  setSavedDraftAllocations(
-    (data as unknown as SavedCapitalCallInvestor[]) ?? []
-  );
-
-  setLoadingDraftAllocation(false);
 }
   setSavingDraft(true);
   setSaveMessage("");
@@ -606,6 +628,9 @@ return (
   <h2>Saved Capital Call Drafts</h2>
 
   <p className="eyebrow">Latest saved drafts from Supabase</p>
+  {draftActionMessage && (
+  <div className="logic-note">{draftActionMessage}</div>
+)}
 
   {loadingSavedDrafts && <p>Loading saved drafts...</p>}
 
@@ -641,23 +666,44 @@ return (
             <td>
               <span className="small-pill">{draft.status ?? "draft"}</span>
             </td>
-            <td>
-  <button
-  type="button"
-  onClick={() => handleOpenSavedDraft(draft)}
-  style={{
-    border: "1px solid rgba(96, 165, 250, 0.45)",
-    background: "rgba(37, 99, 235, 0.16)",
-    color: "#dbeafe",
-    borderRadius: "999px",
-    padding: "8px 16px",
-    fontSize: "14px",
-    fontWeight: 700,
-    cursor: "pointer",
-  }}
->
-  Open Draft
-</button>
+<td>
+  <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+    <button
+      type="button"
+      onClick={() => handleOpenSavedDraft(draft)}
+      style={{
+        border: "1px solid rgba(96, 165, 250, 0.45)",
+        background: "rgba(37, 99, 235, 0.16)",
+        color: "#dbeafe",
+        borderRadius: "999px",
+        padding: "8px 16px",
+        fontSize: "14px",
+        fontWeight: 700,
+        cursor: "pointer",
+      }}
+    >
+      Open
+    </button>
+
+    <button
+      type="button"
+      onClick={() => handleDeleteSavedDraft(draft)}
+      disabled={deletingDraftId === draft.id}
+      style={{
+        border: "1px solid rgba(248, 113, 113, 0.45)",
+        background: "rgba(127, 29, 29, 0.18)",
+        color: "#fecaca",
+        borderRadius: "999px",
+        padding: "8px 16px",
+        fontSize: "14px",
+        fontWeight: 700,
+        cursor: deletingDraftId === draft.id ? "not-allowed" : "pointer",
+        opacity: deletingDraftId === draft.id ? 0.6 : 1,
+      }}
+    >
+      {deletingDraftId === draft.id ? "Deleting..." : "Delete"}
+    </button>
+  </div>
 </td>
           </tr>
         ))}
