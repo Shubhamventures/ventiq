@@ -43,7 +43,18 @@ type SavedCapitalCall = {
   created_at: string | null;
   funds: { name: string } | { name: string }[] | null;
 };
-
+type SavedCapitalCallInvestor = {
+  id: string;
+  capital_call_id: string;
+  investor_id: string | null;
+  commitment_id: string | null;
+  call_amount: number | null;
+  allocation_amount: number | null;
+  allocation_percentage: number | null;
+  status: string | null;
+  investors: Investor | Investor[] | null;
+  commitments: { commitment_amount: number | null } | { commitment_amount: number | null }[] | null;
+};
 function getInvestor(value: Investor | Investor[] | null | undefined) {
   if (Array.isArray(value)) return value[0] ?? null;
   return value ?? null;
@@ -106,12 +117,33 @@ function getSavedDraftFundName(value: SavedCapitalCall["funds"]) {
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "-";
+function getSavedInvestor(value: SavedCapitalCallInvestor["investors"]) {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
 
+function getSavedCommitment(
+  value: SavedCapitalCallInvestor["commitments"]
+) {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
   return new Date(value).toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   });
+}
+function getSavedInvestor(value: SavedCapitalCallInvestor["investors"]) {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+function getSavedCommitment(
+  value: SavedCapitalCallInvestor["commitments"]
+) {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
 }
 
 export default function CapitalCallPage() {
@@ -130,6 +162,13 @@ export default function CapitalCallPage() {
 const [saveMessage, setSaveMessage] = useState("");
 const [savedDrafts, setSavedDrafts] = useState<SavedCapitalCall[]>([]);
 const [loadingSavedDrafts, setLoadingSavedDrafts] = useState(false);
+const [selectedSavedDraft, setSelectedSavedDraft] =
+  useState<SavedCapitalCall | null>(null);
+const [savedDraftAllocations, setSavedDraftAllocations] = useState<
+  SavedCapitalCallInvestor[]
+>([]);
+const [loadingDraftAllocation, setLoadingDraftAllocation] = useState(false);
+const [draftAllocationMessage, setDraftAllocationMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingCommitments, setLoadingCommitments] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -316,6 +355,39 @@ const [loadingSavedDrafts, setLoadingSavedDrafts] = useState(false);
 
   setLoadingSavedDrafts(false);
 }
+async function handleOpenSavedDraft(draft: SavedCapitalCall) {
+  if (!supabase) {
+    setDraftAllocationMessage("Supabase is not configured.");
+    return;
+  }
+
+  setSelectedSavedDraft(draft);
+  setSavedDraftAllocations([]);
+  setDraftAllocationMessage("");
+  setLoadingDraftAllocation(true);
+
+  const { data, error } = await supabase
+    .from("capital_call_investors")
+    .select(
+      "id, capital_call_id, investor_id, commitment_id, call_amount, allocation_amount, allocation_percentage, status, investors(name, investor_type, email, country, kyc_status), commitments(commitment_amount)"
+    )
+    .eq("capital_call_id", draft.id)
+    .order("allocation_amount", { ascending: false });
+
+  if (error) {
+    setDraftAllocationMessage(
+      `Could not load saved allocation: ${error.message}`
+    );
+    setLoadingDraftAllocation(false);
+    return;
+  }
+
+  setSavedDraftAllocations(
+    (data as unknown as SavedCapitalCallInvestor[]) ?? []
+  );
+
+  setLoadingDraftAllocation(false);
+}
 async function handleSaveDraft() {
   if (!supabase) {
     setSaveMessage("Supabase is not configured.");
@@ -331,7 +403,39 @@ async function handleSaveDraft() {
     setSaveMessage("No investor allocation found to save.");
     return;
   }
+async function handleOpenSavedDraft(draft: SavedCapitalCall) {
+  if (!supabase) {
+    setDraftAllocationMessage("Supabase is not configured.");
+    return;
+  }
 
+  setSelectedSavedDraft(draft);
+  setSavedDraftAllocations([]);
+  setDraftAllocationMessage("");
+  setLoadingDraftAllocation(true);
+
+  const { data, error } = await supabase
+    .from("capital_call_investors")
+    .select(
+      "id, capital_call_id, investor_id, commitment_id, call_amount, allocation_amount, allocation_percentage, status, investors(name, investor_type, email, country, kyc_status), commitments(commitment_amount)"
+    )
+    .eq("capital_call_id", draft.id)
+    .order("allocation_amount", { ascending: false });
+
+  if (error) {
+    setDraftAllocationMessage(
+      `Could not load saved allocation: ${error.message}`
+    );
+    setLoadingDraftAllocation(false);
+    return;
+  }
+
+  setSavedDraftAllocations(
+    (data as unknown as SavedCapitalCallInvestor[]) ?? []
+  );
+
+  setLoadingDraftAllocation(false);
+}
   setSavingDraft(true);
   setSaveMessage("");
 
@@ -522,6 +626,7 @@ return (
           <th>Call Date</th>
           <th>Due Date</th>
           <th>Status</th>
+          <th>Action</th>
         </tr>
       </thead>
 
@@ -536,12 +641,121 @@ return (
             <td>
               <span className="small-pill">{draft.status ?? "draft"}</span>
             </td>
+            <td>
+  <button
+  type="button"
+  onClick={() => handleOpenSavedDraft(draft)}
+  style={{
+    border: "1px solid rgba(96, 165, 250, 0.45)",
+    background: "rgba(37, 99, 235, 0.16)",
+    color: "#dbeafe",
+    borderRadius: "999px",
+    padding: "8px 16px",
+    fontSize: "14px",
+    fontWeight: 700,
+    cursor: "pointer",
+  }}
+>
+  Open Draft
+</button>
+</td>
           </tr>
         ))}
       </tbody>
     </table>
   )}
 </div>
+{selectedSavedDraft && (
+  <div className="preview-card">
+    <h2>Opened Draft Allocation</h2>
+
+    <p className="eyebrow">
+      Saved investor-wise allocation from Supabase
+    </p>
+
+    <div className="impact-grid">
+      <div className="impact-card">
+        <h3>{selectedSavedDraft.call_name ?? "VENTIQ Capital Call Draft"}</h3>
+        <p>Draft selected</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{formatCr(toCr(selectedSavedDraft.call_amount))}</h3>
+        <p>Saved call amount</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{formatDate(selectedSavedDraft.call_date)}</h3>
+        <p>Call date</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{selectedSavedDraft.status ?? "draft"}</h3>
+        <p>Saved status</p>
+      </div>
+    </div>
+
+    {loadingDraftAllocation && <p>Loading saved allocation...</p>}
+
+    {draftAllocationMessage && (
+      <div className="explain-box">{draftAllocationMessage}</div>
+    )}
+
+    {!loadingDraftAllocation &&
+      !draftAllocationMessage &&
+      savedDraftAllocations.length === 0 && (
+        <div className="explain-box">
+          No investor allocation rows found for this saved draft.
+        </div>
+      )}
+
+    {!loadingDraftAllocation && savedDraftAllocations.length > 0 && (
+      <table className="investor-table">
+        <thead>
+          <tr>
+            <th>Investor</th>
+            <th>Investor Type</th>
+            <th>Commitment</th>
+            <th>Allocation %</th>
+            <th>Allocation Amount</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {savedDraftAllocations.map((allocation) => {
+            const investor = getSavedInvestor(allocation.investors);
+            const commitment = getSavedCommitment(allocation.commitments);
+
+            return (
+              <tr key={allocation.id}>
+                <td>{investor?.name ?? "Unknown Investor"}</td>
+                <td>{investor?.investor_type ?? "Investor"}</td>
+                <td>{formatCr(toCr(commitment?.commitment_amount))}</td>
+                <td>
+                  {Number(allocation.allocation_percentage || 0).toFixed(2)}%
+                </td>
+                <td>
+                  {formatCr(
+                    toCr(
+                      allocation.allocation_amount ??
+                        allocation.call_amount
+                    )
+                  )}
+                </td>
+                <td>
+                  <span className="small-pill">
+                    {allocation.status ?? "ready"}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    )}
+  </div>
+)}
             <div className="preview-card">
               <h2>AI Financial Reasoning</h2>
 
