@@ -145,6 +145,7 @@ const [loadingDistributionAllocation, setLoadingDistributionAllocation] =
 const [distributionAllocationMessage, setDistributionAllocationMessage] =
   useState("");
 const [deletingDistributionId, setDeletingDistributionId] = useState("");
+const [approvingDistributionId, setApprovingDistributionId] = useState("");
 const [distributionActionMessage, setDistributionActionMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingCommitments, setLoadingCommitments] = useState(false);
@@ -409,6 +410,69 @@ async function handleDeleteSavedDistribution(distribution: SavedDistribution) {
   setDistributionActionMessage("Saved distribution draft deleted successfully.");
   setDeletingDistributionId("");
 }
+
+async function handleApproveSavedDistribution(distribution: SavedDistribution) {
+  if (!supabase) {
+    setDistributionActionMessage("Supabase is not configured.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Approve this distribution draft?\n\n${
+      distribution.distribution_name ?? "VENTIQ Distribution Draft"
+    }`
+  );
+
+  if (!confirmed) return;
+
+  setApprovingDistributionId(distribution.id);
+  setDistributionActionMessage("");
+  setDistributionAllocationMessage("");
+
+  const { error: distributionUpdateError } = await supabase
+    .from("distributions")
+    .update({ status: "approved" })
+    .eq("id", distribution.id);
+
+  if (distributionUpdateError) {
+    setDistributionActionMessage(
+      `Could not approve distribution: ${distributionUpdateError.message}`
+    );
+    setApprovingDistributionId("");
+    return;
+  }
+
+  const { error: allocationUpdateError } = await supabase
+    .from("distribution_investors")
+    .update({ status: "approved" })
+    .eq("distribution_id", distribution.id)
+    .eq("status", "ready");
+
+  if (allocationUpdateError) {
+    setDistributionActionMessage(
+      `Distribution approved, but LP allocation status update failed: ${allocationUpdateError.message}`
+    );
+    setApprovingDistributionId("");
+    return;
+  }
+
+  if (selectedSavedDistribution?.id === distribution.id) {
+    setSelectedSavedDistribution({
+      ...selectedSavedDistribution,
+      status: "approved",
+    });
+
+    await handleOpenSavedDistribution({
+      ...distribution,
+      status: "approved",
+    });
+  }
+
+  await loadSavedDistributions();
+
+  setDistributionActionMessage("Distribution draft approved successfully.");
+  setApprovingDistributionId("");
+}
   async function handleSaveDistributionDraft() {
     if (!supabase) {
       setSaveMessage("Supabase is not configured.");
@@ -637,51 +701,82 @@ async function handleDeleteSavedDistribution(distribution: SavedDistribution) {
               </span>
             </td>
 
-            <td>
-              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                <button
-                  type="button"
-                  onClick={() => handleOpenSavedDistribution(distribution)}
-                  style={{
-                    border: "1px solid rgba(96, 165, 250, 0.45)",
-                    background: "rgba(37, 99, 235, 0.16)",
-                    color: "#dbeafe",
-                    borderRadius: "999px",
-                    padding: "8px 16px",
-                    fontSize: "14px",
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  Open
-                </button>
+<td>
+  <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+    <button
+      type="button"
+      onClick={() => handleOpenSavedDistribution(distribution)}
+      style={{
+        border: "1px solid rgba(96, 165, 250, 0.45)",
+        background: "rgba(37, 99, 235, 0.16)",
+        color: "#dbeafe",
+        borderRadius: "999px",
+        padding: "8px 16px",
+        fontSize: "14px",
+        fontWeight: 700,
+        cursor: "pointer",
+      }}
+    >
+      Open
+    </button>
 
-                <button
-                  type="button"
-                  onClick={() => handleDeleteSavedDistribution(distribution)}
-                  disabled={deletingDistributionId === distribution.id}
-                  style={{
-                    border: "1px solid rgba(248, 113, 113, 0.45)",
-                    background: "rgba(127, 29, 29, 0.18)",
-                    color: "#fecaca",
-                    borderRadius: "999px",
-                    padding: "8px 16px",
-                    fontSize: "14px",
-                    fontWeight: 700,
-                    cursor:
-                      deletingDistributionId === distribution.id
-                        ? "not-allowed"
-                        : "pointer",
-                    opacity:
-                      deletingDistributionId === distribution.id ? 0.6 : 1,
-                  }}
-                >
-                  {deletingDistributionId === distribution.id
-                    ? "Deleting..."
-                    : "Delete"}
-                </button>
-              </div>
-            </td>
+    <button
+      type="button"
+      onClick={() => handleApproveSavedDistribution(distribution)}
+      disabled={
+        distribution.status === "approved" ||
+        approvingDistributionId === distribution.id
+      }
+      style={{
+        border: "1px solid rgba(74, 222, 128, 0.45)",
+        background: "rgba(22, 101, 52, 0.18)",
+        color: "#bbf7d0",
+        borderRadius: "999px",
+        padding: "8px 16px",
+        fontSize: "14px",
+        fontWeight: 700,
+        cursor:
+          distribution.status === "approved" ||
+          approvingDistributionId === distribution.id
+            ? "not-allowed"
+            : "pointer",
+        opacity:
+          distribution.status === "approved" ||
+          approvingDistributionId === distribution.id
+            ? 0.6
+            : 1,
+      }}
+    >
+      {approvingDistributionId === distribution.id
+        ? "Approving..."
+        : distribution.status === "approved"
+        ? "Approved"
+        : "Approve"}
+    </button>
+
+    <button
+      type="button"
+      onClick={() => handleDeleteSavedDistribution(distribution)}
+      disabled={deletingDistributionId === distribution.id}
+      style={{
+        border: "1px solid rgba(248, 113, 113, 0.45)",
+        background: "rgba(127, 29, 29, 0.18)",
+        color: "#fecaca",
+        borderRadius: "999px",
+        padding: "8px 16px",
+        fontSize: "14px",
+        fontWeight: 700,
+        cursor:
+          deletingDistributionId === distribution.id
+            ? "not-allowed"
+            : "pointer",
+        opacity: deletingDistributionId === distribution.id ? 0.6 : 1,
+      }}
+    >
+      {deletingDistributionId === distribution.id ? "Deleting..." : "Delete"}
+    </button>
+  </div>
+</td>
           </tr>
         ))}
       </tbody>
