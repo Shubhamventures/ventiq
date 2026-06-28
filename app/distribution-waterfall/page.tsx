@@ -395,7 +395,7 @@ export default function DistributionWaterfallPage() {
                 </p>
 
                 <label>Fund Type</label>
-                <select value="Close-ended Fund" readOnly>
+                <select value="Close-ended Fund" disabled>
                   <option>Close-ended Fund</option>
                   <option>Open-ended Fund</option>
                 </select>
