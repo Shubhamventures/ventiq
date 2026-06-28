@@ -46,6 +46,21 @@ type SavedDistribution = {
   created_at: string | null;
   funds: { name: string } | { name: string }[] | null;
 };
+type SavedDistributionInvestor = {
+  id: string;
+  distribution_id: string;
+  investor_id: string | null;
+  commitment_id: string | null;
+  distribution_amount: number | null;
+  allocation_amount: number | null;
+  allocation_percentage: number | null;
+  status: string | null;
+  investors: Investor | Investor[] | null;
+  commitments:
+    | { commitment_amount: number | null; called_amount: number | null }
+    | { commitment_amount: number | null; called_amount: number | null }[]
+    | null;
+};
 
 function getInvestor(value: Investor | Investor[] | null | undefined) {
   if (Array.isArray(value)) return value[0] ?? null;
@@ -78,7 +93,15 @@ function formatDate(value: string | null | undefined) {
     year: "numeric",
   });
 }
+function getSavedInvestor(value: SavedDistributionInvestor["investors"]) {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
 
+function getSavedCommitment(value: SavedDistributionInvestor["commitments"]) {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
 function getInvestorPreference(investor: Investor | null) {
   const type = investor?.investor_type ?? "";
 
@@ -113,6 +136,16 @@ export default function DistributionWaterfallPage() {
   >([]);
   const [loadingSavedDistributions, setLoadingSavedDistributions] =
     useState(false);
+    const [selectedSavedDistribution, setSelectedSavedDistribution] =
+  useState<SavedDistribution | null>(null);
+const [savedDistributionAllocations, setSavedDistributionAllocations] =
+  useState<SavedDistributionInvestor[]>([]);
+const [loadingDistributionAllocation, setLoadingDistributionAllocation] =
+  useState(false);
+const [distributionAllocationMessage, setDistributionAllocationMessage] =
+  useState("");
+const [deletingDistributionId, setDeletingDistributionId] = useState("");
+const [distributionActionMessage, setDistributionActionMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingCommitments, setLoadingCommitments] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -288,7 +321,94 @@ const distributionAmount = Number(distributionAmountInput || 0);
 
     setLoadingSavedDistributions(false);
   }
+async function handleOpenSavedDistribution(distribution: SavedDistribution) {
+  if (!supabase) {
+    setDistributionAllocationMessage("Supabase is not configured.");
+    return;
+  }
 
+  setSelectedSavedDistribution(distribution);
+  setSavedDistributionAllocations([]);
+  setDistributionAllocationMessage("");
+  setLoadingDistributionAllocation(true);
+
+  const { data, error } = await supabase
+    .from("distribution_investors")
+    .select(
+      "id, distribution_id, investor_id, commitment_id, distribution_amount, allocation_amount, allocation_percentage, status, investors(name, investor_type, email, country, kyc_status), commitments(commitment_amount, called_amount)"
+    )
+    .eq("distribution_id", distribution.id)
+    .order("allocation_amount", { ascending: false });
+
+  if (error) {
+    setDistributionAllocationMessage(
+      `Could not load saved distribution allocation: ${error.message}`
+    );
+    setLoadingDistributionAllocation(false);
+    return;
+  }
+
+  setSavedDistributionAllocations(
+    (data as unknown as SavedDistributionInvestor[]) ?? []
+  );
+
+  setLoadingDistributionAllocation(false);
+}
+
+async function handleDeleteSavedDistribution(distribution: SavedDistribution) {
+  if (!supabase) {
+    setDistributionActionMessage("Supabase is not configured.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Delete this saved distribution draft?\n\n${
+      distribution.distribution_name ?? "VENTIQ Distribution Draft"
+    }`
+  );
+
+  if (!confirmed) return;
+
+  setDeletingDistributionId(distribution.id);
+  setDistributionActionMessage("");
+  setDistributionAllocationMessage("");
+
+  const { error: investorDeleteError } = await supabase
+    .from("distribution_investors")
+    .delete()
+    .eq("distribution_id", distribution.id);
+
+  if (investorDeleteError) {
+    setDistributionActionMessage(
+      `Could not delete investor allocations: ${investorDeleteError.message}`
+    );
+    setDeletingDistributionId("");
+    return;
+  }
+
+  const { error: distributionDeleteError } = await supabase
+    .from("distributions")
+    .delete()
+    .eq("id", distribution.id);
+
+  if (distributionDeleteError) {
+    setDistributionActionMessage(
+      `Could not delete saved distribution: ${distributionDeleteError.message}`
+    );
+    setDeletingDistributionId("");
+    return;
+  }
+
+  if (selectedSavedDistribution?.id === distribution.id) {
+    setSelectedSavedDistribution(null);
+    setSavedDistributionAllocations([]);
+  }
+
+  await loadSavedDistributions();
+
+  setDistributionActionMessage("Saved distribution draft deleted successfully.");
+  setDeletingDistributionId("");
+}
   async function handleSaveDistributionDraft() {
     if (!supabase) {
       setSaveMessage("Supabase is not configured.");
@@ -449,76 +569,227 @@ const distributionAmount = Number(distributionAmountInput || 0);
             </div>
 
             <div className="preview-card">
-              <h2>Saved Distribution Drafts</h2>
+  <h2>Saved Distribution Drafts</h2>
 
-              <p className="eyebrow">
-                Latest saved distribution drafts from Supabase
-              </p>
+  <p className="eyebrow">
+    Latest saved distribution drafts from Supabase
+  </p>
 
-              {loadingSavedDistributions && (
-                <p>Loading saved distributions...</p>
-              )}
+  {distributionActionMessage && (
+    <div className="logic-note">{distributionActionMessage}</div>
+  )}
 
-              {!loadingSavedDistributions &&
-                savedDistributions.length === 0 && (
-                  <div className="explain-box">
-                    No saved distribution drafts found yet. Click Save Draft to
-                    create the first saved distribution workflow.
-                  </div>
-                )}
+  {loadingSavedDistributions && (
+    <p>Loading saved distributions...</p>
+  )}
 
-              {!loadingSavedDistributions &&
-                savedDistributions.length > 0 && (
-                  <table className="investor-table">
-                    <thead>
-                      <tr>
-                        <th>Draft Name</th>
-                        <th>Fund</th>
-                        <th>Amount</th>
-                        <th>Distribution Date</th>
-                        <th>Payment Date</th>
-                        <th>Type</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
+  {!loadingSavedDistributions && savedDistributions.length === 0 && (
+    <div className="explain-box">
+      No saved distribution drafts found yet. Click Save Draft to create the
+      first saved distribution workflow.
+    </div>
+  )}
 
-                    <tbody>
-                      {savedDistributions.map((distribution) => (
-                        <tr key={distribution.id}>
-                          <td>
-                            {distribution.distribution_name ??
-                              "VENTIQ Distribution Draft"}
-                          </td>
-                          <td>
-                            {getSavedDistributionFundName(
-                              distribution.funds
-                            )}
-                          </td>
-                          <td>
-                            {formatCr(
-                              toCr(distribution.distribution_amount)
-                            )}
-                          </td>
-                          <td>
-                            {formatDate(distribution.distribution_date)}
-                          </td>
-                          <td>{formatDate(distribution.payment_date)}</td>
-                          <td>
-                            {distribution.distribution_type ??
-                              "Distribution"}
-                          </td>
-                          <td>
-                            <span className="small-pill">
-                              {distribution.status ?? "draft"}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-            </div>
+  {!loadingSavedDistributions && savedDistributions.length > 0 && (
+    <table className="investor-table">
+      <thead>
+        <tr>
+          <th>Draft Name</th>
+          <th>Fund</th>
+          <th>Amount</th>
+          <th>Distribution Date</th>
+          <th>Payment Date</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
 
+      <tbody>
+        {savedDistributions.map((distribution) => (
+          <tr key={distribution.id}>
+            <td>
+              {distribution.distribution_name ??
+                "VENTIQ Distribution Draft"}
+            </td>
+
+            <td>
+              {getSavedDistributionFundName(distribution.funds)}
+            </td>
+
+            <td>
+              {formatCr(toCr(distribution.distribution_amount))}
+            </td>
+
+            <td>
+              {formatDate(distribution.distribution_date)}
+            </td>
+
+            <td>{formatDate(distribution.payment_date)}</td>
+
+            <td>
+              {distribution.distribution_type ?? "Distribution"}
+            </td>
+
+            <td>
+              <span className="small-pill">
+                {distribution.status ?? "draft"}
+              </span>
+            </td>
+
+            <td>
+              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                <button
+                  type="button"
+                  onClick={() => handleOpenSavedDistribution(distribution)}
+                  style={{
+                    border: "1px solid rgba(96, 165, 250, 0.45)",
+                    background: "rgba(37, 99, 235, 0.16)",
+                    color: "#dbeafe",
+                    borderRadius: "999px",
+                    padding: "8px 16px",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Open
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleDeleteSavedDistribution(distribution)}
+                  disabled={deletingDistributionId === distribution.id}
+                  style={{
+                    border: "1px solid rgba(248, 113, 113, 0.45)",
+                    background: "rgba(127, 29, 29, 0.18)",
+                    color: "#fecaca",
+                    borderRadius: "999px",
+                    padding: "8px 16px",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    cursor:
+                      deletingDistributionId === distribution.id
+                        ? "not-allowed"
+                        : "pointer",
+                    opacity:
+                      deletingDistributionId === distribution.id ? 0.6 : 1,
+                  }}
+                >
+                  {deletingDistributionId === distribution.id
+                    ? "Deleting..."
+                    : "Delete"}
+                </button>
+              </div>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )}
+</div>
+
+{selectedSavedDistribution && (
+  <div className="preview-card">
+    <h2>Opened Distribution Allocation</h2>
+
+    <p className="eyebrow">
+      Saved LP-wise distribution allocation from Supabase
+    </p>
+
+    <div className="impact-grid">
+      <div className="impact-card">
+        <h3>
+          {selectedSavedDistribution.distribution_name ??
+            "VENTIQ Distribution Draft"}
+        </h3>
+        <p>Draft selected</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>
+          {formatCr(toCr(selectedSavedDistribution.distribution_amount))}
+        </h3>
+        <p>Saved distribution amount</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{formatDate(selectedSavedDistribution.distribution_date)}</h3>
+        <p>Distribution date</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{selectedSavedDistribution.status ?? "draft"}</h3>
+        <p>Saved status</p>
+      </div>
+    </div>
+
+    {loadingDistributionAllocation && (
+      <p>Loading saved distribution allocation...</p>
+    )}
+
+    {distributionAllocationMessage && (
+      <div className="explain-box">{distributionAllocationMessage}</div>
+    )}
+
+    {!loadingDistributionAllocation &&
+      !distributionAllocationMessage &&
+      savedDistributionAllocations.length === 0 && (
+        <div className="explain-box">
+          No investor allocation rows found for this saved distribution.
+        </div>
+      )}
+
+    {!loadingDistributionAllocation &&
+      savedDistributionAllocations.length > 0 && (
+        <table className="investor-table">
+          <thead>
+            <tr>
+              <th>Investor</th>
+              <th>Investor Type</th>
+              <th>Commitment</th>
+              <th>Called Capital</th>
+              <th>Allocation %</th>
+              <th>Distribution Amount</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {savedDistributionAllocations.map((allocation) => {
+              const investor = getSavedInvestor(allocation.investors);
+              const commitment = getSavedCommitment(allocation.commitments);
+
+              return (
+                <tr key={allocation.id}>
+                  <td>{investor?.name ?? "Unknown Investor"}</td>
+                  <td>{investor?.investor_type ?? "Investor"}</td>
+                  <td>{formatCr(toCr(commitment?.commitment_amount))}</td>
+                  <td>{formatCr(toCr(commitment?.called_amount))}</td>
+                  <td>
+                    {Number(allocation.allocation_percentage || 0).toFixed(2)}%
+                  </td>
+                  <td>
+                    {formatCr(
+                      toCr(
+                        allocation.allocation_amount ??
+                          allocation.distribution_amount
+                      )
+                    )}
+                  </td>
+                  <td>
+                    <span className="small-pill">
+                      {allocation.status ?? "ready"}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+  </div>
+)}
             <div className="preview-card">
               <h2>AI Financial Reasoning</h2>
 
