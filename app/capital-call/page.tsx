@@ -171,6 +171,7 @@ const [loadingDraftAllocation, setLoadingDraftAllocation] = useState(false);
 const [draftAllocationMessage, setDraftAllocationMessage] = useState("");
 const [deletingDraftId, setDeletingDraftId] = useState("");
 const [draftActionMessage, setDraftActionMessage] = useState("");
+const [approvingDraftId, setApprovingDraftId] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingCommitments, setLoadingCommitments] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -363,8 +364,9 @@ async function handleOpenSavedDraft(draft: SavedCapitalCall) {
     return;
   }
 
-  setSelectedSavedDraft(draft);
-  setSavedDraftAllocations([]);
+ setSelectedSavedDraft(draft);
+setIsApproved(draft.status === "approved");
+setSavedDraftAllocations([]);
   setDraftAllocationMessage("");
   setLoadingDraftAllocation(true);
 
@@ -441,6 +443,68 @@ async function handleDeleteSavedDraft(draft: SavedCapitalCall) {
 
   setDraftActionMessage("Saved draft deleted successfully.");
   setDeletingDraftId("");
+}
+async function handleApproveSavedDraft(draft: SavedCapitalCall) {
+  if (!supabase) {
+    setDraftActionMessage("Supabase is not configured.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Approve this capital call draft?\n\n${draft.call_name ?? "VENTIQ Capital Call Draft"}`
+  );
+
+  if (!confirmed) return;
+
+  setApprovingDraftId(draft.id);
+  setDraftActionMessage("");
+  setDraftAllocationMessage("");
+
+  const { error: callUpdateError } = await supabase
+    .from("capital_calls")
+    .update({ status: "approved" })
+    .eq("id", draft.id);
+
+  if (callUpdateError) {
+    setDraftActionMessage(
+      `Could not approve capital call: ${callUpdateError.message}`
+    );
+    setApprovingDraftId("");
+    return;
+  }
+
+  const { error: allocationUpdateError } = await supabase
+    .from("capital_call_investors")
+    .update({ status: "approved" })
+    .eq("capital_call_id", draft.id)
+    .eq("status", "ready");
+
+  if (allocationUpdateError) {
+    setDraftActionMessage(
+      `Capital call approved, but investor allocation status update failed: ${allocationUpdateError.message}`
+    );
+    setApprovingDraftId("");
+    return;
+  }
+
+  if (selectedSavedDraft?.id === draft.id) {
+    setSelectedSavedDraft({
+      ...selectedSavedDraft,
+      status: "approved",
+    });
+
+    await handleOpenSavedDraft({
+      ...draft,
+      status: "approved",
+    });
+  }
+
+setIsApproved(true);
+
+await loadSavedDrafts();
+
+setDraftActionMessage("Capital call draft approved successfully.");
+setApprovingDraftId("");
 }
 async function handleSaveDraft() {
   if (!supabase) {
@@ -683,6 +747,33 @@ return (
       }}
     >
       Open
+    </button>
+
+    <button
+      type="button"
+      onClick={() => handleApproveSavedDraft(draft)}
+      disabled={draft.status === "approved" || approvingDraftId === draft.id}
+      style={{
+        border: "1px solid rgba(74, 222, 128, 0.45)",
+        background: "rgba(22, 101, 52, 0.18)",
+        color: "#bbf7d0",
+        borderRadius: "999px",
+        padding: "8px 16px",
+        fontSize: "14px",
+        fontWeight: 700,
+        cursor:
+          draft.status === "approved" || approvingDraftId === draft.id
+            ? "not-allowed"
+            : "pointer",
+        opacity:
+          draft.status === "approved" || approvingDraftId === draft.id ? 0.6 : 1,
+      }}
+    >
+      {approvingDraftId === draft.id
+        ? "Approving..."
+        : draft.status === "approved"
+        ? "Approved"
+        : "Approve"}
     </button>
 
     <button
