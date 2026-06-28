@@ -33,6 +33,16 @@ type Commitment = {
   status: string | null;
   investors: Investor | Investor[] | null;
 };
+type SavedCapitalCall = {
+  id: string;
+  call_name: string | null;
+  call_date: string | null;
+  due_date: string | null;
+  call_amount: number | null;
+  status: string | null;
+  created_at: string | null;
+  funds: { name: string } | { name: string }[] | null;
+};
 
 function getInvestor(value: Investor | Investor[] | null | undefined) {
   if (Array.isArray(value)) return value[0] ?? null;
@@ -89,6 +99,20 @@ function getInvestorEta(investor: Investor | null) {
 
   return "2 days";
 }
+function getSavedDraftFundName(value: SavedCapitalCall["funds"]) {
+  if (Array.isArray(value)) return value[0]?.name ?? "Unknown Fund";
+  return value?.name ?? "Unknown Fund";
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return "-";
+
+  return new Date(value).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 export default function CapitalCallPage() {
   const [funds, setFunds] = useState<Fund[]>([]);
@@ -104,6 +128,8 @@ export default function CapitalCallPage() {
   const [isApproved, setIsApproved] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
 const [saveMessage, setSaveMessage] = useState("");
+const [savedDrafts, setSavedDrafts] = useState<SavedCapitalCall[]>([]);
+const [loadingSavedDrafts, setLoadingSavedDrafts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingCommitments, setLoadingCommitments] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -148,6 +174,7 @@ const [saveMessage, setSaveMessage] = useState("");
   useEffect(() => {
     async function loadCommitments() {
       if (!selectedFundId || !supabase) return;
+     
 
       setLoadingCommitments(true);
       setErrorMessage("");
@@ -173,6 +200,9 @@ const [saveMessage, setSaveMessage] = useState("");
 
     loadCommitments();
   }, [selectedFundId]);
+  useEffect(() => {
+  loadSavedDrafts();
+}, []);
 
   const selectedFund = funds.find((fund) => fund.id === selectedFundId);
 
@@ -267,6 +297,25 @@ const [saveMessage, setSaveMessage] = useState("");
   );
 
   const selectedFundName = cleanFundName(selectedFund?.name);
+  async function loadSavedDrafts() {
+  if (!supabase) return;
+
+  setLoadingSavedDrafts(true);
+
+  const { data, error } = await supabase
+    .from("capital_calls")
+    .select(
+      "id, call_name, call_date, due_date, call_amount, status, created_at, funds(name)"
+    )
+    .order("created_at", { ascending: false })
+    .limit(5);
+
+  if (!error) {
+    setSavedDrafts((data as unknown as SavedCapitalCall[]) ?? []);
+  }
+
+  setLoadingSavedDrafts(false);
+}
 async function handleSaveDraft() {
   if (!supabase) {
     setSaveMessage("Supabase is not configured.");
@@ -342,12 +391,16 @@ const { data: savedCall, error: callError } = await supabase
     return;
   }
 
-  setSaveMessage(
-    `Draft saved successfully for ${selectedFundName}. ${eligibleCount} investor allocations stored.`
-  );
-  setSavingDraft(false);
+ await loadSavedDrafts();
+
+setSaveMessage(
+  `Draft saved successfully for ${selectedFundName}. ${eligibleCount} investor allocations stored.`
+);
+
+setSavingDraft(false);
 }
-  return (
+
+return (
     <main className="app-page">
       <section className="app-shell">
         <div className="app-header">
@@ -445,7 +498,50 @@ const { data: savedCall, error: callError } = await supabase
                 <p>Liquidity risk after call</p>
               </div>
             </div>
+<div className="preview-card">
+  <h2>Saved Capital Call Drafts</h2>
 
+  <p className="eyebrow">Latest saved drafts from Supabase</p>
+
+  {loadingSavedDrafts && <p>Loading saved drafts...</p>}
+
+  {!loadingSavedDrafts && savedDrafts.length === 0 && (
+    <div className="explain-box">
+      No saved capital call drafts found yet. Click Save Draft to create the
+      first saved workflow.
+    </div>
+  )}
+
+  {!loadingSavedDrafts && savedDrafts.length > 0 && (
+    <table className="investor-table">
+      <thead>
+        <tr>
+          <th>Draft Name</th>
+          <th>Fund</th>
+          <th>Call Amount</th>
+          <th>Call Date</th>
+          <th>Due Date</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {savedDrafts.map((draft) => (
+          <tr key={draft.id}>
+            <td>{draft.call_name ?? "VENTIQ Capital Call Draft"}</td>
+            <td>{getSavedDraftFundName(draft.funds)}</td>
+            <td>{formatCr(toCr(draft.call_amount))}</td>
+            <td>{formatDate(draft.call_date)}</td>
+            <td>{formatDate(draft.due_date)}</td>
+            <td>
+              <span className="small-pill">{draft.status ?? "draft"}</span>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )}
+</div>
             <div className="preview-card">
               <h2>AI Financial Reasoning</h2>
 
