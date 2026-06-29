@@ -82,6 +82,8 @@ type InvestorDocument = {
   status: string | null;
   email_status: string | null;
   portal_status: string | null;
+  storage_path: string | null;
+storage_url: string | null;
   generated_at: string | null;
 };
 
@@ -188,6 +190,9 @@ export default function DocumentEnginePage() {
   const [selectedPreviewDocument, setSelectedPreviewDocument] =
   useState<InvestorDocument | null>(null);
 const [generatingPdfId, setGeneratingPdfId] = useState("");
+const [uploadingPdfId, setUploadingPdfId] = useState("");
+const [storingAllPdfs, setStoringAllPdfs] = useState(false);
+const [bulkStoreProgress, setBulkStoreProgress] = useState("");
 const previewDocumentRef = useRef<HTMLDivElement | null>(null);
 const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -239,7 +244,7 @@ const [message, setMessage] = useState("");
     const { data: documentData, error: documentError } = await supabase
       .from("investor_documents")
       .select(
-        "id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, generated_at"
+        "id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, storage_path, storage_url, generated_at"
       )
       .order("generated_at", { ascending: false })
       .limit(20);
@@ -276,7 +281,7 @@ const [message, setMessage] = useState("");
     const { data, error } = await supabase
       .from("investor_documents")
       .select(
-        "id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, generated_at"
+        "id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, storage_path, storage_url, generated_at"
       )
       .order("generated_at", { ascending: false })
       .limit(20);
@@ -341,14 +346,65 @@ const [message, setMessage] = useState("");
     .toLowerCase();
 }
 
-async function handleDownloadPdf() {
+async function buildPdfForSelectedDocument() {
   if (!selectedPreviewDocument) {
-    setMessage("Please preview a document before downloading PDF.");
-    return;
+    throw new Error("Please preview a document before generating PDF.");
   }
 
   if (!previewDocumentRef.current) {
-    setMessage("PDF preview is not ready yet.");
+    throw new Error("PDF preview is not ready yet.");
+  }
+
+  const canvas = await html2canvas(previewDocumentRef.current, {
+    scale: 2,
+    backgroundColor: "#f8fafc",
+    useCORS: true,
+  });
+
+  const imageData = canvas.toDataURL("image/png");
+
+  const pdf = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4",
+  });
+
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+
+  const margin = 8;
+  const pdfWidth = pageWidth - margin * 2;
+  const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+
+  let heightLeft = pdfHeight;
+  let position = margin;
+
+  pdf.addImage(imageData, "PNG", margin, position, pdfWidth, pdfHeight);
+  heightLeft -= pageHeight - margin * 2;
+
+  while (heightLeft > 0) {
+    pdf.addPage();
+    position = margin - (pdfHeight - heightLeft);
+    pdf.addImage(imageData, "PNG", margin, position, pdfWidth, pdfHeight);
+    heightLeft -= pageHeight - margin * 2;
+  }
+
+  const fileName = `${getSafeFileName(
+    selectedPreviewDocument.document_name
+  )}.pdf`;
+
+  const blob = pdf.output("blob");
+
+  return {
+    pdf,
+    blob,
+    fileName,
+  };
+}
+
+async function handleDownloadPdf() {
+  if (!selectedPreviewDocument) {
+    setMessage("Please preview a document before downloading PDF.");
     return;
   }
 
@@ -356,43 +412,7 @@ async function handleDownloadPdf() {
   setMessage("");
 
   try {
-    const canvas = await html2canvas(previewDocumentRef.current, {
-      scale: 2,
-      backgroundColor: "#f8fafc",
-      useCORS: true,
-    });
-
-    const imageData = canvas.toDataURL("image/png");
-
-    const pdf = new jsPDF({
-      orientation: "portrait",
-      unit: "mm",
-      format: "a4",
-    });
-
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-
-    const margin = 8;
-    const pdfWidth = pageWidth - margin * 2;
-    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-
-    let heightLeft = pdfHeight;
-    let position = margin;
-
-    pdf.addImage(imageData, "PNG", margin, position, pdfWidth, pdfHeight);
-    heightLeft -= pageHeight - margin * 2;
-
-    while (heightLeft > 0) {
-      pdf.addPage();
-      position = margin - (pdfHeight - heightLeft);
-      pdf.addImage(imageData, "PNG", margin, position, pdfWidth, pdfHeight);
-      heightLeft -= pageHeight - margin * 2;
-    }
-
-    const fileName = `${getSafeFileName(
-      selectedPreviewDocument.document_name
-    )}.pdf`;
+    const { pdf, fileName } = await buildPdfForSelectedDocument();
 
     pdf.save(fileName);
 
@@ -406,6 +426,301 @@ async function handleDownloadPdf() {
   }
 
   setGeneratingPdfId("");
+}
+
+function buildPdfBlobFromDocumentRecord(documentRecord: InvestorDocument) {
+  const pdf = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4",
+  });
+
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const margin = 16;
+  const usableWidth = pageWidth - margin * 2;
+
+  const title = getDocumentTitle(documentRecord);
+  const amountLabel = getDocumentAmountLabel(documentRecord);
+  const body = getDocumentBody(documentRecord);
+  const footer = getDocumentFooter(documentRecord);
+
+  let y = 18;
+
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(12);
+  pdf.setTextColor(37, 99, 235);
+  pdf.text("VENTIQ", margin, y);
+
+  y += 12;
+
+  pdf.setTextColor(15, 23, 42);
+  pdf.setFontSize(24);
+  pdf.text(title, margin, y);
+
+  y += 12;
+
+  pdf.setLineWidth(0.4);
+  pdf.line(margin, y, pageWidth - margin, y);
+
+  y += 16;
+
+  pdf.setFontSize(10);
+  pdf.setFont("helvetica", "bold");
+  pdf.text("Generated Date", pageWidth - margin - 38, 18);
+  pdf.setFont("helvetica", "normal");
+  pdf.text(formatDate(documentRecord.generated_at), pageWidth - margin - 38, 24);
+
+  pdf.setFont("helvetica", "bold");
+  pdf.text("Status", pageWidth - margin - 38, 34);
+  pdf.setFont("helvetica", "normal");
+  pdf.text(documentRecord.status ?? "generated", pageWidth - margin - 38, 40);
+
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(12);
+  pdf.text("Investor", margin, y);
+  pdf.text("Fund", margin + usableWidth / 2, y);
+
+  y += 7;
+
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(11);
+  pdf.text(documentRecord.investor_name ?? "-", margin, y);
+  pdf.text(documentRecord.fund_name ?? "-", margin + usableWidth / 2, y);
+
+  y += 6;
+
+  pdf.setFontSize(10);
+  pdf.text(documentRecord.investor_email ?? "-", margin, y);
+  pdf.text("Investor Reporting Document", margin + usableWidth / 2, y);
+
+  y += 18;
+
+  const rows = [
+    ["Document Name", documentRecord.document_name],
+    [amountLabel, formatCr(toCr(documentRecord.amount))],
+    ["Portal Status", documentRecord.portal_status ?? "available"],
+    ["Email Status", documentRecord.email_status ?? "not_sent"],
+  ];
+
+  rows.forEach(([label, value]) => {
+    pdf.setDrawColor(203, 213, 225);
+    pdf.rect(margin, y, usableWidth, 11);
+
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+    pdf.setTextColor(100, 116, 139);
+    pdf.text(label, margin + 4, y + 7);
+
+    pdf.setFont("helvetica", "bold");
+    pdf.setTextColor(15, 23, 42);
+    const wrappedValue = pdf.splitTextToSize(value, usableWidth / 2 - 8);
+    pdf.text(wrappedValue, margin + usableWidth / 2, y + 7);
+
+    y += 11;
+  });
+
+  y += 16;
+
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(11);
+  pdf.setTextColor(15, 23, 42);
+
+  const letterText = [
+    `Dear ${documentRecord.investor_name ?? "Investor"},`,
+    "",
+    body,
+    "",
+    `The amount applicable to your account is ${formatCr(
+      toCr(documentRecord.amount)
+    )}. Please refer to the final PDF notice and fund communication for the detailed payment or distribution instructions.`,
+    "",
+    "This document will be made available in the investor reporting portal and may be dispatched by email once reviewed and approved by the fund operations team.",
+    "",
+    "Regards,",
+    "VENTIQ Document Engine",
+  ].join("\n");
+
+  const wrappedText = pdf.splitTextToSize(letterText, usableWidth);
+  pdf.text(wrappedText, margin, y);
+
+  y += wrappedText.length * 6 + 14;
+
+  pdf.setDrawColor(203, 213, 225);
+  pdf.line(margin, 280, pageWidth - margin, 280);
+
+  pdf.setFontSize(9);
+  pdf.setTextColor(100, 116, 139);
+  pdf.text(footer, margin, 286);
+  pdf.text("Generated by VENTIQ", pageWidth - margin - 34, 286);
+
+  const fileName = `${getSafeFileName(documentRecord.document_name)}.pdf`;
+  const blob = pdf.output("blob");
+
+  return {
+    blob,
+    fileName,
+  };
+}
+async function handleStorePdfInSupabase() {
+  if (!supabase) {
+    setMessage("Supabase is not configured.");
+    return;
+  }
+
+  if (!selectedPreviewDocument) {
+    setMessage("Please preview a document before storing PDF.");
+    return;
+  }
+
+  setUploadingPdfId(selectedPreviewDocument.id);
+  setMessage("");
+
+  try {
+    const { blob, fileName } = await buildPdfForSelectedDocument();
+
+    const storagePath = `${selectedPreviewDocument.id}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("investor-documents")
+      .upload(storagePath, blob, {
+        contentType: "application/pdf",
+        upsert: true,
+        cacheControl: "3600",
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from("investor-documents")
+      .getPublicUrl(storagePath);
+
+    const publicUrl = publicUrlData.publicUrl;
+
+    const { error: updateError } = await supabase
+      .from("investor_documents")
+      .update({
+        storage_path: storagePath,
+        storage_url: publicUrl,
+        status: "stored",
+        portal_status: "available",
+      })
+      .eq("id", selectedPreviewDocument.id);
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    const updatedDocument = {
+      ...selectedPreviewDocument,
+      storage_path: storagePath,
+      storage_url: publicUrl,
+      status: "stored",
+      portal_status: "available",
+    };
+
+    setSelectedPreviewDocument(updatedDocument);
+
+    await loadDocumentsOnly();
+
+    setMessage(`PDF stored in Supabase Storage: ${fileName}`);
+  } catch (error) {
+    setMessage(
+      `Could not store PDF: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`
+    );
+  }
+
+  setUploadingPdfId("");
+}
+async function handleStoreAllPdfsInSupabase() {
+  if (!supabase) {
+    setMessage("Supabase is not configured.");
+    return;
+  }
+
+  const unstoredDocuments = documents.filter(
+    (documentRecord) => !documentRecord.storage_url
+  );
+
+  if (unstoredDocuments.length === 0) {
+    setMessage("All generated documents are already stored in the portal.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Store PDFs for ${unstoredDocuments.length} unstored investor documents?`
+  );
+
+  if (!confirmed) return;
+
+  setStoringAllPdfs(true);
+  setMessage("");
+  setBulkStoreProgress(`Starting bulk PDF storage for ${unstoredDocuments.length} documents...`);
+
+  let storedCount = 0;
+  let failedCount = 0;
+
+  for (const documentRecord of unstoredDocuments) {
+    try {
+      setBulkStoreProgress(
+        `Storing ${storedCount + failedCount + 1} of ${
+          unstoredDocuments.length
+        }: ${documentRecord.document_name}`
+      );
+
+      const { blob, fileName } = buildPdfBlobFromDocumentRecord(documentRecord);
+
+      const storagePath = `${documentRecord.id}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("investor-documents")
+        .upload(storagePath, blob, {
+          contentType: "application/pdf",
+          upsert: true,
+          cacheControl: "3600",
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from("investor-documents")
+        .getPublicUrl(storagePath);
+
+      const publicUrl = publicUrlData.publicUrl;
+
+      const { error: updateError } = await supabase
+        .from("investor_documents")
+        .update({
+          storage_path: storagePath,
+          storage_url: publicUrl,
+          status: "stored",
+          portal_status: "available",
+        })
+        .eq("id", documentRecord.id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      storedCount += 1;
+    } catch (error) {
+      failedCount += 1;
+      console.error("Bulk PDF store failed:", error);
+    }
+  }
+
+  await loadDocumentsOnly();
+
+  setBulkStoreProgress("");
+  setMessage(
+    `Bulk PDF storage completed. ${storedCount} documents stored. ${failedCount} failed.`
+  );
+  setStoringAllPdfs(false);
 }
 
   async function generateCapitalCallDocuments() {
@@ -824,6 +1139,17 @@ async function handleDownloadPdf() {
   <p className="eyebrow">
     Latest investor document records from Supabase
   </p>
+  <div className="action-row">
+  <button
+    type="button"
+    onClick={handleStoreAllPdfsInSupabase}
+    disabled={storingAllPdfs || documents.length === 0}
+  >
+    {storingAllPdfs ? "Storing All PDFs..." : "Store All PDFs to Portal"}
+  </button>
+</div>
+
+{bulkStoreProgress && <div className="logic-note">{bulkStoreProgress}</div>}
 
   {documents.length === 0 && (
     <div className="explain-box">
@@ -1136,6 +1462,12 @@ async function handleDownloadPdf() {
           <div style={{ padding: "16px", fontWeight: 700 }}>
             {selectedPreviewDocument.portal_status ?? "available"}
           </div>
+          <div className="journal-row">
+  <span>Storage Status</span>
+  <strong>
+    {selectedPreviewDocument.storage_url ? "PDF stored" : "Not stored yet"}
+  </strong>
+</div>
         </div>
 
         <div
@@ -1205,24 +1537,58 @@ async function handleDownloadPdf() {
       </div>
     </div>
 
-    <div className="action-row" style={{ marginTop: "20px" }}>
-      <button
-  type="button"
-  onClick={handleDownloadPdf}
-  disabled={
-    !selectedPreviewDocument ||
-    generatingPdfId === selectedPreviewDocument.id
-  }
->
-  {generatingPdfId === selectedPreviewDocument?.id
-    ? "Generating PDF..."
-    : "Download PDF"}
-</button>
+   <div className="action-row" style={{ marginTop: "20px" }}>
+  <button
+    type="button"
+    onClick={handleDownloadPdf}
+    disabled={
+      !selectedPreviewDocument ||
+      generatingPdfId === selectedPreviewDocument.id
+    }
+  >
+    {generatingPdfId === selectedPreviewDocument?.id
+      ? "Generating PDF..."
+      : "Download PDF"}
+  </button>
 
-      <button type="button">
-        Send Email Coming Later
-      </button>
-    </div>
+  <button
+    type="button"
+    onClick={handleStorePdfInSupabase}
+    disabled={
+      !selectedPreviewDocument ||
+      uploadingPdfId === selectedPreviewDocument.id
+    }
+  >
+    {uploadingPdfId === selectedPreviewDocument?.id
+      ? "Storing PDF..."
+      : "Store PDF to Portal"}
+  </button>
+
+  {selectedPreviewDocument?.storage_url && (
+    <a
+      href={selectedPreviewDocument.storage_url}
+      target="_blank"
+      rel="noreferrer"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        border: "1px solid rgba(74, 222, 128, 0.45)",
+        background: "rgba(22, 101, 52, 0.18)",
+        color: "#bbf7d0",
+        borderRadius: "999px",
+        padding: "12px 18px",
+        fontSize: "15px",
+        fontWeight: 800,
+        textDecoration: "none",
+      }}
+    >
+      Open Stored PDF
+    </a>
+  )}
+
+  <button type="button">Send Email Coming Later</button>
+</div>
 
     <div className="explain-box">
       This is now a PDF-style preview. In Phase 3.4, we will convert this
