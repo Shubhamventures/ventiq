@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 
 type ApprovedCapitalCall = {
@@ -184,8 +186,10 @@ export default function DocumentEnginePage() {
   const [generatingDistributionId, setGeneratingDistributionId] = useState("");
   const [deletingDocumentId, setDeletingDocumentId] = useState("");
   const [selectedPreviewDocument, setSelectedPreviewDocument] =
-    useState<InvestorDocument | null>(null);
-  const [message, setMessage] = useState("");
+  useState<InvestorDocument | null>(null);
+const [generatingPdfId, setGeneratingPdfId] = useState("");
+const previewDocumentRef = useRef<HTMLDivElement | null>(null);
+const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
@@ -329,6 +333,80 @@ export default function DocumentEnginePage() {
       });
     }, 100);
   }
+  function getSafeFileName(value: string) {
+  return value
+    .replace(/[^a-z0-9]/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+}
+
+async function handleDownloadPdf() {
+  if (!selectedPreviewDocument) {
+    setMessage("Please preview a document before downloading PDF.");
+    return;
+  }
+
+  if (!previewDocumentRef.current) {
+    setMessage("PDF preview is not ready yet.");
+    return;
+  }
+
+  setGeneratingPdfId(selectedPreviewDocument.id);
+  setMessage("");
+
+  try {
+    const canvas = await html2canvas(previewDocumentRef.current, {
+      scale: 2,
+      backgroundColor: "#f8fafc",
+      useCORS: true,
+    });
+
+    const imageData = canvas.toDataURL("image/png");
+
+    const pdf = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+    });
+
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+
+    const margin = 8;
+    const pdfWidth = pageWidth - margin * 2;
+    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+
+    let heightLeft = pdfHeight;
+    let position = margin;
+
+    pdf.addImage(imageData, "PNG", margin, position, pdfWidth, pdfHeight);
+    heightLeft -= pageHeight - margin * 2;
+
+    while (heightLeft > 0) {
+      pdf.addPage();
+      position = margin - (pdfHeight - heightLeft);
+      pdf.addImage(imageData, "PNG", margin, position, pdfWidth, pdfHeight);
+      heightLeft -= pageHeight - margin * 2;
+    }
+
+    const fileName = `${getSafeFileName(
+      selectedPreviewDocument.document_name
+    )}.pdf`;
+
+    pdf.save(fileName);
+
+    setMessage(`PDF downloaded: ${fileName}`);
+  } catch (error) {
+    setMessage(
+      `Could not download PDF: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`
+    );
+  }
+
+  setGeneratingPdfId("");
+}
 
   async function generateCapitalCallDocuments() {
     if (!supabase) {
@@ -913,6 +991,7 @@ export default function DocumentEnginePage() {
     </div>
 
     <div
+  ref={previewDocumentRef}
       style={{
         background: "#f8fafc",
         color: "#0f172a",
@@ -1127,9 +1206,18 @@ export default function DocumentEnginePage() {
     </div>
 
     <div className="action-row" style={{ marginTop: "20px" }}>
-      <button type="button">
-        Download PDF Coming Next
-      </button>
+      <button
+  type="button"
+  onClick={handleDownloadPdf}
+  disabled={
+    !selectedPreviewDocument ||
+    generatingPdfId === selectedPreviewDocument.id
+  }
+>
+  {generatingPdfId === selectedPreviewDocument?.id
+    ? "Generating PDF..."
+    : "Download PDF"}
+</button>
 
       <button type="button">
         Send Email Coming Later
