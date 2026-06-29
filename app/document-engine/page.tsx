@@ -191,6 +191,8 @@ export default function DocumentEnginePage() {
   useState<InvestorDocument | null>(null);
 const [generatingPdfId, setGeneratingPdfId] = useState("");
 const [uploadingPdfId, setUploadingPdfId] = useState("");
+const [emailActionId, setEmailActionId] = useState("");
+const [bulkEmailAction, setBulkEmailAction] = useState("");
 const [storingAllPdfs, setStoringAllPdfs] = useState(false);
 const [bulkStoreProgress, setBulkStoreProgress] = useState("");
 const previewDocumentRef = useRef<HTMLDivElement | null>(null);
@@ -326,6 +328,185 @@ const [message, setMessage] = useState("");
     setMessage("Investor document deleted successfully.");
     setDeletingDocumentId("");
   }
+  async function updateInvestorDocumentEmailStatus(
+  documentRecord: InvestorDocument,
+  nextStatus: string
+) {
+  if (!supabase) {
+    setMessage("Supabase is not configured.");
+    return;
+  }
+
+  setEmailActionId(documentRecord.id);
+  setMessage("");
+
+  try {
+    const { error } = await supabase
+      .from("investor_documents")
+      .update({
+        email_status: nextStatus,
+      })
+      .eq("id", documentRecord.id);
+
+    if (error) {
+      throw error;
+    }
+
+    if (selectedPreviewDocument?.id === documentRecord.id) {
+      setSelectedPreviewDocument({
+        ...selectedPreviewDocument,
+        email_status: nextStatus,
+      });
+    }
+
+    await loadDocumentsOnly();
+
+    setMessage(
+      `${documentRecord.document_name} email status updated to ${nextStatus}.`
+    );
+  } catch (error) {
+    setMessage(
+      `Could not update email status: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`
+    );
+  }
+
+  setEmailActionId("");
+}
+
+async function handleQueueInvestorDocumentEmail(
+  documentRecord: InvestorDocument
+) {
+  if (!documentRecord.storage_url) {
+    setMessage("Please store the PDF before queuing email.");
+    return;
+  }
+
+  await updateInvestorDocumentEmailStatus(documentRecord, "queued");
+}
+
+async function handleMarkInvestorDocumentEmailSent(
+  documentRecord: InvestorDocument
+) {
+  if (!documentRecord.storage_url) {
+    setMessage("Please store the PDF before marking email as sent.");
+    return;
+  }
+
+  await updateInvestorDocumentEmailStatus(documentRecord, "sent");
+}
+
+async function handleQueueAllStoredEmails() {
+  if (!supabase) {
+    setMessage("Supabase is not configured.");
+    return;
+  }
+
+  const queueableDocuments = documents.filter(
+    (documentRecord) =>
+      documentRecord.storage_url &&
+      documentRecord.email_status !== "queued" &&
+      documentRecord.email_status !== "sent"
+  );
+
+  if (queueableDocuments.length === 0) {
+    setMessage("No stored documents are pending for email queue.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Queue emails for ${queueableDocuments.length} stored investor documents?`
+  );
+
+  if (!confirmed) return;
+
+  setBulkEmailAction("queue");
+  setMessage("");
+
+  try {
+    const documentIds = queueableDocuments.map(
+      (documentRecord) => documentRecord.id
+    );
+
+    const { error } = await supabase
+      .from("investor_documents")
+      .update({
+        email_status: "queued",
+      })
+      .in("id", documentIds);
+
+    if (error) {
+      throw error;
+    }
+
+    await loadDocumentsOnly();
+
+    setMessage(`${queueableDocuments.length} investor emails queued.`);
+  } catch (error) {
+    setMessage(
+      `Could not queue emails: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`
+    );
+  }
+
+  setBulkEmailAction("");
+}
+
+async function handleMarkAllQueuedEmailsSent() {
+  if (!supabase) {
+    setMessage("Supabase is not configured.");
+    return;
+  }
+
+  const queuedDocuments = documents.filter(
+    (documentRecord) => documentRecord.email_status === "queued"
+  );
+
+  if (queuedDocuments.length === 0) {
+    setMessage("No queued emails found.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Mark ${queuedDocuments.length} queued investor emails as sent?`
+  );
+
+  if (!confirmed) return;
+
+  setBulkEmailAction("sent");
+  setMessage("");
+
+  try {
+    const documentIds = queuedDocuments.map(
+      (documentRecord) => documentRecord.id
+    );
+
+    const { error } = await supabase
+      .from("investor_documents")
+      .update({
+        email_status: "sent",
+      })
+      .in("id", documentIds);
+
+    if (error) {
+      throw error;
+    }
+
+    await loadDocumentsOnly();
+
+    setMessage(`${queuedDocuments.length} investor emails marked as sent.`);
+  } catch (error) {
+    setMessage(
+      `Could not mark emails as sent: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`
+    );
+  }
+
+  setBulkEmailAction("");
+}
 
   function handlePreviewInvestorDocument(documentRecord: InvestorDocument) {
     setSelectedPreviewDocument(documentRecord);
@@ -1147,6 +1328,27 @@ async function handleStoreAllPdfsInSupabase() {
   >
     {storingAllPdfs ? "Storing All PDFs..." : "Store All PDFs to Portal"}
   </button>
+  <div className="action-row">
+  <button
+    type="button"
+    onClick={handleQueueAllStoredEmails}
+    disabled={bulkEmailAction === "queue" || documents.length === 0}
+  >
+    {bulkEmailAction === "queue"
+      ? "Queuing Emails..."
+      : "Queue All Stored Emails"}
+  </button>
+
+  <button
+    type="button"
+    onClick={handleMarkAllQueuedEmailsSent}
+    disabled={bulkEmailAction === "sent" || documents.length === 0}
+  >
+    {bulkEmailAction === "sent"
+      ? "Marking Sent..."
+      : "Mark All Queued as Sent"}
+  </button>
+</div>
 </div>
 
 {bulkStoreProgress && <div className="logic-note">{bulkStoreProgress}</div>}
@@ -1190,97 +1392,159 @@ async function handleStoreAllPdfsInSupabase() {
         </thead>
 
         <tbody>
-          {documents.map((documentRecord) => (
-            <tr key={documentRecord.id}>
-              <td style={{ maxWidth: "260px" }}>
-                <strong>{documentRecord.document_name}</strong>
-              </td>
+  {documents.map((documentRecord) => (
+    <tr key={documentRecord.id}>
+      <td style={{ maxWidth: "260px" }}>
+        <strong>{documentRecord.document_name}</strong>
+      </td>
 
-              <td>{documentRecord.document_type}</td>
+      <td>{documentRecord.document_type}</td>
 
-              <td>{documentRecord.investor_name ?? "-"}</td>
+      <td>{documentRecord.investor_name ?? "-"}</td>
 
-              <td>{documentRecord.investor_email ?? "-"}</td>
+      <td>{documentRecord.investor_email ?? "-"}</td>
 
-              <td>{documentRecord.fund_name ?? "-"}</td>
+      <td>{documentRecord.fund_name ?? "-"}</td>
 
-              <td>{formatCr(toCr(documentRecord.amount))}</td>
+      <td>{formatCr(toCr(documentRecord.amount))}</td>
 
-              <td>
-                <span className="small-pill">
-                  {documentRecord.portal_status ?? "available"}
-                </span>
-              </td>
+      <td>
+        <span className="small-pill">
+          {documentRecord.portal_status ?? "available"}
+        </span>
+      </td>
 
-              <td>
-                <span className="small-pill">
-                  {documentRecord.email_status ?? "not_sent"}
-                </span>
-              </td>
+      <td>
+        <span className="small-pill">
+          {documentRecord.email_status ?? "not_sent"}
+        </span>
+      </td>
 
-              <td>{formatDate(documentRecord.generated_at)}</td>
+      <td>{formatDate(documentRecord.generated_at)}</td>
 
-              <td>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "10px",
-                    alignItems: "center",
-                    flexWrap: "nowrap",
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handlePreviewInvestorDocument(documentRecord)
-                    }
-                    style={{
-                      border: "1px solid rgba(96, 165, 250, 0.45)",
-                      background: "rgba(37, 99, 235, 0.16)",
-                      color: "#dbeafe",
-                      borderRadius: "999px",
-                      padding: "8px 16px",
-                      fontSize: "14px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    Preview
-                  </button>
+      <td>
+        <div
+          style={{
+            display: "flex",
+            gap: "10px",
+            alignItems: "center",
+            flexWrap: "nowrap",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => handlePreviewInvestorDocument(documentRecord)}
+            style={{
+              border: "1px solid rgba(96, 165, 250, 0.45)",
+              background: "rgba(37, 99, 235, 0.16)",
+              color: "#dbeafe",
+              borderRadius: "999px",
+              padding: "8px 16px",
+              fontSize: "14px",
+              fontWeight: 700,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Preview
+          </button>
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleDeleteInvestorDocument(documentRecord)
-                    }
-                    disabled={deletingDocumentId === documentRecord.id}
-                    style={{
-                      border: "1px solid rgba(248, 113, 113, 0.45)",
-                      background: "rgba(127, 29, 29, 0.18)",
-                      color: "#fecaca",
-                      borderRadius: "999px",
-                      padding: "8px 16px",
-                      fontSize: "14px",
-                      fontWeight: 700,
-                      cursor:
-                        deletingDocumentId === documentRecord.id
-                          ? "not-allowed"
-                          : "pointer",
-                      opacity:
-                        deletingDocumentId === documentRecord.id ? 0.6 : 1,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {deletingDocumentId === documentRecord.id
-                      ? "Deleting..."
-                      : "Delete"}
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
+          {!documentRecord.storage_url && (
+            <span className="small-pill">Store PDF First</span>
+          )}
+
+          {documentRecord.storage_url &&
+            documentRecord.email_status !== "queued" &&
+            documentRecord.email_status !== "sent" && (
+              <button
+                type="button"
+                onClick={() => handleQueueInvestorDocumentEmail(documentRecord)}
+                disabled={emailActionId === documentRecord.id}
+                style={{
+                  border: "1px solid rgba(251, 191, 36, 0.45)",
+                  background: "rgba(120, 53, 15, 0.18)",
+                  color: "#fde68a",
+                  borderRadius: "999px",
+                  padding: "8px 16px",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  cursor:
+                    emailActionId === documentRecord.id
+                      ? "not-allowed"
+                      : "pointer",
+                  opacity: emailActionId === documentRecord.id ? 0.6 : 1,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {emailActionId === documentRecord.id
+                  ? "Queuing..."
+                  : "Queue Email"}
+              </button>
+            )}
+
+          {documentRecord.storage_url &&
+            documentRecord.email_status === "queued" && (
+              <button
+                type="button"
+                onClick={() =>
+                  handleMarkInvestorDocumentEmailSent(documentRecord)
+                }
+                disabled={emailActionId === documentRecord.id}
+                style={{
+                  border: "1px solid rgba(74, 222, 128, 0.45)",
+                  background: "rgba(22, 101, 52, 0.18)",
+                  color: "#bbf7d0",
+                  borderRadius: "999px",
+                  padding: "8px 16px",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  cursor:
+                    emailActionId === documentRecord.id
+                      ? "not-allowed"
+                      : "pointer",
+                  opacity: emailActionId === documentRecord.id ? 0.6 : 1,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {emailActionId === documentRecord.id
+                  ? "Updating..."
+                  : "Mark Sent"}
+              </button>
+            )}
+
+          {documentRecord.email_status === "sent" && (
+            <span className="small-pill">Sent</span>
+          )}
+
+          <button
+            type="button"
+            onClick={() => handleDeleteInvestorDocument(documentRecord)}
+            disabled={deletingDocumentId === documentRecord.id}
+            style={{
+              border: "1px solid rgba(248, 113, 113, 0.45)",
+              background: "rgba(127, 29, 29, 0.18)",
+              color: "#fecaca",
+              borderRadius: "999px",
+              padding: "8px 16px",
+              fontSize: "14px",
+              fontWeight: 700,
+              cursor:
+                deletingDocumentId === documentRecord.id
+                  ? "not-allowed"
+                  : "pointer",
+              opacity: deletingDocumentId === documentRecord.id ? 0.6 : 1,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {deletingDocumentId === documentRecord.id
+              ? "Deleting..."
+              : "Delete"}
+          </button>
+        </div>
+      </td>
+    </tr>
+  ))}
+</tbody>
       </table>
     </div>
   )}
@@ -1587,7 +1851,43 @@ async function handleStoreAllPdfsInSupabase() {
     </a>
   )}
 
-  <button type="button">Send Email Coming Later</button>
+  {selectedPreviewDocument?.email_status !== "queued" &&
+  selectedPreviewDocument?.email_status !== "sent" && (
+    <button
+      type="button"
+      onClick={() =>
+        handleQueueInvestorDocumentEmail(selectedPreviewDocument)
+      }
+      disabled={
+        !selectedPreviewDocument.storage_url ||
+        emailActionId === selectedPreviewDocument.id
+      }
+    >
+      {emailActionId === selectedPreviewDocument.id
+        ? "Queuing Email..."
+        : "Queue Email"}
+    </button>
+  )}
+
+{selectedPreviewDocument?.email_status === "queued" && (
+  <button
+    type="button"
+    onClick={() =>
+      handleMarkInvestorDocumentEmailSent(selectedPreviewDocument)
+    }
+    disabled={emailActionId === selectedPreviewDocument.id}
+  >
+    {emailActionId === selectedPreviewDocument.id
+      ? "Updating..."
+      : "Mark Email Sent"}
+  </button>
+)}
+
+{selectedPreviewDocument?.email_status === "sent" && (
+  <button type="button" disabled>
+    Email Sent
+  </button>
+)}
 </div>
 
     <div className="explain-box">
