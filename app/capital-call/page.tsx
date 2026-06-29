@@ -1251,6 +1251,28 @@ return (
                 LP-wise workings, draft emails, queue portal updates, create the
                 accounting entry and start bank receipt tracking automatically.
               </div>
+              {isApproved && (
+  <div className="action-row">
+    <a
+      href="/document-engine"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        border: "1px solid rgba(96, 165, 250, 0.45)",
+        background: "rgba(37, 99, 235, 0.2)",
+        color: "#dbeafe",
+        borderRadius: "999px",
+        padding: "12px 18px",
+        fontSize: "15px",
+        fontWeight: 800,
+        textDecoration: "none",
+      }}
+    >
+      Generate Investor Documents
+    </a>
+  </div>
+)}
             </div>
 
             <div className="preview-card">
@@ -1281,7 +1303,23 @@ return (
               </div>
 
               <div className="action-row">
-                <button>Generate Documents</button>
+                <a
+  href="/document-engine"
+  style={{
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#2563eb",
+    color: "#ffffff",
+    borderRadius: "12px",
+    padding: "12px 18px",
+    fontSize: "15px",
+    fontWeight: 700,
+    textDecoration: "none",
+  }}
+>
+  Generate Investor Documents
+</a>
                 <button>Request Approval</button>
                 <button>Preview LP Notice</button>
               </div>

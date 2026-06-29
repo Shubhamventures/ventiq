@@ -771,7 +771,26 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
         ? "Approved"
         : "Approve"}
     </button>
-
+{distribution.status === "approved" && (
+  <a
+    href="/document-engine"
+    style={{
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      border: "1px solid rgba(96, 165, 250, 0.45)",
+      background: "rgba(37, 99, 235, 0.2)",
+      color: "#dbeafe",
+      borderRadius: "999px",
+      padding: "8px 16px",
+      fontSize: "14px",
+      fontWeight: 700,
+      textDecoration: "none",
+    }}
+  >
+    Documents
+  </a>
+)}
     <button
       type="button"
       onClick={() => handleDeleteSavedDistribution(distribution)}
@@ -1026,6 +1045,28 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
       entry, LP-wise distribution statements, investor emails, portal updates,
       WhatsApp notifications, bank payment instruction file and audit trail.
     </div>
+    {isDistributionApproved && (
+  <div className="action-row">
+    <a
+      href="/document-engine"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        border: "1px solid rgba(96, 165, 250, 0.45)",
+        background: "rgba(37, 99, 235, 0.2)",
+        color: "#dbeafe",
+        borderRadius: "999px",
+        padding: "12px 18px",
+        fontSize: "15px",
+        fontWeight: 800,
+        textDecoration: "none",
+      }}
+    >
+      Generate Investor Documents
+    </a>
+  </div>
+)}
   </div>
 )}
             <div className="preview-card">
