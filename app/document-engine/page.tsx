@@ -135,6 +135,9 @@ export default function DocumentEnginePage() {
   const [loading, setLoading] = useState(true);
   const [generatingCapitalCallId, setGeneratingCapitalCallId] = useState("");
   const [generatingDistributionId, setGeneratingDistributionId] = useState("");
+  const [deletingDocumentId, setDeletingDocumentId] = useState("");
+  const [selectedPreviewDocument, setSelectedPreviewDocument] =
+    useState<InvestorDocument | null>(null);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -232,6 +235,54 @@ export default function DocumentEnginePage() {
     }
   }
 
+  async function handleDeleteInvestorDocument(documentRecord: InvestorDocument) {
+    if (!supabase) {
+      setMessage("Supabase is not configured.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete this generated document?\n\n${documentRecord.document_name}`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingDocumentId(documentRecord.id);
+    setMessage("");
+
+    const { error } = await supabase
+      .from("investor_documents")
+      .delete()
+      .eq("id", documentRecord.id);
+
+    if (error) {
+      setMessage(`Could not delete document: ${error.message}`);
+      setDeletingDocumentId("");
+      return;
+    }
+
+    if (selectedPreviewDocument?.id === documentRecord.id) {
+      setSelectedPreviewDocument(null);
+    }
+
+    await loadDocumentsOnly();
+
+    setMessage("Investor document deleted successfully.");
+    setDeletingDocumentId("");
+  }
+
+  function handlePreviewInvestorDocument(documentRecord: InvestorDocument) {
+    setSelectedPreviewDocument(documentRecord);
+    setMessage(`Preview opened for "${documentRecord.document_name}".`);
+
+    setTimeout(() => {
+      window.document.getElementById("document-preview")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 100);
+  }
+
   async function generateCapitalCallDocuments() {
     if (!supabase) {
       setMessage("Supabase is not configured.");
@@ -274,7 +325,38 @@ export default function DocumentEnginePage() {
 
     const fundName = getFundName(selectedCall.funds);
 
-    const payload = rows.map((row) => {
+    const { data: existingDocuments, error: existingError } = await supabase
+      .from("investor_documents")
+      .select("investor_id")
+      .eq("capital_call_id", selectedCall.id)
+      .eq("document_type", "Capital Call Notice");
+
+    if (existingError) {
+      setMessage(`Could not check existing documents: ${existingError.message}`);
+      setGeneratingCapitalCallId("");
+      return;
+    }
+
+    const existingInvestorIds = new Set(
+      ((existingDocuments as { investor_id: string | null }[]) ?? [])
+        .map((item) => item.investor_id)
+        .filter((id): id is string => Boolean(id))
+    );
+
+    const newRows = rows.filter((row) => {
+      if (!row.investor_id) return true;
+      return !existingInvestorIds.has(row.investor_id);
+    });
+
+    if (newRows.length === 0) {
+      setMessage(
+        `Capital call notices already exist for all approved investors in ${fundName}.`
+      );
+      setGeneratingCapitalCallId("");
+      return;
+    }
+
+    const payload = newRows.map((row) => {
       const investor = getInvestor(row.investors);
 
       return {
@@ -310,7 +392,9 @@ export default function DocumentEnginePage() {
     await loadDocumentsOnly();
 
     setMessage(
-      `${rows.length} capital call notice records generated for ${fundName}.`
+      `${newRows.length} new capital call notice records generated for ${fundName}. ${
+        rows.length - newRows.length
+      } duplicate records skipped.`
     );
     setGeneratingCapitalCallId("");
   }
@@ -357,7 +441,38 @@ export default function DocumentEnginePage() {
 
     const fundName = getFundName(selectedDistribution.funds);
 
-    const payload = rows.map((row) => {
+    const { data: existingDocuments, error: existingError } = await supabase
+      .from("investor_documents")
+      .select("investor_id")
+      .eq("distribution_id", selectedDistribution.id)
+      .eq("document_type", "Distribution Notice");
+
+    if (existingError) {
+      setMessage(`Could not check existing documents: ${existingError.message}`);
+      setGeneratingDistributionId("");
+      return;
+    }
+
+    const existingInvestorIds = new Set(
+      ((existingDocuments as { investor_id: string | null }[]) ?? [])
+        .map((item) => item.investor_id)
+        .filter((id): id is string => Boolean(id))
+    );
+
+    const newRows = rows.filter((row) => {
+      if (!row.investor_id) return true;
+      return !existingInvestorIds.has(row.investor_id);
+    });
+
+    if (newRows.length === 0) {
+      setMessage(
+        `Distribution notices already exist for all approved investors in ${fundName}.`
+      );
+      setGeneratingDistributionId("");
+      return;
+    }
+
+    const payload = newRows.map((row) => {
       const investor = getInvestor(row.investors);
 
       return {
@@ -393,7 +508,9 @@ export default function DocumentEnginePage() {
     await loadDocumentsOnly();
 
     setMessage(
-      `${rows.length} distribution notice records generated for ${fundName}.`
+      `${newRows.length} new distribution notice records generated for ${fundName}. ${
+        rows.length - newRows.length
+      } duplicate records skipped.`
     );
     setGeneratingDistributionId("");
   }
@@ -576,64 +693,215 @@ export default function DocumentEnginePage() {
               )}
             </div>
 
-            <div className="preview-card">
-              <h2>Generated Investor Documents</h2>
+           <div className="preview-card">
+  <h2>Generated Investor Documents</h2>
 
-              <p className="eyebrow">
-                Latest investor document records from Supabase
-              </p>
+  <p className="eyebrow">
+    Latest investor document records from Supabase
+  </p>
 
-              {documents.length === 0 && (
-                <div className="explain-box">
-                  No investor documents generated yet.
+  {documents.length === 0 && (
+    <div className="explain-box">
+      No investor documents generated yet.
+    </div>
+  )}
+
+  {documents.length > 0 && (
+    <div
+      style={{
+        overflowX: "auto",
+        overflowY: "auto",
+        maxHeight: "560px",
+        border: "1px solid rgba(148, 163, 184, 0.22)",
+        borderRadius: "18px",
+      }}
+    >
+      <table
+        className="investor-table"
+        style={{
+          minWidth: "1250px",
+          width: "100%",
+        }}
+      >
+        <thead>
+          <tr>
+            <th>Document</th>
+            <th>Type</th>
+            <th>Investor</th>
+            <th>Email</th>
+            <th>Fund</th>
+            <th>Amount</th>
+            <th>Portal</th>
+            <th>Email</th>
+            <th>Generated</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {documents.map((documentRecord) => (
+            <tr key={documentRecord.id}>
+              <td style={{ maxWidth: "260px" }}>
+                <strong>{documentRecord.document_name}</strong>
+              </td>
+
+              <td>{documentRecord.document_type}</td>
+
+              <td>{documentRecord.investor_name ?? "-"}</td>
+
+              <td>{documentRecord.investor_email ?? "-"}</td>
+
+              <td>{documentRecord.fund_name ?? "-"}</td>
+
+              <td>{formatCr(toCr(documentRecord.amount))}</td>
+
+              <td>
+                <span className="small-pill">
+                  {documentRecord.portal_status ?? "available"}
+                </span>
+              </td>
+
+              <td>
+                <span className="small-pill">
+                  {documentRecord.email_status ?? "not_sent"}
+                </span>
+              </td>
+
+              <td>{formatDate(documentRecord.generated_at)}</td>
+
+              <td>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "10px",
+                    alignItems: "center",
+                    flexWrap: "nowrap",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handlePreviewInvestorDocument(documentRecord)
+                    }
+                    style={{
+                      border: "1px solid rgba(96, 165, 250, 0.45)",
+                      background: "rgba(37, 99, 235, 0.16)",
+                      color: "#dbeafe",
+                      borderRadius: "999px",
+                      padding: "8px 16px",
+                      fontSize: "14px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Preview
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleDeleteInvestorDocument(documentRecord)
+                    }
+                    disabled={deletingDocumentId === documentRecord.id}
+                    style={{
+                      border: "1px solid rgba(248, 113, 113, 0.45)",
+                      background: "rgba(127, 29, 29, 0.18)",
+                      color: "#fecaca",
+                      borderRadius: "999px",
+                      padding: "8px 16px",
+                      fontSize: "14px",
+                      fontWeight: 700,
+                      cursor:
+                        deletingDocumentId === documentRecord.id
+                          ? "not-allowed"
+                          : "pointer",
+                      opacity:
+                        deletingDocumentId === documentRecord.id ? 0.6 : 1,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {deletingDocumentId === documentRecord.id
+                      ? "Deleting..."
+                      : "Delete"}
+                  </button>
                 </div>
-              )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</div>
 
-              {documents.length > 0 && (
-                <table className="investor-table">
-                  <thead>
-                    <tr>
-                      <th>Document</th>
-                      <th>Type</th>
-                      <th>Investor</th>
-                      <th>Email</th>
-                      <th>Fund</th>
-                      <th>Amount</th>
-                      <th>Portal</th>
-                      <th>Email Status</th>
-                      <th>Generated</th>
-                    </tr>
-                  </thead>
+{selectedPreviewDocument && (
+  <div id="document-preview" className="preview-card">
+    <h2>Document Preview</h2>
 
-                  <tbody>
-                    {documents.map((document) => (
-                      <tr key={document.id}>
-                        <td>{document.document_name}</td>
-                        <td>{document.document_type}</td>
-                        <td>{document.investor_name ?? "-"}</td>
-                        <td>{document.investor_email ?? "-"}</td>
-                        <td>{document.fund_name ?? "-"}</td>
-                        <td>{formatCr(toCr(document.amount))}</td>
-                        <td>
-                          <span className="small-pill">
-                            {document.portal_status ?? "available"}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="small-pill">
-                            {document.email_status ?? "not_sent"}
-                          </span>
-                        </td>
-                        <td>{formatDate(document.generated_at)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+    <p className="eyebrow">
+      PDF preview placeholder for Phase 3.3
+    </p>
+
+    <div className="impact-grid">
+      <div className="impact-card">
+        <h3>{selectedPreviewDocument.document_type}</h3>
+        <p>Document type</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{selectedPreviewDocument.investor_name ?? "-"}</h3>
+        <p>Investor</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{formatCr(toCr(selectedPreviewDocument.amount))}</h3>
+        <p>Document amount</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{selectedPreviewDocument.email_status ?? "not_sent"}</h3>
+        <p>Email status</p>
+      </div>
+    </div>
+
+    <div className="journal-preview">
+      <div className="journal-row">
+        <span>Document Name</span>
+        <strong>{selectedPreviewDocument.document_name}</strong>
+      </div>
+
+      <div className="journal-row">
+        <span>Investor Email</span>
+        <strong>{selectedPreviewDocument.investor_email ?? "-"}</strong>
+      </div>
+
+      <div className="journal-row">
+        <span>Fund</span>
+        <strong>{selectedPreviewDocument.fund_name ?? "-"}</strong>
+      </div>
+
+      <div className="journal-row">
+        <span>Portal Status</span>
+        <strong>{selectedPreviewDocument.portal_status ?? "available"}</strong>
+      </div>
+
+      <div className="journal-row">
+        <span>Generated Date</span>
+        <strong>{formatDate(selectedPreviewDocument.generated_at)}</strong>
+      </div>
+    </div>
+
+    <div className="explain-box">
+      In Phase 3.3, this preview will become a proper PDF-style notice template
+      with fund name, investor name, amount, date, notice content and download
+      option.
+    </div>
+  </div>
+)}
 
             <div className="preview-card">
-              <h2>Next Step After Phase 3.1</h2>
+              <h2>Next Step After Phase 3.2</h2>
 
               <div className="queue-grid">
                 <div className="queue-item">
@@ -642,6 +910,14 @@ export default function DocumentEnginePage() {
 
                 <div className="queue-item">
                   🟢 Investor document records generated
+                </div>
+
+                <div className="queue-item">
+                  🟢 Duplicate prevention added
+                </div>
+
+                <div className="queue-item">
+                  🟢 Document preview placeholder added
                 </div>
 
                 <div className="queue-item">
