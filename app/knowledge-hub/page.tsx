@@ -123,6 +123,13 @@ function textToArray(value: string) {
     .map((item) => item.trim())
     .filter(Boolean);
 }
+function arrayToText(value: string[] | undefined) {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+
+  return value.join("\n");
+}
 
 function buildSafeFileName(value: string) {
   return value
@@ -144,6 +151,7 @@ export default function KnowledgeHub() {
   const [newCircular, setNewCircular] =
     useState<NewCircularForm>(emptyCircularForm);
   const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null);
+  const [aiFillingCircular, setAiFillingCircular] = useState(false);
   const [savingCircular, setSavingCircular] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
   const [loading, setLoading] = useState(true);
@@ -228,7 +236,81 @@ export default function KnowledgeHub() {
       [fieldName]: value,
     }));
   }
+async function handleAiFillFromPdf() {
+  if (!selectedPdfFile) {
+    alert("Please upload a PDF first.");
+    setActionMessage("Please upload a PDF first.");
+    return;
+  }
 
+  if (selectedPdfFile.type !== "application/pdf") {
+    alert("Please upload only PDF files.");
+    setActionMessage("Please upload only PDF files.");
+    return;
+  }
+
+  setAiFillingCircular(true);
+  setActionMessage("VENTIQ AI is reading the PDF and filling the circular form...");
+
+  try {
+    const formData = new FormData();
+    formData.append("file", selectedPdfFile);
+
+    const response = await fetch("/api/knowledge-hub/ai-fill", {
+      method: "POST",
+      body: formData,
+    });
+
+    const responseData = await response.json();
+
+    if (!response.ok) {
+      throw new Error(responseData.error ?? "AI Fill failed.");
+    }
+
+    const result = responseData.result;
+
+    setNewCircular((currentForm) => ({
+      ...currentForm,
+      authority: result.authority || currentForm.authority,
+      circular_number:
+        result.circular_number || currentForm.circular_number,
+      title: result.title || currentForm.title,
+      saved_as: result.saved_as || currentForm.saved_as,
+      topic: result.topic || currentForm.topic,
+      impact: result.impact || currentForm.impact,
+      effective_date: result.effective_date || currentForm.effective_date,
+      summary: result.summary || currentForm.summary,
+      what_changed: result.what_changed || currentForm.what_changed,
+      affected_workflows:
+        arrayToText(result.affected_workflows) ||
+        currentForm.affected_workflows,
+      impacted_funds:
+        arrayToText(result.impacted_funds) || currentForm.impacted_funds,
+      recommended_actions:
+        arrayToText(result.recommended_actions) ||
+        currentForm.recommended_actions,
+      checklist: arrayToText(result.checklist) || currentForm.checklist,
+      related_circulars:
+        arrayToText(result.related_circulars) ||
+        currentForm.related_circulars,
+      aliases: arrayToText(result.aliases) || currentForm.aliases,
+      owner: result.owner || currentForm.owner,
+      internal_note: result.internal_note || currentForm.internal_note,
+      linked_sop: result.linked_sop || currentForm.linked_sop,
+    }));
+
+    alert("AI Fill completed. Please review the form before saving.");
+    setActionMessage("AI Fill completed. Please review the form before saving.");
+  } catch (error) {
+    const errorText =
+      error instanceof Error ? error.message : "Unknown AI Fill error.";
+
+    alert(`AI Fill failed: ${errorText}`);
+    setActionMessage(`AI Fill failed: ${errorText}`);
+  }
+
+  setAiFillingCircular(false);
+}
   async function uploadCircularPdf(slug: string) {
     if (!supabase || !selectedPdfFile) {
       return null;
@@ -638,6 +720,17 @@ export default function KnowledgeHub() {
                       Selected PDF: {selectedPdfFile.name}
                     </div>
                   )}
+                  <div className="action-row">
+  <button
+    type="button"
+    onClick={() => {
+      void handleAiFillFromPdf();
+    }}
+    disabled={!selectedPdfFile || aiFillingCircular}
+  >
+    {aiFillingCircular ? "AI Reading PDF..." : "AI Fill from PDF"}
+  </button>
+</div>
 
                   <label>Summary</label>
                   <textarea
