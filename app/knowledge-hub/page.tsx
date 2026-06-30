@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 
+type ImpactLevel = "HIGH" | "MEDIUM" | "LOW";
+
 type CircularRecord = {
   id: string;
   slug: string;
@@ -11,7 +13,7 @@ type CircularRecord = {
   title: string;
   saved_as: string;
   topic: string;
-  impact: "HIGH" | "MEDIUM" | "LOW";
+  impact: ImpactLevel;
   effective_date: string | null;
   summary: string | null;
   what_changed: string | null;
@@ -29,12 +31,64 @@ type CircularRecord = {
   status: string | null;
 };
 
+type NewCircularForm = {
+  authority: string;
+  circular_number: string;
+  title: string;
+  saved_as: string;
+  topic: string;
+  impact: ImpactLevel;
+  effective_date: string;
+  summary: string;
+  what_changed: string;
+  affected_workflows: string;
+  impacted_funds: string;
+  recommended_actions: string;
+  checklist: string;
+  related_circulars: string;
+  aliases: string;
+  owner: string;
+  internal_note: string;
+  linked_sop: string;
+  source_url: string;
+};
+
+const emptyCircularForm: NewCircularForm = {
+  authority: "SEBI",
+  circular_number: "",
+  title: "",
+  saved_as: "",
+  topic: "",
+  impact: "MEDIUM",
+  effective_date: "",
+  summary: "",
+  what_changed: "",
+  affected_workflows: "",
+  impacted_funds: "",
+  recommended_actions: "",
+  checklist: "",
+  related_circulars: "",
+  aliases: "",
+  owner: "",
+  internal_note: "",
+  linked_sop: "",
+  source_url: "",
+};
+
 function asStringArray(value: unknown) {
   if (Array.isArray(value)) {
     return value.map((item) => String(item));
   }
 
   return [];
+}
+
+function normalizeImpact(value: string): ImpactLevel {
+  if (value === "HIGH" || value === "MEDIUM" || value === "LOW") {
+    return value;
+  }
+
+  return "MEDIUM";
 }
 
 function formatDate(value: string | null | undefined) {
@@ -47,10 +101,35 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
-function includesSearch(value: string | string[] | null | undefined, searchTerm: string) {
+function includesSearch(
+  value: string | string[] | null | undefined,
+  searchTerm: string
+) {
   const source = Array.isArray(value) ? value.join(" ") : String(value ?? "");
 
   return source.toLowerCase().includes(searchTerm.toLowerCase());
+}
+
+function buildSlug(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function textToArray(value: string) {
+  return value
+    .split(/\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildSafeFileName(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9.]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 export default function KnowledgeHub() {
@@ -61,6 +140,12 @@ export default function KnowledgeHub() {
   const [selectedQuestion, setSelectedQuestion] = useState(
     "What changed in this circular?"
   );
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newCircular, setNewCircular] =
+    useState<NewCircularForm>(emptyCircularForm);
+  const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null);
+  const [savingCircular, setSavingCircular] = useState(false);
+  const [actionMessage, setActionMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -103,7 +188,7 @@ export default function KnowledgeHub() {
         title: record.title,
         saved_as: record.saved_as,
         topic: record.topic,
-        impact: record.impact,
+        impact: normalizeImpact(record.impact),
         effective_date: record.effective_date,
         summary: record.summary,
         what_changed: record.what_changed,
@@ -127,12 +212,160 @@ export default function KnowledgeHub() {
       circularData.find((record) => record.slug === "valuation-rules") ??
       circularData[0];
 
-    if (preferredCircular) {
+    if (!selectedCircularId && preferredCircular) {
       setSelectedCircularId(preferredCircular.id);
     }
 
     setLoading(false);
   }
+
+  function updateCircularForm<FieldName extends keyof NewCircularForm>(
+    fieldName: FieldName,
+    value: NewCircularForm[FieldName]
+  ) {
+    setNewCircular((currentForm) => ({
+      ...currentForm,
+      [fieldName]: value,
+    }));
+  }
+
+  async function uploadCircularPdf(slug: string) {
+    if (!supabase || !selectedPdfFile) {
+      return null;
+    }
+
+    if (selectedPdfFile.type !== "application/pdf") {
+      throw new Error("Please upload only PDF files.");
+    }
+
+    const safeFileName = buildSafeFileName(selectedPdfFile.name);
+    const storagePath = `${slug}/${Date.now()}-${safeFileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("regulatory-circulars")
+      .upload(storagePath, selectedPdfFile, {
+        contentType: "application/pdf",
+        upsert: true,
+        cacheControl: "3600",
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from("regulatory-circulars")
+      .getPublicUrl(storagePath);
+
+    return publicUrlData.publicUrl;
+  }
+
+  async function handleCreateCircular() {
+  if (!supabase) {
+    alert("Supabase is not configured.");
+    setActionMessage("Supabase is not configured.");
+    return;
+  }
+
+  const savedAs = newCircular.saved_as.trim();
+  const title = newCircular.title.trim();
+  const topic = newCircular.topic.trim();
+
+  if (!savedAs) {
+    alert("Please enter Saved As.");
+    setActionMessage("Please enter Saved As.");
+    return;
+  }
+
+  if (!title) {
+    alert("Please enter circular title.");
+    setActionMessage("Please enter circular title.");
+    return;
+  }
+
+  if (!topic) {
+    alert("Please enter topic.");
+    setActionMessage("Please enter topic.");
+    return;
+  }
+
+  const slug = buildSlug(savedAs);
+
+  if (!slug) {
+    alert("Saved As should contain at least one valid word.");
+    setActionMessage("Saved As should contain at least one valid word.");
+    return;
+  }
+
+  setSavingCircular(true);
+  setActionMessage("Saving circular...");
+
+  try {
+    const uploadedDocumentUrl = await uploadCircularPdf(slug);
+
+    const payload = {
+      slug,
+      authority: newCircular.authority,
+      circular_number:
+        newCircular.circular_number.trim() || "Internal Regulatory Note",
+      title,
+      saved_as: savedAs,
+      topic,
+      impact: newCircular.impact,
+      effective_date: newCircular.effective_date || null,
+      summary: newCircular.summary || null,
+      what_changed: newCircular.what_changed || null,
+      affected_workflows: textToArray(newCircular.affected_workflows),
+      impacted_funds: textToArray(newCircular.impacted_funds),
+      recommended_actions: textToArray(newCircular.recommended_actions),
+      checklist: textToArray(newCircular.checklist),
+      related_circulars: textToArray(newCircular.related_circulars),
+      aliases: textToArray(newCircular.aliases),
+      owner: newCircular.owner || null,
+      internal_note: newCircular.internal_note || null,
+      linked_sop: newCircular.linked_sop || null,
+      source_url: newCircular.source_url || null,
+      document_url: uploadedDocumentUrl,
+      status: "active",
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from("regulatory_circulars")
+      .upsert(payload, {
+        onConflict: "slug",
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    await loadRegulatoryCirculars();
+
+    if (data?.id) {
+      setSelectedCircularId(data.id);
+    }
+
+    setSearchTerm("");
+    setSelectedAuthority("All");
+    setNewCircular(emptyCircularForm);
+    setSelectedPdfFile(null);
+    setShowCreateForm(false);
+
+    alert("Regulatory circular saved successfully.");
+    setActionMessage("Regulatory circular saved successfully.");
+  } catch (error) {
+    const errorText =
+      error instanceof Error ? error.message : "Unknown error";
+
+    alert(`Could not save circular: ${errorText}`);
+    setActionMessage(`Could not save circular: ${errorText}`);
+  }
+
+  setSavingCircular(false);
+}
 
   const filteredCirculars = useMemo(() => {
     return circulars.filter((record) => {
@@ -196,7 +429,8 @@ export default function KnowledgeHub() {
 
     if (question === "What should the team do next?") {
       const firstAction =
-        selectedCircular.recommended_actions[0] ?? "generate a compliance checklist";
+        selectedCircular.recommended_actions[0] ??
+        "generate a compliance checklist";
 
       return `VENTIQ recommends ${firstAction} as the first action, followed by checklist generation, SOP update and owner assignment.`;
     }
@@ -243,9 +477,7 @@ export default function KnowledgeHub() {
         {loading && (
           <div className="preview-card">
             <h2>Loading Knowledge Hub...</h2>
-            <p>
-              VENTIQ is reading regulatory circulars from Supabase.
-            </p>
+            <p>VENTIQ is reading regulatory circulars from Supabase.</p>
           </div>
         )}
 
@@ -285,10 +517,270 @@ export default function KnowledgeHub() {
                 />
 
                 <div className="logic-note">
-                  Natural Language Search • AI Summary • Regulatory Impact • Fund
-                  Workflows • SOP Generation • Supabase Knowledge Base
+                  Natural Language Search • AI Summary • Regulatory Impact •
+                  Fund Workflows • SOP Generation • Supabase Knowledge Base
                 </div>
               </div>
+            </div>
+
+            <div className="preview-card">
+              <h2>Add New Regulatory Record</h2>
+
+              <div className="action-row">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateForm(!showCreateForm)}
+                >
+                  {showCreateForm ? "Hide Form" : "Add Circular"}
+                </button>
+              </div>
+
+              {actionMessage && (
+                <div className="logic-note">{actionMessage}</div>
+              )}
+
+              {showCreateForm && (
+                <div className="form-card">
+                  <label>Authority</label>
+                  <select
+                    value={newCircular.authority}
+                    onChange={(event) =>
+                      updateCircularForm("authority", event.target.value)
+                    }
+                  >
+                    <option>SEBI</option>
+                    <option>IFSCA</option>
+                    <option>Income Tax</option>
+                    <option>RBI</option>
+                    <option>MCA</option>
+                  </select>
+
+                  <label>Official Circular Number / Reference</label>
+                  <input
+                    value={newCircular.circular_number}
+                    onChange={(event) =>
+                      updateCircularForm("circular_number", event.target.value)
+                    }
+                    placeholder="Example: SEBI Circular - Valuation Update"
+                  />
+
+                  <label>Title</label>
+                  <input
+                    value={newCircular.title}
+                    onChange={(event) =>
+                      updateCircularForm("title", event.target.value)
+                    }
+                    placeholder="Example: AIF Valuation and Reporting Update"
+                  />
+
+                  <label>Saved As</label>
+                  <input
+                    value={newCircular.saved_as}
+                    onChange={(event) =>
+                      updateCircularForm("saved_as", event.target.value)
+                    }
+                    placeholder="Example: Valuation Rules"
+                  />
+
+                  <label>Topic</label>
+                  <input
+                    value={newCircular.topic}
+                    onChange={(event) =>
+                      updateCircularForm("topic", event.target.value)
+                    }
+                    placeholder="Example: Valuation"
+                  />
+
+                  <label>Impact</label>
+                  <select
+                    value={newCircular.impact}
+                    onChange={(event) =>
+                      updateCircularForm(
+                        "impact",
+                        event.target.value as ImpactLevel
+                      )
+                    }
+                  >
+                    <option>HIGH</option>
+                    <option>MEDIUM</option>
+                    <option>LOW</option>
+                  </select>
+
+                  <label>Effective Date</label>
+                  <input
+                    type="date"
+                    value={newCircular.effective_date}
+                    onChange={(event) =>
+                      updateCircularForm("effective_date", event.target.value)
+                    }
+                  />
+
+                  <label>Source URL</label>
+                  <input
+                    value={newCircular.source_url}
+                    onChange={(event) =>
+                      updateCircularForm("source_url", event.target.value)
+                    }
+                    placeholder="Paste official source URL if available"
+                  />
+
+                  <label>Upload Circular PDF</label>
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    onChange={(event) =>
+                      setSelectedPdfFile(event.target.files?.[0] ?? null)
+                    }
+                  />
+
+                  {selectedPdfFile && (
+                    <div className="logic-note">
+                      Selected PDF: {selectedPdfFile.name}
+                    </div>
+                  )}
+
+                  <label>Summary</label>
+                  <textarea
+                    value={newCircular.summary}
+                    onChange={(event) =>
+                      updateCircularForm("summary", event.target.value)
+                    }
+                    placeholder="Short summary of the circular"
+                    rows={3}
+                  />
+
+                  <label>What Changed?</label>
+                  <textarea
+                    value={newCircular.what_changed}
+                    onChange={(event) =>
+                      updateCircularForm("what_changed", event.target.value)
+                    }
+                    placeholder="Explain what changed and why it matters"
+                    rows={4}
+                  />
+
+                  <label>Affected Workflows</label>
+                  <textarea
+                    value={newCircular.affected_workflows}
+                    onChange={(event) =>
+                      updateCircularForm(
+                        "affected_workflows",
+                        event.target.value
+                      )
+                    }
+                    placeholder="Valuation, NAV, Investor Reporting"
+                    rows={3}
+                  />
+
+                  <label>Impacted Funds</label>
+                  <textarea
+                    value={newCircular.impacted_funds}
+                    onChange={(event) =>
+                      updateCircularForm("impacted_funds", event.target.value)
+                    }
+                    placeholder="Category II AIF, GIFT City Funds"
+                    rows={3}
+                  />
+
+                  <label>Recommended Actions</label>
+                  <textarea
+                    value={newCircular.recommended_actions}
+                    onChange={(event) =>
+                      updateCircularForm(
+                        "recommended_actions",
+                        event.target.value
+                      )
+                    }
+                    placeholder="Generate checklist, Notify auditors, Update SOP"
+                    rows={3}
+                  />
+
+                  <label>Compliance Checklist</label>
+                  <textarea
+                    value={newCircular.checklist}
+                    onChange={(event) =>
+                      updateCircularForm("checklist", event.target.value)
+                    }
+                    placeholder="Review policy, Update tracker, Inform team"
+                    rows={3}
+                  />
+
+                  <label>Aliases / Internal Names</label>
+                  <textarea
+                    value={newCircular.aliases}
+                    onChange={(event) =>
+                      updateCircularForm("aliases", event.target.value)
+                    }
+                    placeholder="NAV Circular, Valuation Rules, QCR Rules"
+                    rows={3}
+                  />
+
+                  <label>Related Circulars</label>
+                  <textarea
+                    value={newCircular.related_circulars}
+                    onChange={(event) =>
+                      updateCircularForm(
+                        "related_circulars",
+                        event.target.value
+                      )
+                    }
+                    placeholder="AIF Valuation Update, Investor Reporting Rules"
+                    rows={3}
+                  />
+
+                  <label>Owner</label>
+                  <input
+                    value={newCircular.owner}
+                    onChange={(event) =>
+                      updateCircularForm("owner", event.target.value)
+                    }
+                    placeholder="Example: Finance Head"
+                  />
+
+                  <label>Internal Note</label>
+                  <textarea
+                    value={newCircular.internal_note}
+                    onChange={(event) =>
+                      updateCircularForm("internal_note", event.target.value)
+                    }
+                    placeholder="Internal firm note"
+                    rows={3}
+                  />
+
+                  <label>Linked SOP</label>
+                  <input
+                    value={newCircular.linked_sop}
+                    onChange={(event) =>
+                      updateCircularForm("linked_sop", event.target.value)
+                    }
+                    placeholder="Example: Quarterly Valuation SOP v4"
+                  />
+
+                  <div className="action-row">
+                    <button
+                      type="button"
+                      onClick={() => {
+  void handleCreateCircular();
+}}
+                      disabled={savingCircular}
+                    >
+                      {savingCircular ? "Saving..." : "Save Circular"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewCircular(emptyCircularForm);
+                        setSelectedPdfFile(null);
+                        setShowCreateForm(false);
+                        setActionMessage("");
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="preview-card">
@@ -419,6 +911,40 @@ export default function KnowledgeHub() {
                   <div className="journal-row">
                     <span>Effective Date</span>
                     <strong>{formatDate(selectedCircular.effective_date)}</strong>
+                  </div>
+
+                  <div className="journal-row">
+                    <span>Source Link</span>
+                    <strong>
+                      {selectedCircular.source_url ? (
+                        <a
+                          href={selectedCircular.source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open Source
+                        </a>
+                      ) : (
+                        "-"
+                      )}
+                    </strong>
+                  </div>
+
+                  <div className="journal-row">
+                    <span>PDF Document</span>
+                    <strong>
+                      {selectedCircular.document_url ? (
+                        <a
+                          href={selectedCircular.document_url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open PDF
+                        </a>
+                      ) : (
+                        "Not uploaded"
+                      )}
+                    </strong>
                   </div>
                 </div>
               </div>
@@ -610,8 +1136,8 @@ export default function KnowledgeHub() {
                 <div className="journal-row">
                   <span>Next Upgrade</span>
                   <strong>
-                    Connect uploaded circular PDFs, source links and LLM-powered
-                    interpretation.
+                    AI Fill from uploaded PDF and live regulatory website
+                    monitoring.
                   </strong>
                 </div>
               </div>
