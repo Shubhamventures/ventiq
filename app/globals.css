@@ -1820,4 +1820,31 @@ button.action-button {
   .monitor-btn {
     width: 100%;
   }
+}.scan-status-pill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.scan-status-pill.success {
+  color: #bbf7d0;
+  background: rgba(22, 163, 74, 0.14);
+  border: 1px solid rgba(74, 222, 128, 0.28);
+}
+
+.scan-status-pill.error {
+  color: #fecaca;
+  background: rgba(220, 38, 38, 0.14);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+.scan-status-pill.neutral {
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.22);
 }

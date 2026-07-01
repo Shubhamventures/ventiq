@@ -308,70 +308,84 @@ const [monitorMessage, setMonitorMessage] = useState("");
     }));
   }
   async function handleRefreshAllSourceMonitors() {
-  if (!supabase) {
-    setMonitorMessage("Supabase is not configured.");
-    return;
-  }
-
   setRefreshingAllSources(true);
-  setMonitorMessage("Refreshing all regulatory sources...");
+  setMonitorMessage("Scanning all regulatory sources...");
 
-  const checkedAt = new Date().toISOString();
+  let totalNewMatches = 0;
+  let totalRelevantMatches = 0;
+  let failedSources = 0;
 
-  const { error } = await supabase
-    .from("regulatory_source_monitors")
-    .update({
-      last_checked_at: checkedAt,
-      last_found_count: 0,
-      last_error: null,
-      updated_at: checkedAt,
-    })
-    .eq("status", "active");
+  for (const monitor of sourceMonitors) {
+    setRefreshingMonitorId(monitor.id);
+    setMonitorMessage(`Scanning ${monitor.source_name}...`);
 
-  if (error) {
-    setMonitorMessage(`Could not refresh all sources: ${error.message}`);
-    setRefreshingAllSources(false);
-    return;
+    try {
+      const response = await fetch("/api/knowledge-hub/scan-source", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          monitorId: monitor.id,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Source scan failed.");
+      }
+
+      totalNewMatches += Number(result.newMatches ?? 0);
+      totalRelevantMatches += Number(result.totalMatches ?? 0);
+    } catch {
+      failedSources += 1;
+    }
   }
 
   await loadRegulatorySourceMonitors();
 
-  setMonitorMessage(
-    "All source refreshes recorded. Website scanning will be connected in Phase 4.4C."
-  );
-
+  setRefreshingMonitorId("");
   setRefreshingAllSources(false);
-}
-  async function handleRefreshSourceMonitor(monitor: SourceMonitor) {
-  if (!supabase) {
-    setMonitorMessage("Supabase is not configured.");
-    return;
-  }
-
-  setRefreshingMonitorId(monitor.id);
-  setMonitorMessage(`Refreshing ${monitor.source_name}...`);
-
-  const { error } = await supabase
-    .from("regulatory_source_monitors")
-    .update({
-      last_checked_at: new Date().toISOString(),
-      last_found_count: 0,
-      last_error: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", monitor.id);
-
-  if (error) {
-    setMonitorMessage(`Could not refresh ${monitor.source_name}: ${error.message}`);
-    setRefreshingMonitorId("");
-    return;
-  }
-
-  await loadRegulatorySourceMonitors();
 
   setMonitorMessage(
-    `${monitor.source_name} refresh recorded. Website scanning will be connected in Phase 4.4C.`
+    `All source scans completed. ${totalNewMatches} new matches found. ${totalRelevantMatches} relevant links detected. ${failedSources} sources failed.`
   );
+}
+ async function handleRefreshSourceMonitor(monitor: SourceMonitor) {
+  setRefreshingMonitorId(monitor.id);
+  setMonitorMessage(`Scanning ${monitor.source_name}...`);
+
+  try {
+    const response = await fetch("/api/knowledge-hub/scan-source", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        monitorId: monitor.id,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error ?? "Source scan failed.");
+    }
+
+    await loadRegulatorySourceMonitors();
+
+    setMonitorMessage(
+      `${monitor.source_name} scan completed. ${result.newMatches} new matches found. ${result.totalMatches} relevant links detected.`
+    );
+  } catch (error) {
+    const errorText =
+      error instanceof Error ? error.message : "Unknown scanning error.";
+
+    await loadRegulatorySourceMonitors();
+
+    setMonitorMessage(`${monitor.source_name} scan failed: ${errorText}`);
+  }
 
   setRefreshingMonitorId("");
 }
@@ -1071,11 +1085,27 @@ async function handleAiFillFromPdf() {
           </p>
 
           <div className="source-monitor-meta">
-            <span>Frequency: {monitor.refresh_frequency}</span>
-            <span>Last checked: {formatDateTime(monitor.last_checked_at)}</span>
-            <span>Keywords: {monitor.tracked_keywords.length}</span>
-            <span>Impact areas: {monitor.impact_areas.length}</span>
-          </div>
+  <span>Frequency: {monitor.refresh_frequency}</span>
+  <span>Last checked: {formatDateTime(monitor.last_checked_at)}</span>
+  <span>Keywords: {monitor.tracked_keywords.length}</span>
+  <span>Impact areas: {monitor.impact_areas.length}</span>
+
+  <span
+    className={
+      monitor.last_error
+        ? "scan-status-pill error"
+        : monitor.last_checked_at
+          ? "scan-status-pill success"
+          : "scan-status-pill neutral"
+    }
+  >
+    {monitor.last_error
+      ? "Last scan failed"
+      : monitor.last_checked_at
+        ? `Last scan success • ${monitor.last_found_count} new`
+        : "Not scanned yet"}
+  </span>
+</div>
 
           <div className="source-monitor-actions">
             <button
@@ -1103,7 +1133,7 @@ async function handleAiFillFromPdf() {
               }}
               disabled={refreshingMonitorId === monitor.id}
             >
-              {refreshingMonitorId === monitor.id ? "Refreshing..." : "Refresh"}
+            {refreshingMonitorId === monitor.id ? "Scanning..." : "Refresh"}
             </button>
           </div>
 
