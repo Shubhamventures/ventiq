@@ -1847,4 +1847,8 @@ button.action-button {
   color: #cbd5e1;
   background: rgba(148, 163, 184, 0.1);
   border: 1px solid rgba(148, 163, 184, 0.22);
+}.scan-status-pill.warning {
+  color: #fde68a;
+  background: rgba(217, 119, 6, 0.14);
+  border: 1px solid rgba(251, 191, 36, 0.32);
 }

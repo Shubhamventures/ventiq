@@ -136,6 +136,24 @@ function inferImpactArea(matchedKeywords: string[], impactAreas: string[]) {
   return matchedImpactArea ?? impactAreas[0];
 }
 
+function getFriendlyScanError(errorText: string) {
+  const lowerError = errorText.toLowerCase();
+
+  if (lowerError.includes("http 403")) {
+    return "Direct scan blocked by source website. Special connector required.";
+  }
+
+  if (lowerError.includes("fetch failed")) {
+    return "Direct scan failed. Source may block server fetch. Special connector required.";
+  }
+
+  if (lowerError.includes("aborted") || lowerError.includes("timeout")) {
+    return "Direct scan timed out. Source may require slower or special connector handling.";
+  }
+
+  return errorText;
+}
+
 async function fetchHtml(url: string) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
@@ -146,9 +164,10 @@ async function fetchHtml(url: string) {
       signal: controller.signal,
       headers: {
         "user-agent":
-          "Mozilla/5.0 (compatible; VENTIQ-Regulatory-Monitor/1.0)",
+          "Mozilla/5.0 (compatible; VENTIQ-Regulatory-Monitor/1.0; +https://useventiq.com)",
         accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "accept-language": "en-US,en;q=0.9",
       },
     });
 
@@ -297,6 +316,8 @@ export async function POST(request: Request) {
     const errorText =
       error instanceof Error ? error.message : "Unknown scanning error.";
 
+    const friendlyErrorText = getFriendlyScanError(errorText);
+
     if (monitorId) {
       try {
         const supabase = createSupabaseServerClient();
@@ -305,7 +326,7 @@ export async function POST(request: Request) {
           .from("regulatory_source_monitors")
           .update({
             last_checked_at: new Date().toISOString(),
-            last_error: errorText,
+            last_error: friendlyErrorText,
             updated_at: new Date().toISOString(),
           })
           .eq("id", monitorId);
@@ -314,6 +335,6 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ error: errorText }, { status: 500 });
+    return NextResponse.json({ error: friendlyErrorText }, { status: 500 });
   }
 }

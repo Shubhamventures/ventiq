@@ -127,6 +127,49 @@ function formatDateTime(value: string | null | undefined) {
     minute: "2-digit",
   });
 }
+function isConnectorRequiredError(value: string | null) {
+  if (!value) return false;
+
+  const lowerValue = value.toLowerCase();
+
+  return (
+    lowerValue.includes("connector required") ||
+    lowerValue.includes("blocked by source") ||
+    lowerValue.includes("block server fetch")
+  );
+}
+
+function getScanStatusKind(monitor: SourceMonitor) {
+  if (isConnectorRequiredError(monitor.last_error)) {
+    return "warning";
+  }
+
+  if (monitor.last_error) {
+    return "error";
+  }
+
+  if (monitor.last_checked_at) {
+    return "success";
+  }
+
+  return "neutral";
+}
+
+function getScanStatusLabel(monitor: SourceMonitor) {
+  if (isConnectorRequiredError(monitor.last_error)) {
+    return "Connector required";
+  }
+
+  if (monitor.last_error) {
+    return "Last scan failed";
+  }
+
+  if (monitor.last_checked_at) {
+    return `Last scan success • ${monitor.last_found_count} new`;
+  }
+
+  return "Not scanned yet";
+}
 function includesSearch(
   value: string | string[] | null | undefined,
   searchTerm: string
@@ -1090,21 +1133,9 @@ async function handleAiFillFromPdf() {
   <span>Keywords: {monitor.tracked_keywords.length}</span>
   <span>Impact areas: {monitor.impact_areas.length}</span>
 
-  <span
-    className={
-      monitor.last_error
-        ? "scan-status-pill error"
-        : monitor.last_checked_at
-          ? "scan-status-pill success"
-          : "scan-status-pill neutral"
-    }
-  >
-    {monitor.last_error
-      ? "Last scan failed"
-      : monitor.last_checked_at
-        ? `Last scan success • ${monitor.last_found_count} new`
-        : "Not scanned yet"}
-  </span>
+  <span className={`scan-status-pill ${getScanStatusKind(monitor)}`}>
+  {getScanStatusLabel(monitor)}
+</span>
 </div>
 
           <div className="source-monitor-actions">
