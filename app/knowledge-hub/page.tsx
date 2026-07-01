@@ -30,7 +30,23 @@ type CircularRecord = {
   document_url: string | null;
   status: string | null;
 };
-
+type SourceMonitor = {
+  id: string;
+  authority: string;
+  source_name: string;
+  source_url: string;
+  source_type: string;
+  tracking_scope: string | null;
+  tracked_keywords: string[];
+  excluded_keywords: string[];
+  impact_areas: string[];
+  refresh_frequency: string;
+  status: string;
+  last_checked_at: string | null;
+  last_found_count: number;
+  last_error: string | null;
+  notes: string | null;
+};
 type NewCircularForm = {
   authority: string;
   circular_number: string;
@@ -100,7 +116,17 @@ function formatDate(value: string | null | undefined) {
     year: "numeric",
   });
 }
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "Not checked yet";
 
+  return new Date(value).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 function includesSearch(
   value: string | string[] | null | undefined,
   searchTerm: string
@@ -141,6 +167,11 @@ function buildSafeFileName(value: string) {
 
 export default function KnowledgeHub() {
   const [circulars, setCirculars] = useState<CircularRecord[]>([]);
+  const [sourceMonitors, setSourceMonitors] = useState<SourceMonitor[]>([]);
+const [expandedMonitorId, setExpandedMonitorId] = useState("");
+const [refreshingMonitorId, setRefreshingMonitorId] = useState("");
+const [refreshingAllSources, setRefreshingAllSources] = useState(false);
+const [monitorMessage, setMonitorMessage] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedAuthority, setSelectedAuthority] = useState("All");
   const [selectedCircularId, setSelectedCircularId] = useState("");
@@ -160,8 +191,9 @@ export default function KnowledgeHub() {
   const authorities = ["All", "SEBI", "IFSCA", "Income Tax", "RBI", "MCA"];
 
   useEffect(() => {
-    loadRegulatoryCirculars();
-  }, []);
+  loadRegulatoryCirculars();
+  loadRegulatorySourceMonitors();
+}, []);
 
   async function loadRegulatoryCirculars() {
     if (!isSupabaseConfigured || !supabase) {
@@ -226,6 +258,45 @@ export default function KnowledgeHub() {
 
     setLoading(false);
   }
+  async function loadRegulatorySourceMonitors() {
+  if (!isSupabaseConfigured || !supabase) {
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("regulatory_source_monitors")
+    .select(
+      "id, authority, source_name, source_url, source_type, tracking_scope, tracked_keywords, excluded_keywords, impact_areas, refresh_frequency, status, last_checked_at, last_found_count, last_error, notes"
+    )
+    .eq("status", "active")
+    .order("authority", { ascending: true });
+
+  if (error) {
+    setMonitorMessage(`Could not load source monitors: ${error.message}`);
+    return;
+  }
+
+  const monitorData =
+    data?.map((record) => ({
+      id: record.id,
+      authority: record.authority,
+      source_name: record.source_name,
+      source_url: record.source_url,
+      source_type: record.source_type,
+      tracking_scope: record.tracking_scope,
+      tracked_keywords: asStringArray(record.tracked_keywords),
+      excluded_keywords: asStringArray(record.excluded_keywords),
+      impact_areas: asStringArray(record.impact_areas),
+      refresh_frequency: record.refresh_frequency,
+      status: record.status,
+      last_checked_at: record.last_checked_at,
+      last_found_count: record.last_found_count ?? 0,
+      last_error: record.last_error,
+      notes: record.notes,
+    })) ?? [];
+
+  setSourceMonitors(monitorData);
+}
 
   function updateCircularForm<FieldName extends keyof NewCircularForm>(
     fieldName: FieldName,
@@ -236,6 +307,74 @@ export default function KnowledgeHub() {
       [fieldName]: value,
     }));
   }
+  async function handleRefreshAllSourceMonitors() {
+  if (!supabase) {
+    setMonitorMessage("Supabase is not configured.");
+    return;
+  }
+
+  setRefreshingAllSources(true);
+  setMonitorMessage("Refreshing all regulatory sources...");
+
+  const checkedAt = new Date().toISOString();
+
+  const { error } = await supabase
+    .from("regulatory_source_monitors")
+    .update({
+      last_checked_at: checkedAt,
+      last_found_count: 0,
+      last_error: null,
+      updated_at: checkedAt,
+    })
+    .eq("status", "active");
+
+  if (error) {
+    setMonitorMessage(`Could not refresh all sources: ${error.message}`);
+    setRefreshingAllSources(false);
+    return;
+  }
+
+  await loadRegulatorySourceMonitors();
+
+  setMonitorMessage(
+    "All source refreshes recorded. Website scanning will be connected in Phase 4.4C."
+  );
+
+  setRefreshingAllSources(false);
+}
+  async function handleRefreshSourceMonitor(monitor: SourceMonitor) {
+  if (!supabase) {
+    setMonitorMessage("Supabase is not configured.");
+    return;
+  }
+
+  setRefreshingMonitorId(monitor.id);
+  setMonitorMessage(`Refreshing ${monitor.source_name}...`);
+
+  const { error } = await supabase
+    .from("regulatory_source_monitors")
+    .update({
+      last_checked_at: new Date().toISOString(),
+      last_found_count: 0,
+      last_error: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", monitor.id);
+
+  if (error) {
+    setMonitorMessage(`Could not refresh ${monitor.source_name}: ${error.message}`);
+    setRefreshingMonitorId("");
+    return;
+  }
+
+  await loadRegulatorySourceMonitors();
+
+  setMonitorMessage(
+    `${monitor.source_name} refresh recorded. Website scanning will be connected in Phase 4.4C.`
+  );
+
+  setRefreshingMonitorId("");
+}
 async function handleAiFillFromPdf() {
   if (!selectedPdfFile) {
     alert("Please upload a PDF first.");
@@ -876,35 +1015,187 @@ async function handleAiFillFromPdf() {
               )}
             </div>
 
-            <div className="preview-card">
-              <h2>Authorities</h2>
+           <div className="preview-card">
+  <div className="source-monitor-header">
+    <div>
+      <h2>Regulatory Source Monitor</h2>
+      <p>
+        Track official regulatory websites for AIFs, private capital, fund
+        taxation, FEMA, FCRA, GIFT City and MCA changes.
+      </p>
+    </div>
 
-              <div className="queue-grid">
-                {authorities.map((authority) => (
-                  <button
-                    key={authority}
-                    type="button"
-                    onClick={() => setSelectedAuthority(authority)}
-                    className="queue-item"
-                    style={{
-                      textAlign: "left",
-                      border:
-                        selectedAuthority === authority
-                          ? "1px solid rgba(96, 165, 250, 0.65)"
-                          : "1px solid rgba(148, 163, 184, 0.22)",
-                      cursor: "pointer",
-                      color: "#e5e7eb",
-                      background:
-                        selectedAuthority === authority
-                          ? "rgba(37, 99, 235, 0.18)"
-                          : "rgba(15, 23, 42, 0.45)",
-                    }}
-                  >
-                    {authority}
-                  </button>
+    <button
+      type="button"
+      className="monitor-btn monitor-btn-primary"
+      onClick={() => {
+        void handleRefreshAllSourceMonitors();
+      }}
+      disabled={refreshingAllSources || sourceMonitors.length === 0}
+    >
+      {refreshingAllSources ? "Refreshing All..." : "Refresh All"}
+    </button>
+  </div>
+
+  {monitorMessage && <div className="logic-note">{monitorMessage}</div>}
+
+  {sourceMonitors.length === 0 && (
+    <div className="explain-box">
+      No source monitors found. Please check regulatory_source_monitors in
+      Supabase.
+    </div>
+  )}
+
+  <div className="source-monitor-grid">
+    {sourceMonitors.map((monitor) => {
+      const isExpanded = expandedMonitorId === monitor.id;
+
+      return (
+        <div
+          key={monitor.id}
+          className={
+            isExpanded
+              ? "source-monitor-card expanded"
+              : "source-monitor-card"
+          }
+        >
+          <div className="source-monitor-top">
+            <span className="source-monitor-badge">{monitor.authority}</span>
+            <span>{monitor.source_type}</span>
+          </div>
+
+          <h3>{monitor.source_name}</h3>
+
+          <p className="source-monitor-description">
+            {monitor.tracking_scope ?? "No tracking scope added."}
+          </p>
+
+          <div className="source-monitor-meta">
+            <span>Frequency: {monitor.refresh_frequency}</span>
+            <span>Last checked: {formatDateTime(monitor.last_checked_at)}</span>
+            <span>Keywords: {monitor.tracked_keywords.length}</span>
+            <span>Impact areas: {monitor.impact_areas.length}</span>
+          </div>
+
+          <div className="source-monitor-actions">
+            <button
+              type="button"
+              className="monitor-btn monitor-btn-secondary"
+              onClick={() => setExpandedMonitorId(isExpanded ? "" : monitor.id)}
+            >
+              {isExpanded ? "Hide Details" : "View Details"}
+            </button>
+
+            <a
+              className="monitor-btn monitor-btn-ghost"
+              href={monitor.source_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open Source
+            </a>
+
+            <button
+              type="button"
+              className="monitor-btn monitor-btn-primary"
+              onClick={() => {
+                void handleRefreshSourceMonitor(monitor);
+              }}
+              disabled={refreshingMonitorId === monitor.id}
+            >
+              {refreshingMonitorId === monitor.id ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
+
+          {isExpanded && (
+            <div className="source-monitor-details">
+              <strong>Tracked Keywords</strong>
+
+              <div className="alias-grid">
+                {monitor.tracked_keywords.map((keyword) => (
+                  <span key={keyword} className="alias-pill">
+                    {keyword}
+                  </span>
                 ))}
               </div>
+
+              <strong>Impact Areas</strong>
+
+              <div className="alias-grid">
+                {monitor.impact_areas.map((impactArea) => (
+                  <span key={impactArea} className="alias-pill">
+                    {impactArea}
+                  </span>
+                ))}
+              </div>
+
+              {monitor.excluded_keywords.length > 0 && (
+                <>
+                  <strong>Excluded Keywords</strong>
+
+                  <div className="alias-grid">
+                    {monitor.excluded_keywords.map((keyword) => (
+                      <span key={keyword} className="alias-pill">
+                        {keyword}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <div className="journal-preview">
+                <div className="journal-row">
+                  <span>Last Found</span>
+                  <strong>{monitor.last_found_count}</strong>
+                </div>
+
+                <div className="journal-row">
+                  <span>Last Error</span>
+                  <strong>{monitor.last_error ?? "-"}</strong>
+                </div>
+
+                <div className="journal-row">
+                  <span>Notes</span>
+                  <strong>{monitor.notes ?? "-"}</strong>
+                </div>
+              </div>
             </div>
+          )}
+        </div>
+      );
+    })}
+  </div>
+</div>
+
+<div className="preview-card">
+  <h2>Authorities</h2>
+
+  <div className="queue-grid">
+    {authorities.map((authority) => (
+      <button
+        key={authority}
+        type="button"
+        onClick={() => setSelectedAuthority(authority)}
+        className="queue-item"
+        style={{
+          textAlign: "left",
+          border:
+            selectedAuthority === authority
+              ? "1px solid rgba(96, 165, 250, 0.65)"
+              : "1px solid rgba(148, 163, 184, 0.22)",
+          cursor: "pointer",
+          color: "#e5e7eb",
+          background:
+            selectedAuthority === authority
+              ? "rgba(37, 99, 235, 0.18)"
+              : "rgba(15, 23, 42, 0.45)",
+        }}
+      >
+        {authority}
+      </button>
+    ))}
+  </div>
+</div>
 
             <div className="impact-grid">
               <div className="impact-card">
