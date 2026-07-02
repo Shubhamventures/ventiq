@@ -47,6 +47,22 @@ type SourceMonitor = {
   last_error: string | null;
   notes: string | null;
 };
+type SourceMatch = {
+  id: string;
+  monitor_id: string | null;
+  authority: string;
+  matched_title: string;
+  matched_url: string | null;
+  published_date: string | null;
+  matched_keywords: string[];
+  impact_area: string | null;
+  relevance: string;
+  raw_excerpt: string | null;
+  ai_summary: string | null;
+  status: string;
+  circular_id: string | null;
+  created_at: string | null;
+};
 type NewCircularForm = {
   authority: string;
   circular_number: string;
@@ -211,10 +227,14 @@ function buildSafeFileName(value: string) {
 export default function KnowledgeHub() {
   const [circulars, setCirculars] = useState<CircularRecord[]>([]);
   const [sourceMonitors, setSourceMonitors] = useState<SourceMonitor[]>([]);
+const [sourceMatches, setSourceMatches] = useState<SourceMatch[]>([]);
 const [expandedMonitorId, setExpandedMonitorId] = useState("");
 const [refreshingMonitorId, setRefreshingMonitorId] = useState("");
 const [refreshingAllSources, setRefreshingAllSources] = useState(false);
 const [monitorMessage, setMonitorMessage] = useState("");
+const [sourceMatchActionId, setSourceMatchActionId] = useState("");
+const [sourceMatchMessage, setSourceMatchMessage] = useState("");
+const [selectedReviewAuthority, setSelectedReviewAuthority] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedAuthority, setSelectedAuthority] = useState("All");
   const [selectedCircularId, setSelectedCircularId] = useState("");
@@ -236,6 +256,7 @@ const [monitorMessage, setMonitorMessage] = useState("");
   useEffect(() => {
   loadRegulatoryCirculars();
   loadRegulatorySourceMonitors();
+  loadRegulatorySourceMatches();
 }, []);
 
   async function loadRegulatoryCirculars() {
@@ -340,6 +361,45 @@ const [monitorMessage, setMonitorMessage] = useState("");
 
   setSourceMonitors(monitorData);
 }
+async function loadRegulatorySourceMatches() {
+  if (!isSupabaseConfigured || !supabase) {
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("regulatory_source_matches")
+    .select(
+      "id, monitor_id, authority, matched_title, matched_url, published_date, matched_keywords, impact_area, relevance, raw_excerpt, ai_summary, status, circular_id, created_at"
+    )
+    .eq("status", "needs_review")
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    setSourceMatchMessage(`Could not load review inbox: ${error.message}`);
+    return;
+  }
+
+  const matchData =
+    data?.map((record) => ({
+      id: record.id,
+      monitor_id: record.monitor_id,
+      authority: record.authority,
+      matched_title: record.matched_title,
+      matched_url: record.matched_url,
+      published_date: record.published_date,
+      matched_keywords: asStringArray(record.matched_keywords),
+      impact_area: record.impact_area,
+      relevance: record.relevance,
+      raw_excerpt: record.raw_excerpt,
+      ai_summary: record.ai_summary,
+      status: record.status,
+      circular_id: record.circular_id,
+      created_at: record.created_at,
+    })) ?? [];
+
+  setSourceMatches(matchData);
+}
 
   function updateCircularForm<FieldName extends keyof NewCircularForm>(
     fieldName: FieldName,
@@ -350,6 +410,199 @@ const [monitorMessage, setMonitorMessage] = useState("");
       [fieldName]: value,
     }));
   }
+  function getDefaultImpactedFundsForMatch(match: SourceMatch) {
+  const keywordText = match.matched_keywords.join(" ").toLowerCase();
+
+  if (match.authority === "IFSCA" || keywordText.includes("gift")) {
+    return ["GIFT City Funds", "IFSC Funds", "Offshore Feeder Funds"];
+  }
+
+  if (match.authority === "Income Tax" || keywordText.includes("tax")) {
+    return ["Category I AIF", "Category II AIF", "Private Equity Funds", "Debt Funds"];
+  }
+
+  if (match.authority === "RBI" || keywordText.includes("fema")) {
+    return ["Offshore Funds", "AIFs with foreign investors", "GIFT City Funds"];
+  }
+
+  if (match.authority === "FCRA") {
+    return ["Impact Funds", "Social Sector Funds", "Foreign Contribution Structures"];
+  }
+
+  if (match.authority === "MCA") {
+    return ["Portfolio Companies", "Private Capital Transactions", "Debenture Structures"];
+  }
+
+  return ["Category I AIF", "Category II AIF", "Category III AIF"];
+}
+
+function getDefaultWorkflowsForMatch(match: SourceMatch) {
+  const workflows = [];
+
+  if (match.impact_area) {
+    workflows.push(match.impact_area);
+  }
+
+  const keywordText = match.matched_keywords.join(" ").toLowerCase();
+
+  if (keywordText.includes("valuation") || keywordText.includes("nav")) {
+    workflows.push("Valuation", "NAV Review");
+  }
+
+  if (keywordText.includes("investor")) {
+    workflows.push("Investor Reporting");
+  }
+
+  if (keywordText.includes("tax") || keywordText.includes("64c") || keywordText.includes("64d")) {
+    workflows.push("Tax Reporting");
+  }
+
+  if (keywordText.includes("capital")) {
+    workflows.push("Capital Calls");
+  }
+
+  if (keywordText.includes("fema") || keywordText.includes("foreign")) {
+    workflows.push("FEMA Compliance");
+  }
+
+  return Array.from(new Set(workflows.length > 0 ? workflows : ["Regulatory Review"]));
+}
+
+function buildCircularSlugFromMatch(match: SourceMatch) {
+  const authoritySlug = buildSlug(match.authority);
+  const titleSlug = buildSlug(match.matched_title).slice(0, 80);
+
+  return `${authoritySlug}-${titleSlug || match.id}`;
+}
+
+async function handleApproveSourceMatch(match: SourceMatch) {
+  if (!supabase) {
+    setSourceMatchMessage("Supabase is not configured.");
+    return;
+  }
+
+  setSourceMatchActionId(match.id);
+  setSourceMatchMessage(`Approving ${match.matched_title}...`);
+
+  try {
+    const slug = buildCircularSlugFromMatch(match);
+    const workflows = getDefaultWorkflowsForMatch(match);
+    const impactedFunds = getDefaultImpactedFundsForMatch(match);
+
+    const payload = {
+      slug,
+      authority: match.authority,
+      circular_number: "Imported from Regulatory Source Monitor",
+      title: match.matched_title,
+      saved_as: match.matched_title,
+      topic: match.impact_area ?? "Regulatory Update",
+      impact: "MEDIUM" as ImpactLevel,
+      effective_date: match.published_date || null,
+      summary:
+        match.ai_summary ||
+        match.raw_excerpt ||
+        "VENTIQ detected this regulatory update from an official source monitor.",
+      what_changed:
+        "VENTIQ detected this update from an official regulatory source. The finance or compliance team should review the source link and confirm applicability before final use.",
+      affected_workflows: workflows,
+      impacted_funds: impactedFunds,
+      recommended_actions: [
+        "Review official source link",
+        "Confirm applicability to active funds",
+        "Assign compliance owner",
+        "Update checklist or SOP if applicable",
+      ],
+      checklist: [
+        "Open official source",
+        "Review relevance to AIF / private capital workflows",
+        "Confirm impacted funds",
+        "Document compliance conclusion",
+      ],
+      related_circulars: [],
+      aliases: match.matched_keywords,
+      owner: "Compliance Team",
+      internal_note:
+        "Imported from Regulatory Source Monitor. Please review before relying on this record.",
+      linked_sop: "Regulatory Monitoring SOP",
+      source_url: match.matched_url,
+      document_url: null,
+      status: "active",
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from("regulatory_circulars")
+      .upsert(payload, {
+        onConflict: "slug",
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    const { error: updateMatchError } = await supabase
+      .from("regulatory_source_matches")
+      .update({
+        status: "approved",
+        relevance: "relevant",
+        circular_id: data?.id ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", match.id);
+
+    if (updateMatchError) {
+      throw updateMatchError;
+    }
+
+    await loadRegulatoryCirculars();
+    await loadRegulatorySourceMatches();
+
+    if (data?.id) {
+      setSelectedCircularId(data.id);
+    }
+
+    setSourceMatchMessage("Match approved and added to Knowledge Hub.");
+  } catch (error) {
+    const errorText =
+      error instanceof Error ? error.message : "Unknown approval error.";
+
+    setSourceMatchMessage(`Could not approve match: ${errorText}`);
+  }
+
+  setSourceMatchActionId("");
+}
+
+async function handleRejectSourceMatch(match: SourceMatch) {
+  if (!supabase) {
+    setSourceMatchMessage("Supabase is not configured.");
+    return;
+  }
+
+  setSourceMatchActionId(match.id);
+  setSourceMatchMessage(`Rejecting ${match.matched_title}...`);
+
+  const { error } = await supabase
+    .from("regulatory_source_matches")
+    .update({
+      status: "rejected",
+      relevance: "not_relevant",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", match.id);
+
+  if (error) {
+    setSourceMatchMessage(`Could not reject match: ${error.message}`);
+    setSourceMatchActionId("");
+    return;
+  }
+
+  await loadRegulatorySourceMatches();
+
+  setSourceMatchMessage("Match rejected.");
+  setSourceMatchActionId("");
+}
   async function handleRefreshAllSourceMonitors() {
   setRefreshingAllSources(true);
   setMonitorMessage("Scanning all regulatory sources...");
@@ -387,6 +640,7 @@ const [monitorMessage, setMonitorMessage] = useState("");
   }
 
   await loadRegulatorySourceMonitors();
+  await loadRegulatorySourceMatches();
 
   setRefreshingMonitorId("");
   setRefreshingAllSources(false);
@@ -417,6 +671,7 @@ const [monitorMessage, setMonitorMessage] = useState("");
     }
 
     await loadRegulatorySourceMonitors();
+    await loadRegulatorySourceMatches();
 
     setMonitorMessage(
       `${monitor.source_name} scan completed. ${result.newMatches} new matches found. ${result.totalMatches} relevant links detected.`
@@ -426,6 +681,7 @@ const [monitorMessage, setMonitorMessage] = useState("");
       error instanceof Error ? error.message : "Unknown scanning error.";
 
     await loadRegulatorySourceMonitors();
+    await loadRegulatorySourceMatches();
 
     setMonitorMessage(`${monitor.source_name} scan failed: ${errorText}`);
   }
@@ -732,7 +988,39 @@ async function handleAiFillFromPdf() {
     "What should the team do next?",
     "Create an SOP from this circular.",
   ];
+const reviewAuthorityRows = useMemo(() => {
+  const authorityNames = Array.from(
+    new Set(sourceMatches.map((match) => match.authority))
+  );
 
+  return authorityNames
+    .map((authority) => {
+      const matches = sourceMatches.filter(
+        (match) => match.authority === authority
+      );
+
+      const latestMatch = matches[0];
+
+      return {
+        authority,
+        count: matches.length,
+        sourceLinks: matches.filter((match) => match.matched_url).length,
+        latestDetected: latestMatch?.created_at ?? null,
+        impactAreas: Array.from(
+          new Set(
+            matches.map((match) => match.impact_area ?? "Regulatory Update")
+          )
+        ).slice(0, 3),
+      };
+    })
+    .sort((first, second) => second.count - first.count);
+}, [sourceMatches]);
+
+const selectedReviewMatches = selectedReviewAuthority
+  ? sourceMatches.filter(
+      (match) => match.authority === selectedReviewAuthority
+    )
+  : [];
   return (
     <main className="app-page">
       <section className="app-shell">
@@ -1071,7 +1359,231 @@ async function handleAiFillFromPdf() {
                 </div>
               )}
             </div>
+<div className="preview-card">
+  <div className="source-monitor-header">
+    <div>
+      <h2>Needs Review Inbox</h2>
+      <p>
+        Review regulatory matches authority-wise before they become Knowledge
+        Hub circulars.
+      </p>
+    </div>
 
+    <button
+      type="button"
+      className="monitor-btn monitor-btn-secondary"
+      onClick={() => {
+        void loadRegulatorySourceMatches();
+      }}
+    >
+      Reload Inbox
+    </button>
+  </div>
+
+  {sourceMatchMessage && <div className="logic-note">{sourceMatchMessage}</div>}
+
+  <div className="impact-grid">
+    <div className="impact-card">
+      <h3>{sourceMatches.length}</h3>
+      <p>Pending review</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>{reviewAuthorityRows.length}</h3>
+      <p>Authorities detected</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>{sourceMatches.filter((match) => match.matched_url).length}</h3>
+      <p>Source links</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>{selectedReviewAuthority || "All"}</h3>
+      <p>Current review view</p>
+    </div>
+  </div>
+
+  {sourceMatches.length === 0 && (
+    <div className="explain-box">
+      No pending matches. Run Refresh on source monitors to detect new
+      regulatory updates.
+    </div>
+  )}
+
+  {sourceMatches.length > 0 && !selectedReviewAuthority && (
+    <div className="authority-review-list">
+      {reviewAuthorityRows.map((row) => (
+        <button
+          key={row.authority}
+          type="button"
+          className="authority-review-row"
+          onClick={() => setSelectedReviewAuthority(row.authority)}
+        >
+          <div>
+            <span className="source-monitor-badge">{row.authority}</span>
+          </div>
+
+          <div className="authority-review-main">
+            <strong>{row.authority} Review Queue</strong>
+            <p>
+              {row.impactAreas.length > 0
+                ? row.impactAreas.join(" • ")
+                : "Regulatory updates detected"}
+            </p>
+          </div>
+
+          <div>
+            <strong>{row.count}</strong>
+            <p>Pending notices</p>
+          </div>
+
+          <div>
+            <strong>{row.sourceLinks}</strong>
+            <p>Source links</p>
+          </div>
+
+          <div>
+            <strong>{formatDateTime(row.latestDetected)}</strong>
+            <p>Latest detected</p>
+          </div>
+
+          <span className="authority-review-action">
+            View {row.count} →
+          </span>
+        </button>
+      ))}
+    </div>
+  )}
+
+  {selectedReviewAuthority && (
+    <>
+      <div className="review-selected-header">
+        <div>
+          <span className="source-monitor-badge">
+            {selectedReviewAuthority}
+          </span>
+          <h3>{selectedReviewAuthority} Review Queue</h3>
+          <p>
+            Showing {selectedReviewMatches.length} pending matches for this
+            authority.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className="monitor-btn monitor-btn-secondary"
+          onClick={() => setSelectedReviewAuthority("")}
+        >
+          Back to Authorities
+        </button>
+      </div>
+
+      {selectedReviewMatches.length === 0 && (
+        <div className="explain-box">
+          No pending matches left for this authority.
+        </div>
+      )}
+
+      {selectedReviewMatches.length > 0 && (
+        <div className="review-table-wrap">
+          <table className="review-table">
+            <thead>
+              <tr>
+                <th>Authority</th>
+                <th>Detected Update</th>
+                <th>Impact Area</th>
+                <th>Keywords</th>
+                <th>Detected</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {selectedReviewMatches.map((match) => (
+                <tr key={match.id}>
+                  <td>
+                    <span className="source-monitor-badge">
+                      {match.authority}
+                    </span>
+                  </td>
+
+                  <td>
+                    <strong>{match.matched_title}</strong>
+                    <p>
+                      {match.ai_summary ||
+                        match.raw_excerpt ||
+                        "Detected from official source monitor."}
+                    </p>
+                  </td>
+
+                  <td>{match.impact_area ?? "Regulatory Update"}</td>
+
+                  <td>
+                    <div className="review-keywords">
+                      {match.matched_keywords.slice(0, 3).map((keyword) => (
+                        <span key={keyword} className="alias-pill">
+                          {keyword}
+                        </span>
+                      ))}
+
+                      {match.matched_keywords.length > 3 && (
+                        <span className="alias-pill">
+                          +{match.matched_keywords.length - 3}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+
+                  <td>{formatDateTime(match.created_at)}</td>
+
+                  <td>
+                    <div className="review-actions">
+                      {match.matched_url && (
+                        <a
+                          className="monitor-btn monitor-btn-ghost"
+                          href={match.matched_url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open
+                        </a>
+                      )}
+
+                      <button
+                        type="button"
+                        className="monitor-btn monitor-btn-primary"
+                        onClick={() => {
+                          void handleApproveSourceMatch(match);
+                        }}
+                        disabled={sourceMatchActionId === match.id}
+                      >
+                        {sourceMatchActionId === match.id
+                          ? "Working..."
+                          : "Approve"}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="monitor-btn monitor-btn-secondary"
+                        onClick={() => {
+                          void handleRejectSourceMatch(match);
+                        }}
+                        disabled={sourceMatchActionId === match.id}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  )}
+</div>
            <div className="preview-card">
   <div className="source-monitor-header">
     <div>
