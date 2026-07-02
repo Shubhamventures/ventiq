@@ -235,6 +235,11 @@ const [monitorMessage, setMonitorMessage] = useState("");
 const [sourceMatchActionId, setSourceMatchActionId] = useState("");
 const [sourceMatchMessage, setSourceMatchMessage] = useState("");
 const [selectedReviewAuthority, setSelectedReviewAuthority] = useState("");
+const [approvalReviewMatch, setApprovalReviewMatch] =
+  useState<SourceMatch | null>(null);
+const [approvalReviewForm, setApprovalReviewForm] =
+  useState<NewCircularForm>(emptyCircularForm);
+const [savingApprovalReview, setSavingApprovalReview] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedAuthority, setSelectedAuthority] = useState("All");
   const [selectedCircularId, setSelectedCircularId] = useState("");
@@ -416,6 +421,15 @@ async function loadRegulatorySourceMatches() {
       [fieldName]: value,
     }));
   }
+  function updateApprovalReviewForm<FieldName extends keyof NewCircularForm>(
+  fieldName: FieldName,
+  value: NewCircularForm[FieldName]
+) {
+  setApprovalReviewForm((currentForm) => ({
+    ...currentForm,
+    [fieldName]: value,
+  }));
+}
   function getDefaultImpactedFundsForMatch(match: SourceMatch) {
   const keywordText = match.matched_keywords.join(" ").toLowerCase();
 
@@ -607,6 +621,160 @@ async function handleRejectSourceMatch(match: SourceMatch) {
   await loadRegulatorySourceMatches();
 
   setSourceMatchMessage("Match rejected.");
+  setSourceMatchActionId("");
+}
+function openApprovalReview(match: SourceMatch) {
+  const workflows = getDefaultWorkflowsForMatch(match);
+  const impactedFunds = getDefaultImpactedFundsForMatch(match);
+
+  setApprovalReviewMatch(match);
+
+  setApprovalReviewForm({
+    authority: match.authority,
+    circular_number: "Imported from Regulatory Source Monitor",
+    title: match.matched_title,
+    saved_as: match.matched_title,
+    topic: match.impact_area ?? "Regulatory Update",
+    impact: "MEDIUM",
+    effective_date: match.published_date ?? "",
+    summary:
+      match.ai_summary ||
+      match.raw_excerpt ||
+      "VENTIQ detected this regulatory update from an official source monitor.",
+    what_changed:
+      "VENTIQ detected this update from an official regulatory source. The finance or compliance team should review the source link and confirm applicability before final use.",
+    affected_workflows: workflows.join("\n"),
+    impacted_funds: impactedFunds.join("\n"),
+    recommended_actions: [
+      "Review official source link",
+      "Confirm applicability to active funds",
+      "Assign compliance owner",
+      "Update checklist or SOP if applicable",
+    ].join("\n"),
+    checklist: [
+      "Open official source",
+      "Review relevance to AIF / private capital workflows",
+      "Confirm impacted funds",
+      "Document compliance conclusion",
+    ].join("\n"),
+    related_circulars: "",
+    aliases: match.matched_keywords.join("\n"),
+    owner: "Compliance Team",
+    internal_note:
+      "Imported from Regulatory Source Monitor. Please review before relying on this record.",
+    linked_sop: "Regulatory Monitoring SOP",
+    source_url: match.matched_url ?? "",
+  });
+
+  setSourceMatchMessage(
+    `Review ${match.matched_title} before adding it to Knowledge Hub.`
+  );
+}
+
+async function handleSaveApprovedSourceMatch() {
+  if (!supabase) {
+    setSourceMatchMessage("Supabase is not configured.");
+    return;
+  }
+
+  if (!approvalReviewMatch) {
+    setSourceMatchMessage("No review match selected.");
+    return;
+  }
+
+  const savedAs = approvalReviewForm.saved_as.trim();
+  const title = approvalReviewForm.title.trim();
+  const topic = approvalReviewForm.topic.trim();
+
+  if (!savedAs || !title || !topic) {
+    setSourceMatchMessage("Please complete Saved As, Title and Topic.");
+    return;
+  }
+
+  const slug = buildSlug(savedAs);
+
+  if (!slug) {
+    setSourceMatchMessage("Saved As should contain at least one valid word.");
+    return;
+  }
+
+  setSavingApprovalReview(true);
+  setSourceMatchActionId(approvalReviewMatch.id);
+  setSourceMatchMessage("Saving reviewed circular to Knowledge Hub...");
+
+  try {
+    const payload = {
+      slug,
+      authority: approvalReviewForm.authority,
+      circular_number:
+        approvalReviewForm.circular_number.trim() ||
+        "Imported from Regulatory Source Monitor",
+      title,
+      saved_as: savedAs,
+      topic,
+      impact: approvalReviewForm.impact,
+      effective_date: approvalReviewForm.effective_date || null,
+      summary: approvalReviewForm.summary || null,
+      what_changed: approvalReviewForm.what_changed || null,
+      affected_workflows: textToArray(approvalReviewForm.affected_workflows),
+      impacted_funds: textToArray(approvalReviewForm.impacted_funds),
+      recommended_actions: textToArray(approvalReviewForm.recommended_actions),
+      checklist: textToArray(approvalReviewForm.checklist),
+      related_circulars: textToArray(approvalReviewForm.related_circulars),
+      aliases: textToArray(approvalReviewForm.aliases),
+      owner: approvalReviewForm.owner || null,
+      internal_note: approvalReviewForm.internal_note || null,
+      linked_sop: approvalReviewForm.linked_sop || null,
+      source_url: approvalReviewForm.source_url || null,
+      document_url: null,
+      status: "active",
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from("regulatory_circulars")
+      .upsert(payload, {
+        onConflict: "slug",
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    const { error: updateMatchError } = await supabase
+      .from("regulatory_source_matches")
+      .update({
+        status: "approved",
+        relevance: "relevant",
+        circular_id: data?.id ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", approvalReviewMatch.id);
+
+    if (updateMatchError) {
+      throw updateMatchError;
+    }
+
+    await loadRegulatoryCirculars();
+    await loadRegulatorySourceMatches();
+
+    if (data?.id) {
+      setSelectedCircularId(data.id);
+    }
+
+    setApprovalReviewMatch(null);
+    setApprovalReviewForm(emptyCircularForm);
+    setSourceMatchMessage("Reviewed match saved to Knowledge Hub.");
+  } catch (error) {
+    const errorText =
+      error instanceof Error ? error.message : "Unknown approval error.";
+
+    setSourceMatchMessage(`Could not save reviewed circular: ${errorText}`);
+  }
+
+  setSavingApprovalReview(false);
   setSourceMatchActionId("");
 }
   async function handleRefreshAllSourceMonitors() {
@@ -1490,6 +1658,219 @@ const selectedReviewMatches = selectedReviewAuthority
           No pending matches left for this authority.
         </div>
       )}
+      {approvalReviewMatch && (
+  <div className="approval-review-panel">
+    <div className="source-monitor-header">
+      <div>
+        <h3>Review Before Approval</h3>
+        <p>
+          Edit the detected update before adding it as a Knowledge Hub circular.
+        </p>
+      </div>
+
+      <button
+        type="button"
+        className="monitor-btn monitor-btn-secondary"
+        onClick={() => {
+          setApprovalReviewMatch(null);
+          setApprovalReviewForm(emptyCircularForm);
+          setSourceMatchMessage("");
+        }}
+      >
+        Close Review
+      </button>
+    </div>
+
+    <div className="approval-review-grid">
+      <label>
+        Authority
+        <select
+          value={approvalReviewForm.authority}
+          onChange={(event) =>
+            updateApprovalReviewForm("authority", event.target.value)
+          }
+        >
+          <option>SEBI</option>
+          <option>IFSCA</option>
+          <option>Income Tax</option>
+          <option>RBI</option>
+          <option>MCA</option>
+          <option>FCRA</option>
+        </select>
+      </label>
+
+      <label>
+        Impact
+        <select
+          value={approvalReviewForm.impact}
+          onChange={(event) =>
+            updateApprovalReviewForm(
+              "impact",
+              event.target.value as ImpactLevel
+            )
+          }
+        >
+          <option>HIGH</option>
+          <option>MEDIUM</option>
+          <option>LOW</option>
+        </select>
+      </label>
+
+      <label>
+        Title
+        <input
+          value={approvalReviewForm.title}
+          onChange={(event) =>
+            updateApprovalReviewForm("title", event.target.value)
+          }
+        />
+      </label>
+
+      <label>
+        Saved As
+        <input
+          value={approvalReviewForm.saved_as}
+          onChange={(event) =>
+            updateApprovalReviewForm("saved_as", event.target.value)
+          }
+        />
+      </label>
+
+      <label>
+        Topic
+        <input
+          value={approvalReviewForm.topic}
+          onChange={(event) =>
+            updateApprovalReviewForm("topic", event.target.value)
+          }
+        />
+      </label>
+
+      <label>
+        Effective Date
+        <input
+          type="date"
+          value={approvalReviewForm.effective_date}
+          onChange={(event) =>
+            updateApprovalReviewForm("effective_date", event.target.value)
+          }
+        />
+      </label>
+    </div>
+
+    <div className="approval-review-stack">
+      <label>
+        Source URL
+        <input
+          value={approvalReviewForm.source_url}
+          onChange={(event) =>
+            updateApprovalReviewForm("source_url", event.target.value)
+          }
+        />
+      </label>
+
+      <label>
+        Summary
+        <textarea
+          value={approvalReviewForm.summary}
+          onChange={(event) =>
+            updateApprovalReviewForm("summary", event.target.value)
+          }
+          rows={3}
+        />
+      </label>
+
+      <label>
+        What Changed?
+        <textarea
+          value={approvalReviewForm.what_changed}
+          onChange={(event) =>
+            updateApprovalReviewForm("what_changed", event.target.value)
+          }
+          rows={4}
+        />
+      </label>
+
+      <label>
+        Affected Workflows
+        <textarea
+          value={approvalReviewForm.affected_workflows}
+          onChange={(event) =>
+            updateApprovalReviewForm("affected_workflows", event.target.value)
+          }
+          rows={3}
+        />
+      </label>
+
+      <label>
+        Impacted Funds
+        <textarea
+          value={approvalReviewForm.impacted_funds}
+          onChange={(event) =>
+            updateApprovalReviewForm("impacted_funds", event.target.value)
+          }
+          rows={3}
+        />
+      </label>
+
+      <label>
+        Recommended Actions
+        <textarea
+          value={approvalReviewForm.recommended_actions}
+          onChange={(event) =>
+            updateApprovalReviewForm("recommended_actions", event.target.value)
+          }
+          rows={3}
+        />
+      </label>
+
+      <label>
+        Checklist
+        <textarea
+          value={approvalReviewForm.checklist}
+          onChange={(event) =>
+            updateApprovalReviewForm("checklist", event.target.value)
+          }
+          rows={3}
+        />
+      </label>
+
+      <label>
+        Aliases
+        <textarea
+          value={approvalReviewForm.aliases}
+          onChange={(event) =>
+            updateApprovalReviewForm("aliases", event.target.value)
+          }
+          rows={3}
+        />
+      </label>
+    </div>
+
+    <div className="action-row">
+      <button
+        type="button"
+        onClick={() => {
+          void handleSaveApprovedSourceMatch();
+        }}
+        disabled={savingApprovalReview}
+      >
+        {savingApprovalReview ? "Saving..." : "Save to Knowledge Hub"}
+      </button>
+
+      {approvalReviewForm.source_url && (
+        <a
+          className="monitor-btn monitor-btn-ghost"
+          href={approvalReviewForm.source_url}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open Source
+        </a>
+      )}
+    </div>
+  </div>
+)}
 
       {selectedReviewMatches.length > 0 && (
         <div className="review-table-wrap">
@@ -1557,17 +1938,15 @@ const selectedReviewMatches = selectedReviewAuthority
                       )}
 
                       <button
-                        type="button"
-                        className="monitor-btn monitor-btn-primary"
-                        onClick={() => {
-                          void handleApproveSourceMatch(match);
-                        }}
-                        disabled={sourceMatchActionId === match.id}
-                      >
-                        {sourceMatchActionId === match.id
-                          ? "Working..."
-                          : "Approve"}
-                      </button>
+  type="button"
+  className="monitor-btn monitor-btn-primary"
+  onClick={() => {
+    openApprovalReview(match);
+  }}
+  disabled={sourceMatchActionId === match.id}
+>
+  Review
+</button>
 
                       <button
                         type="button"

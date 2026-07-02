@@ -2016,4 +2016,64 @@ button.action-button {
   .authority-review-row {
     grid-template-columns: 1fr;
   }
+}.approval-review-panel {
+  margin: 22px 0;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 34%),
+    rgba(2, 6, 23, 0.82);
+  padding: 22px;
+  box-shadow: 0 18px 44px rgba(2, 8, 23, 0.38);
+}
+
+.approval-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.approval-review-stack {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.approval-review-panel label {
+  display: grid;
+  gap: 8px;
+  color: #dbeafe;
+  font-weight: 700;
+}
+
+.approval-review-panel input,
+.approval-review-panel select,
+.approval-review-panel textarea {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  background: rgba(2, 6, 23, 0.76);
+  color: #e5e7eb;
+  padding: 13px 14px;
+  font: inherit;
+  outline: none;
+}
+
+.approval-review-panel textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.approval-review-panel input:focus,
+.approval-review-panel select:focus,
+.approval-review-panel textarea:focus {
+  border-color: rgba(96, 165, 250, 0.72);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+
+@media (max-width: 900px) {
+  .approval-review-grid {
+    grid-template-columns: 1fr;
+  }
 }
