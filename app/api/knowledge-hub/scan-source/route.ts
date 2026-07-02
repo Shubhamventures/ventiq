@@ -21,6 +21,87 @@ type ExtractedLink = {
   excerpt: string;
 };
 
+type ScoredLink = ExtractedLink & {
+  matchedKeywords: string[];
+  hasExcludedKeyword: boolean;
+  relevanceScore: number;
+};
+
+const genericTitleBlocklist = [
+  "video gallery",
+  "photo gallery",
+  "media gallery",
+  "career",
+  "careers",
+  "act",
+  "regulation",
+  "circular",
+  "notification",
+  "public notice",
+  "swit portal",
+  "chief vigilance officer (cvo)",
+  "independent external monitors (iems)",
+  "contact us",
+  "about us",
+  "sitemap",
+  "login",
+  "home",
+  "faq",
+  "faqs",
+];
+
+const genericUrlBlocklist = [
+  "career",
+  "careers",
+  "gallery",
+  "tender",
+  "recruitment",
+  "contact",
+  "about",
+  "sitemap",
+  "login",
+  "video",
+  "media",
+];
+
+const strongSignalWords = [
+  "aif",
+  "alternative investment fund",
+  "category i",
+  "category ii",
+  "category iii",
+  "fund management entity",
+  "fme",
+  "fund management",
+  "investment fund",
+  "scheme",
+  "circular",
+  "master circular",
+  "notification",
+  "guideline",
+  "guidelines",
+  "regulation",
+  "regulations",
+  "framework",
+  "reporting",
+  "compliance",
+  "valuation",
+  "nav",
+  "investor reporting",
+  "capital call",
+  "distribution",
+  "form 64c",
+  "form 64d",
+  "capital gains",
+  "unlisted securities",
+  "fema",
+  "fcra",
+  "foreign contribution",
+  "private placement",
+  "debenture",
+  "beneficial ownership",
+];
+
 function createSupabaseServerClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -103,7 +184,7 @@ function extractLinksFromHtml(html: string, baseUrl: string): ExtractedLink[] {
     });
   }
 
-  return links.slice(0, 250);
+  return links.slice(0, 300);
 }
 
 function getMatchedKeywords(text: string, keywords: string[]) {
@@ -120,6 +201,89 @@ function hasExcludedKeyword(text: string, excludedKeywords: string[]) {
   return excludedKeywords.some((keyword) =>
     lowerText.includes(keyword.toLowerCase())
   );
+}
+
+function isGenericTitle(title: string) {
+  const lowerTitle = title.toLowerCase().trim();
+
+  return genericTitleBlocklist.some(
+    (blockedTitle) => lowerTitle === blockedTitle
+  );
+}
+
+function hasGenericUrl(url: string) {
+  const lowerUrl = url.toLowerCase();
+
+  return genericUrlBlocklist.some((blockedPart) =>
+    lowerUrl.includes(blockedPart)
+  );
+}
+
+function hasStrongSignal(text: string) {
+  const lowerText = text.toLowerCase();
+
+  return strongSignalWords.some((signal) => lowerText.includes(signal));
+}
+
+function getRelevanceScore(text: string, matchedKeywords: string[]) {
+  let score = matchedKeywords.length;
+
+  if (hasStrongSignal(text)) {
+    score += 3;
+  }
+
+  const lowerText = text.toLowerCase();
+
+  if (lowerText.includes("circular")) score += 2;
+  if (lowerText.includes("notification")) score += 2;
+  if (lowerText.includes("guideline")) score += 2;
+  if (lowerText.includes("regulation")) score += 2;
+  if (lowerText.includes("fund")) score += 2;
+  if (lowerText.includes("fme")) score += 2;
+  if (lowerText.includes("aif")) score += 2;
+  if (lowerText.includes("compliance")) score += 1;
+  if (lowerText.includes("reporting")) score += 1;
+
+  return score;
+}
+
+function isOnlyWeakIfscMatch(matchedKeywords: string[]) {
+  const normalizedKeywords = matchedKeywords.map((keyword) =>
+    keyword.toLowerCase()
+  );
+
+  return (
+    normalizedKeywords.length > 0 &&
+    normalizedKeywords.every(
+      (keyword) => keyword === "ifsc" || keyword === "ifsca"
+    )
+  );
+}
+
+function shouldKeepMatch(link: ScoredLink) {
+  const searchableText = `${link.title} ${link.url} ${link.excerpt}`;
+
+  if (isGenericTitle(link.title)) {
+    return false;
+  }
+
+  if (hasGenericUrl(link.url)) {
+    return false;
+  }
+
+  if (link.hasExcludedKeyword) {
+    return false;
+  }
+
+  if (link.matchedKeywords.length === 0) {
+    return false;
+  }
+
+  if (isOnlyWeakIfscMatch(link.matchedKeywords) && !hasStrongSignal(searchableText)) {
+    return false;
+  }
+
+  return link.relevanceScore >= 3;
 }
 
 function inferImpactArea(matchedKeywords: string[], impactAreas: string[]) {
@@ -223,28 +387,28 @@ export async function POST(request: Request) {
     const html = await fetchHtml(monitor.source_url);
     const extractedLinks = extractLinksFromHtml(html, monitor.source_url);
 
-    const relevantMatches = extractedLinks
-      .map((link) => {
-        const searchableText = `${link.title} ${link.url} ${link.excerpt}`;
-        const matchedKeywords = getMatchedKeywords(
-          searchableText,
-          monitor.tracked_keywords
-        );
+    const scoredMatches = extractedLinks.map((link) => {
+      const searchableText = `${link.title} ${link.url} ${link.excerpt}`;
+      const matchedKeywords = getMatchedKeywords(
+        searchableText,
+        monitor.tracked_keywords
+      );
 
-        return {
-          ...link,
-          matchedKeywords,
-          hasExcludedKeyword: hasExcludedKeyword(
-            searchableText,
-            monitor.excluded_keywords
-          ),
-        };
-      })
-      .filter(
-        (match) =>
-          match.matchedKeywords.length > 0 && !match.hasExcludedKeyword
-      )
-      .slice(0, 25);
+      return {
+        ...link,
+        matchedKeywords,
+        hasExcludedKeyword: hasExcludedKeyword(
+          searchableText,
+          monitor.excluded_keywords
+        ),
+        relevanceScore: getRelevanceScore(searchableText, matchedKeywords),
+      };
+    });
+
+    const relevantMatches = scoredMatches
+      .filter((match) => shouldKeepMatch(match))
+      .sort((first, second) => second.relevanceScore - first.relevanceScore)
+      .slice(0, 20);
 
     const { data: existingRows } = await supabase
       .from("regulatory_source_matches")

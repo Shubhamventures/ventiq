@@ -373,7 +373,7 @@ async function loadRegulatorySourceMatches() {
     )
     .eq("status", "needs_review")
     .order("created_at", { ascending: false })
-    .limit(50);
+    .limit(500);
 
   if (error) {
     setSourceMatchMessage(`Could not load review inbox: ${error.message}`);
@@ -399,6 +399,12 @@ async function loadRegulatorySourceMatches() {
     })) ?? [];
 
   setSourceMatches(matchData);
+  if (
+  selectedReviewAuthority &&
+  !matchData.some((match) => match.authority === selectedReviewAuthority)
+) {
+  setSelectedReviewAuthority("");
+}
 }
 
   function updateCircularForm<FieldName extends keyof NewCircularForm>(
