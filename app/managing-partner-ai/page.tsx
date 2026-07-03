@@ -781,83 +781,109 @@ export default function ManagingPartnerAIPage() {
               )}
             </div>
 
-            <div className="knowledge-grid">
-              <div className="preview-card">
-                <h2>Upcoming Debt Repayments</h2>
+          <div className="knowledge-grid">
+  <div className="preview-card">
+    <h2>Upcoming Debt Repayments</h2>
 
-                {upcomingRepaymentRows.length === 0 && (
-                  <div className="explain-box">
-                    No upcoming repayment schedules found.
-                  </div>
-                )}
+    {upcomingRepaymentRows.length === 0 && (
+      <div className="explain-box">No upcoming repayment schedules found.</div>
+    )}
 
-                {upcomingRepaymentRows.length > 0 && (
-                  <div className="journal-preview">
-                    {upcomingRepaymentRows.map((repayment) => {
-                      const company = companyMap.get(
-                        getString(repayment, ["portfolio_company_id"], "")
-                      );
+    {upcomingRepaymentRows.length > 0 && (
+      <div className="journal-preview">
+        {upcomingRepaymentRows.map((repayment) => {
+          const company = companyMap.get(
+            getString(repayment, ["portfolio_company_id"], "")
+          );
 
-                      return (
-                        <div className="journal-row" key={getId(repayment)}>
-                          <span>
-                            {getString(company, ["company_name"], "Unknown")} •{" "}
-                            {formatDate(repayment["due_date"])}
-                          </span>
-                          <strong>
-                            {formatCurrencyCr(
-                              getNumber(repayment, ["total_due"])
-                            )}{" "}
-                            due
-                          </strong>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+          return (
+            <div className="journal-row" key={getId(repayment)}>
+              <span>
+                {getString(company, ["company_name"], "Unknown")} •{" "}
+                {formatDate(repayment["due_date"])}
+              </span>
+              <strong>
+                {formatCurrencyCr(getNumber(repayment, ["total_due"]))} due
+              </strong>
+            </div>
+          );
+        })}
+      </div>
+    )}
 
-                <div className="action-row">
-                  <a
-                    className="monitor-btn monitor-btn-secondary"
-                    href="/portfolio-intelligence"
-                  >
-                    View Repayment Schedule
-                  </a>
-                </div>
+    <div className="action-row">
+      <a
+        className="monitor-btn monitor-btn-secondary"
+        href="/portfolio-intelligence"
+      >
+        View Repayment Schedule
+      </a>
+    </div>
+  </div>
+
+  <div className="preview-card">
+    <h2>Portfolio News & Alerts</h2>
+
+    {portfolioAlertRows.length === 0 && (
+      <div className="explain-box">No open portfolio alerts found.</div>
+    )}
+
+    {portfolioAlertRows.length > 0 && (
+      <div className="portfolio-alert-grid">
+        {portfolioAlertRows.map((alert) => {
+          const company = companyMap.get(
+            getString(alert, ["portfolio_company_id"], "")
+          );
+          const sourceUrl = getString(alert, ["source_url"], "");
+
+          return (
+            <div className="portfolio-alert-card" key={getId(alert)}>
+              <div className="portfolio-alert-top">
+                <span className="portfolio-alert-badge">
+                  {statusLabel(getString(alert, ["impact_level"], ""))}
+                </span>
+
+                <span className="portfolio-alert-date">
+                  {formatDate(alert["alert_date"])}
+                </span>
               </div>
 
-              <div className="preview-card">
-                <h2>Portfolio News & Alerts</h2>
+              <h3>{getString(alert, ["title"], "-")}</h3>
 
-                {portfolioAlertRows.length === 0 && (
-                  <div className="explain-box">
-                    No open portfolio alerts found.
-                  </div>
+              <p className="portfolio-alert-company">
+                {getString(company, ["company_name"], "Unknown Company")}
+              </p>
+
+              <p className="portfolio-alert-summary">
+                {getString(alert, ["summary"], "No summary available.")}
+              </p>
+
+              <div className="portfolio-alert-actions">
+                {sourceUrl && sourceUrl !== "-" && (
+                  <a
+                    className="monitor-btn monitor-btn-ghost"
+                    href={sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open Source
+                  </a>
                 )}
 
-                {portfolioAlertRows.length > 0 && (
-                  <div className="queue-grid">
-                    {portfolioAlertRows.map((alert) => {
-                      const company = companyMap.get(
-                        getString(alert, ["portfolio_company_id"], "")
-                      );
-
-                      return (
-                        <div className="queue-item" key={getId(alert)}>
-                          <strong>{getString(alert, ["title"], "-")}</strong>
-                          <br />
-                          {getString(company, ["company_name"], "Unknown")}
-                          <br />
-                          Impact:{" "}
-                          {statusLabel(getString(alert, ["impact_level"], ""))}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/portfolio-intelligence"
+                >
+                  View Portfolio
+                </a>
               </div>
             </div>
-
+          );
+        })}
+      </div>
+    )}
+  </div>
+</div>
             <div className="preview-card">
               <h2>Portfolio Companies Needing Attention</h2>
 

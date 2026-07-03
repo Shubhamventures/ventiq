@@ -602,37 +602,68 @@ export default function PortfolioIntelligencePage() {
             </div>
 
             <div className="preview-card">
-              <h2>Portfolio News & Alerts</h2>
+  <h2>Portfolio News & Alerts</h2>
 
-              {newsAlerts.length === 0 && (
-                <div className="explain-box">
-                  No portfolio alerts found yet.
-                </div>
-              )}
+  {newsAlerts.length === 0 && (
+    <div className="explain-box">No portfolio alerts found yet.</div>
+  )}
 
-              {newsAlerts.length > 0 && (
-                <div className="queue-grid">
-                  {newsAlerts.map((alert) => {
-                    const company = companyMap.get(
-                      getString(alert, ["portfolio_company_id"], "")
-                    );
+  {newsAlerts.length > 0 && (
+    <div className="portfolio-alert-grid">
+      {newsAlerts.map((alert) => {
+        const company = companyMap.get(
+          getString(alert, ["portfolio_company_id"], "")
+        );
+        const sourceUrl = getString(alert, ["source_url"], "");
 
-                    return (
-                      <div className="queue-item" key={getId(alert)}>
-                        <strong>{getString(alert, ["title"], "-")}</strong>
-                        <br />
-                        {getString(company, ["company_name"], "Unknown")}
-                        <br />
-                        Impact:{" "}
-                        {statusLabel(getString(alert, ["impact_level"], ""))}
-                        <br />
-                        {getString(alert, ["summary"], "-")}
-                      </div>
-                    );
-                  })}
-                </div>
+        return (
+          <div className="portfolio-alert-card" key={getId(alert)}>
+            <div className="portfolio-alert-top">
+              <span className="portfolio-alert-badge">
+                {statusLabel(getString(alert, ["impact_level"], ""))}
+              </span>
+
+              <span className="portfolio-alert-date">
+                {formatDate(alert["alert_date"])}
+              </span>
+            </div>
+
+            <h3>{getString(alert, ["title"], "-")}</h3>
+
+            <p className="portfolio-alert-company">
+              {getString(company, ["company_name"], "Unknown Company")}
+            </p>
+
+            <p className="portfolio-alert-summary">
+              {getString(alert, ["summary"], "No summary available.")}
+            </p>
+
+            <div className="portfolio-alert-actions">
+              <span className="small-pill">
+                {statusLabel(getString(alert, ["alert_type"], ""))}
+              </span>
+
+              <span className="small-pill">
+                {statusLabel(getString(alert, ["status"], ""))}
+              </span>
+
+              {sourceUrl && sourceUrl !== "-" && (
+                <a
+                  className="monitor-btn monitor-btn-ghost"
+                  href={sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open Source
+                </a>
               )}
             </div>
+          </div>
+        );
+      })}
+    </div>
+  )}
+</div>
           </>
         )}
       </section>
