@@ -150,6 +150,9 @@ export default function ManagingPartnerAIPage() {
   const [selectedDeckFundId, setSelectedDeckFundId] = useState("all");
   const [deckMessage, setDeckMessage] = useState("");
   const [showDeckBuilder, setShowDeckBuilder] = useState(false);
+  const [editedDeckNarratives, setEditedDeckNarratives] = useState<
+  Record<string, string>
+>({});
   const [selectedDeckMetrics, setSelectedDeckMetrics] = useState<
     Record<DeckMetricKey, boolean>
   >({
@@ -773,14 +776,60 @@ if (selectedDeckMetrics.riskSummary) {
       [metricKey]: !current[metricKey],
     }));
   }
+  function getEditableNarrative(sectionTitle: string, defaultNarrative: string) {
+  return editedDeckNarratives[sectionTitle] ?? defaultNarrative;
+}
+
+function updateDeckNarrative(sectionTitle: string, narrative: string) {
+  setEditedDeckNarratives((current) => ({
+    ...current,
+    [sectionTitle]: narrative,
+  }));
+}
+
+function resetDeckNarrative(sectionTitle: string) {
+  setEditedDeckNarratives((current) => {
+    const updated = { ...current };
+    delete updated[sectionTitle];
+    return updated;
+  });
+}
 
   function handlePreparePowerPoint() {
     const targetFund = selectedDeckFund?.name ?? "All Funds";
 
-    setDeckMessage(
-      `Presentation brief prepared for ${targetFund} with ${selectedMetricCount} selected sections, including fund performance, portfolio metrics, repayment schedule and portfolio alerts. Actual PPT generation will be connected in Phase 5.3.`
-    );
+   const editedNarrativeCount = Object.keys(editedDeckNarratives).length;
+
+setDeckMessage(
+  `Presentation brief prepared for ${targetFund} with ${selectedMetricCount} selected sections and ${editedNarrativeCount} edited slide narratives. Actual PPT generation will be connected in Phase 5.3.`
+);
   }
+  function handleEditSlideNarrative() {
+  const firstNarrativeEditor = document.querySelector<HTMLTextAreaElement>(
+    ".lp-deck-narrative-editor textarea"
+  );
+
+  if (firstNarrativeEditor) {
+    firstNarrativeEditor.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+
+    firstNarrativeEditor.focus();
+  }
+
+  setDeckMessage(
+    "Slide narratives are editable directly inside each slide preview. Update any narrative box, then click Prepare PowerPoint Brief."
+  );
+}
+
+function handleGeneratePowerPoint() {
+  const editedNarrativeCount = Object.keys(editedDeckNarratives).length;
+
+  setDeckMessage(
+    `PowerPoint generation is ready for ${deckScopeName} with ${deckPreviewSections.length} slides and ${editedNarrativeCount} edited narratives. Actual .pptx download will be connected in Phase 5.3.`
+  );
+}
 
   return (
     <main className="app-page">
@@ -1354,7 +1403,27 @@ if (selectedDeckMetrics.riskSummary) {
                   ))}
                 </div>
 
-                <p className="lp-deck-narrative">{section.narrative}</p>
+                <div className="lp-deck-narrative-editor">
+  <label>Editable slide narrative</label>
+
+  <textarea
+    value={getEditableNarrative(section.title, section.narrative)}
+    onChange={(event) =>
+      updateDeckNarrative(section.title, event.target.value)
+    }
+    rows={5}
+  />
+
+  <div className="lp-deck-editor-actions">
+    <button
+      type="button"
+      className="monitor-btn monitor-btn-secondary"
+      onClick={() => resetDeckNarrative(section.title)}
+    >
+      Reset Narrative
+    </button>
+  </div>
+</div>
               </div>
             ))}
           </div>
@@ -1362,18 +1431,19 @@ if (selectedDeckMetrics.riskSummary) {
       </div>
 
       <div className="action-row">
-        <button type="button" onClick={handlePreparePowerPoint}>
-          Prepare PowerPoint Brief
-        </button>
+  <button type="button" onClick={handlePreparePowerPoint}>
+    Prepare PowerPoint Brief
+  </button>
 
-        <button type="button">
-          Edit Slide Narrative
-        </button>
+  <button type="button" onClick={handleEditSlideNarrative}>
+    Edit Slide Narrative
+  </button>
 
-        <button type="button">
-          Generate PowerPoint
-        </button>
-      </div>
+  <button type="button" onClick={handleGeneratePowerPoint}>
+    Generate PowerPoint
+  </button>
+</div>
+
     </>
   )}
 </div>
