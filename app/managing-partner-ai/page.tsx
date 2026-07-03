@@ -149,6 +149,7 @@ export default function ManagingPartnerAIPage() {
 
   const [selectedDeckFundId, setSelectedDeckFundId] = useState("all");
   const [deckMessage, setDeckMessage] = useState("");
+  const [showDeckBuilder, setShowDeckBuilder] = useState(false);
   const [selectedDeckMetrics, setSelectedDeckMetrics] = useState<
     Record<DeckMetricKey, boolean>
   >({
@@ -563,7 +564,209 @@ export default function ManagingPartnerAIPage() {
 
   const selectedMetricCount = Object.values(selectedDeckMetrics).filter(Boolean)
     .length;
+const deckScopeName = selectedDeckFund?.name ?? "All Funds";
 
+const deckPreviewSections: {
+  title: string;
+  subtitle: string;
+  highlights: string[];
+  narrative: string;
+}[] = [];
+
+if (selectedDeckMetrics.fundOverview) {
+  deckPreviewSections.push({
+    title: "Fund Overview",
+    subtitle: deckScopeName,
+    highlights: [
+      `${dashboardMetrics.activeFunds} active funds`,
+      `${dashboardMetrics.portfolioCompanies} portfolio companies`,
+      `${dashboardMetrics.fundInvestments} tracked investments`,
+      `${formatCurrencyCr(dashboardMetrics.currentNav)} current NAV`,
+    ],
+    narrative:
+      "VENTIQ will introduce the selected fund scope, current platform coverage, fund base, portfolio base and latest NAV position.",
+  });
+}
+
+if (selectedDeckMetrics.fundPerformance) {
+  deckPreviewSections.push({
+    title: "Fund Performance",
+    subtitle: "IRR / DPI / TVPI / MOIC",
+    highlights: [
+      `${formatPercent(dashboardMetrics.grossIrr)} Gross IRR`,
+      `${formatPercent(dashboardMetrics.netIrr)} Net IRR`,
+      `${formatMultiple(dashboardMetrics.dpi)} DPI`,
+      `${formatMultiple(dashboardMetrics.tvpi)} TVPI`,
+    ],
+    narrative:
+      "VENTIQ will summarize fund performance using key LP-facing metrics including gross IRR, net IRR, DPI, TVPI and MOIC.",
+  });
+}
+
+if (selectedDeckMetrics.portfolioPerformance) {
+  deckPreviewSections.push({
+    title: "Portfolio Performance",
+    subtitle: "Company-level intelligence",
+    highlights: [
+      `${formatCurrencyCr(dashboardMetrics.totalInvestmentCost)} investment cost`,
+      `${formatCurrencyCr(dashboardMetrics.currentFairValue)} current fair value`,
+      `${formatCurrencyCr(dashboardMetrics.realizedValue)} realized value`,
+      `${formatCurrencyCr(dashboardMetrics.unrealizedValue)} unrealized value`,
+    ],
+    narrative:
+      "VENTIQ will show portfolio-level performance, valuation movement, realized value, unrealized value and investment-side commentary.",
+  });
+}
+
+if (selectedDeckMetrics.deployment) {
+  deckPreviewSections.push({
+    title: "Deployment & Dry Powder",
+    subtitle: "Capital deployment snapshot",
+    highlights: [
+      `${formatCurrencyCr(dashboardMetrics.totalCommitted)} committed capital`,
+      `${formatCurrencyCr(dashboardMetrics.totalCalled)} called capital`,
+      `${formatCurrencyCr(dashboardMetrics.uncalledCapital)} dry powder`,
+      `${formatPercent(dashboardMetrics.deploymentRate)} deployment rate`,
+    ],
+    narrative:
+      "VENTIQ will explain capital deployment pace, uncalled capital, available dry powder and whether deployment is on track.",
+  });
+}
+
+if (selectedDeckMetrics.capitalCalls) {
+  deckPreviewSections.push({
+    title: "Capital Calls",
+    subtitle: "Investor funding workflow",
+    highlights: [
+      `${dashboardMetrics.pendingCapitalCalls} drafts pending review`,
+      `${formatCurrencyCr(dashboardMetrics.totalCalled)} approved called capital`,
+      `${dashboardMetrics.investors} investors tracked`,
+      "Capital call workflow connected",
+    ],
+    narrative:
+      "VENTIQ will summarize capital call activity, pending approvals and investor funding readiness.",
+  });
+}
+
+if (selectedDeckMetrics.distributions) {
+  deckPreviewSections.push({
+    title: "Distributions",
+    subtitle: "Money returned to investors",
+    highlights: [
+      `${formatCurrencyCr(dashboardMetrics.totalDistributed)} approved distributions`,
+      `${dashboardMetrics.pendingDistributions} distribution drafts pending`,
+      `${formatMultiple(dashboardMetrics.dpi)} DPI`,
+      "Distribution waterfall workflow connected",
+    ],
+    narrative:
+      "VENTIQ will present distribution activity, DPI impact and approved money returned to investors.",
+  });
+}
+
+if (selectedDeckMetrics.investorDocuments) {
+  deckPreviewSections.push({
+    title: "Investor Document Status",
+    subtitle: "Document generation and dispatch",
+    highlights: [
+      `${dashboardMetrics.generatedDocuments} documents generated`,
+      `${dashboardMetrics.storedDocuments} stored PDFs`,
+      `${dashboardMetrics.queuedEmails} queued emails`,
+      `${dashboardMetrics.sentEmails} sent emails`,
+    ],
+    narrative:
+      "VENTIQ will show investor communication readiness, generated documents, stored PDFs and dispatch status.",
+  });
+}
+
+if (selectedDeckMetrics.regulatoryUpdates) {
+  deckPreviewSections.push({
+    title: "Regulatory Updates",
+    subtitle: "Knowledge Hub intelligence",
+    highlights: [
+      `${dashboardMetrics.pendingRegulatoryReviews} pending regulatory reviews`,
+      `${dashboardMetrics.highImpactCirculars} high-impact circulars`,
+      "Source monitor connected",
+      "Review-before-approval workflow enabled",
+    ],
+    narrative:
+      "VENTIQ will highlight regulatory items requiring attention and summarize Knowledge Hub readiness for LP and compliance reporting.",
+  });
+}
+
+if (selectedDeckMetrics.repaymentSchedule) {
+  deckPreviewSections.push({
+    title: "Debt Repayment Schedule",
+    subtitle: "Upcoming repayment visibility",
+    highlights: [
+      `${dashboardMetrics.upcomingRepayments} upcoming repayments`,
+      `${dashboardMetrics.overdueRepayments} overdue repayments`,
+      "Repayment notice workflow planned",
+      "Debt deal tracking connected",
+    ],
+    narrative:
+      "VENTIQ will summarize upcoming debt repayments, overdue amounts and repayment notice readiness for finance teams.",
+  });
+}
+
+if (selectedDeckMetrics.portfolioNews) {
+  deckPreviewSections.push({
+    title: "Portfolio News & Alerts",
+    subtitle: "Company-level updates",
+    highlights: [
+      `${dashboardMetrics.openPortfolioAlerts} open portfolio alerts`,
+      `${dashboardMetrics.highRiskMetrics} high-risk / watchlist items`,
+      `${portfolioAlertRows.length} alerts in preview`,
+      "News and internal update tracking connected",
+    ],
+    narrative:
+      "VENTIQ will include portfolio company developments, business updates, risks and alerts relevant for LP storytelling.",
+  });
+}
+
+if (selectedDeckMetrics.lpNarrative) {
+  deckPreviewSections.push({
+    title: "LP Narrative",
+    subtitle: "Investor-facing story",
+    highlights: [
+      "Fund performance summary",
+      "Portfolio progress",
+      "Regulatory readiness",
+      "Next fund / fundraising narrative",
+    ],
+    narrative:
+      "VENTIQ will generate a structured LP-facing narrative using fund metrics, portfolio developments and operational progress.",
+  });
+}
+
+if (selectedDeckMetrics.exitPipeline) {
+  deckPreviewSections.push({
+    title: "Exit Pipeline",
+    subtitle: "Expected realization opportunities",
+    highlights: [
+      "Projected exit timing",
+      "Expected exit value",
+      "MOIC and IRR impact",
+      "Exit readiness commentary",
+    ],
+    narrative:
+      "VENTIQ will summarize exit-ready investments, expected exit timing and potential impact on fund-level returns.",
+  });
+}
+
+if (selectedDeckMetrics.riskSummary) {
+  deckPreviewSections.push({
+    title: "Portfolio Risk Summary",
+    subtitle: "Companies requiring attention",
+    highlights: [
+      `${dashboardMetrics.highRiskMetrics} high-risk / watchlist items`,
+      `${dashboardMetrics.openPortfolioAlerts} open alerts`,
+      `${dashboardMetrics.overdueRepayments} overdue repayments`,
+      "Partner attention queue connected",
+    ],
+    narrative:
+      "VENTIQ will highlight companies, repayments and regulatory items that require Managing Partner attention.",
+  });
+}
   function toggleDeckMetric(metricKey: DeckMetricKey) {
     setSelectedDeckMetrics((current) => ({
       ...current,
@@ -994,71 +1197,186 @@ export default function ManagingPartnerAIPage() {
               </div>
             </div>
 
-            <div className="preview-card">
-              <h2>Executive Presentation Builder</h2>
+           <div className="preview-card">
+  <div className="source-monitor-header">
+    <div>
+      <h2>Executive Presentation Builder</h2>
+      <p>
+        Create LP update decks using live fund performance, portfolio,
+        repayment, regulatory and investor communication data.
+      </p>
+    </div>
 
-              <div className="explain-box">
-                Select funds and metrics for an LP update deck. VENTIQ will use
-                fund performance, portfolio metrics, repayment schedules,
-                regulatory alerts and investor communication data.
-              </div>
+    <button
+      type="button"
+      className={
+        showDeckBuilder
+          ? "monitor-btn monitor-btn-secondary"
+          : "monitor-btn monitor-btn-primary"
+      }
+      onClick={() => setShowDeckBuilder((current) => !current)}
+    >
+      {showDeckBuilder ? "Close Builder" : "Create LP Presentation"}
+    </button>
+  </div>
 
-              <div className="form-card">
-                <label>Select fund scope</label>
-                <select
-                  value={selectedDeckFundId}
-                  onChange={(event) => setSelectedDeckFundId(event.target.value)}
-                >
-                  <option value="all">All Funds</option>
-                  {fundRows.map((fund) => (
-                    <option key={fund.id || fund.name} value={fund.id}>
-                      {fund.name}
-                    </option>
-                  ))}
-                </select>
+  {!showDeckBuilder && (
+    <>
+      <div className="explain-box">
+        The Managing Partner can generate an LP presentation whenever required.
+        Select fund scope, choose metrics, preview slides, edit narrative and
+        generate a PowerPoint deck in the next phase.
+      </div>
 
-                <div className="logic-note">
-                  Current deck scope: {selectedDeckFund?.name ?? "All Funds"} •{" "}
-                  {selectedMetricCount} sections selected
+      <div className="impact-grid">
+        <div className="impact-card">
+          <h3>{deckScopeName}</h3>
+          <p>Current deck scope</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{selectedMetricCount}</h3>
+          <p>Default sections selected</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{formatPercent(dashboardMetrics.grossIrr)}</h3>
+          <p>Gross IRR available</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{dashboardMetrics.openPortfolioAlerts}</h3>
+          <p>Portfolio alerts available</p>
+        </div>
+      </div>
+
+      <div className="action-row">
+        <button
+          type="button"
+          onClick={() => setShowDeckBuilder(true)}
+        >
+          Create LP Presentation
+        </button>
+
+        <button type="button">
+          Preview Last Deck
+        </button>
+      </div>
+    </>
+  )}
+
+  {showDeckBuilder && (
+    <>
+      <div className="form-card">
+        <label>Select fund scope</label>
+        <select
+          value={selectedDeckFundId}
+          onChange={(event) => setSelectedDeckFundId(event.target.value)}
+        >
+          <option value="all">All Funds</option>
+          {fundRows.map((fund) => (
+            <option key={fund.id || fund.name} value={fund.id}>
+              {fund.name}
+            </option>
+          ))}
+        </select>
+
+        <div className="logic-note">
+          Current deck scope: {selectedDeckFund?.name ?? "All Funds"} •{" "}
+          {selectedMetricCount} sections selected
+        </div>
+      </div>
+
+      <div className="queue-grid">
+        {deckMetricOptions.map((metric) => (
+          <button
+            key={metric.key}
+            type="button"
+            className="queue-item"
+            onClick={() => toggleDeckMetric(metric.key)}
+            style={{
+              textAlign: "left",
+              cursor: "pointer",
+              border: selectedDeckMetrics[metric.key]
+                ? "1px solid rgba(96, 165, 250, 0.65)"
+                : "1px solid rgba(148, 163, 184, 0.22)",
+              background: selectedDeckMetrics[metric.key]
+                ? "rgba(37, 99, 235, 0.18)"
+                : "rgba(15, 23, 42, 0.45)",
+              color: "#e5e7eb",
+            }}
+          >
+            {selectedDeckMetrics[metric.key] ? "✓ " : "+ "}
+            {metric.label}
+          </button>
+        ))}
+      </div>
+
+      {deckMessage && <div className="logic-note">{deckMessage}</div>}
+
+      <div className="lp-deck-preview">
+        <div className="lp-deck-preview-header">
+          <div>
+            <p className="eyebrow">LP Deck Preview</p>
+            <h3>{deckScopeName} Investor Presentation</h3>
+            <p>
+              Preview the sections VENTIQ will include before generating the
+              actual PowerPoint file.
+            </p>
+          </div>
+
+          <div className="lp-deck-count">
+            <strong>{deckPreviewSections.length}</strong>
+            <span>Sections</span>
+          </div>
+        </div>
+
+        {deckPreviewSections.length === 0 && (
+          <div className="explain-box">
+            Select at least one metric to preview the LP deck structure.
+          </div>
+        )}
+
+        {deckPreviewSections.length > 0 && (
+          <div className="lp-deck-section-grid">
+            {deckPreviewSections.map((section, index) => (
+              <div className="lp-deck-section-card" key={section.title}>
+                <div className="lp-deck-slide-number">
+                  Slide {index + 1}
                 </div>
+
+                <h4>{section.title}</h4>
+                <p className="lp-deck-subtitle">{section.subtitle}</p>
+
+                <div className="lp-deck-highlights">
+                  {section.highlights.map((highlight) => (
+                    <span key={highlight}>{highlight}</span>
+                  ))}
+                </div>
+
+                <p className="lp-deck-narrative">{section.narrative}</p>
               </div>
+            ))}
+          </div>
+        )}
+      </div>
 
-              <div className="queue-grid">
-                {deckMetricOptions.map((metric) => (
-                  <button
-                    key={metric.key}
-                    type="button"
-                    className="queue-item"
-                    onClick={() => toggleDeckMetric(metric.key)}
-                    style={{
-                      textAlign: "left",
-                      cursor: "pointer",
-                      border: selectedDeckMetrics[metric.key]
-                        ? "1px solid rgba(96, 165, 250, 0.65)"
-                        : "1px solid rgba(148, 163, 184, 0.22)",
-                      background: selectedDeckMetrics[metric.key]
-                        ? "rgba(37, 99, 235, 0.18)"
-                        : "rgba(15, 23, 42, 0.45)",
-                      color: "#e5e7eb",
-                    }}
-                  >
-                    {selectedDeckMetrics[metric.key] ? "✓ " : "+ "}
-                    {metric.label}
-                  </button>
-                ))}
-              </div>
+      <div className="action-row">
+        <button type="button" onClick={handlePreparePowerPoint}>
+          Prepare PowerPoint Brief
+        </button>
 
-              {deckMessage && <div className="logic-note">{deckMessage}</div>}
+        <button type="button">
+          Edit Slide Narrative
+        </button>
 
-              <div className="action-row">
-                <button type="button" onClick={handlePreparePowerPoint}>
-                  Prepare PowerPoint Brief
-                </button>
-
-                <button type="button">Preview LP Narrative</button>
-              </div>
-            </div>
-
+        <button type="button">
+          Generate PowerPoint
+        </button>
+      </div>
+    </>
+  )}
+</div>
             <div className="preview-card">
               <h2>Exit Offer Impact Simulator</h2>
 
