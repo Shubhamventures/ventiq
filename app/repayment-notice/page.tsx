@@ -89,6 +89,8 @@ export default function RepaymentNoticePage() {
 );
 const [bulkNoticeMessage, setBulkNoticeMessage] = useState("");
 const [bulkCopied, setBulkCopied] = useState(false);
+const [pdfGenerating, setPdfGenerating] = useState(false);
+const [bulkPdfGenerating, setBulkPdfGenerating] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -359,7 +361,124 @@ async function handleCopyBulkNotices() {
   await navigator.clipboard.writeText(bulkNoticeMessage);
   setBulkCopied(true);
 }
+async function downloadPdfFromNotices({
+  fileName,
+  notices,
+}: {
+  fileName: string;
+  notices: {
+    title: string;
+    companyName: string;
+    dueDate: string;
+    noticeText: string;
+  }[];
+}) {
+  const response = await fetch("/api/repayment-notice/pdf", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      fileName,
+      notices,
+    }),
+  });
 
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null);
+    throw new Error(errorBody?.error || "Could not generate repayment PDF.");
+  }
+
+  const blob = await response.blob();
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = downloadUrl;
+  link.download = `${fileName
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase()}.pdf`;
+
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.URL.revokeObjectURL(downloadUrl);
+}
+
+async function handleDownloadSinglePdf() {
+  if (!selectedRepayment) return;
+
+  setPdfGenerating(true);
+
+  try {
+    const company = getCompanyForRepayment(selectedRepayment);
+    const companyName = getString(
+      company,
+      ["company_name", "name", "title"],
+      "Portfolio Company"
+    );
+
+    await downloadPdfFromNotices({
+      fileName: `${companyName}-repayment-notice`,
+      notices: [
+        {
+          title: "Repayment Notice",
+          companyName,
+          dueDate: formatDate(selectedRepayment["due_date"]),
+          noticeText: buildNoticeForRepayment(selectedRepayment),
+        },
+      ],
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown PDF error.";
+
+    setNoticeMessage(`PDF generation failed: ${errorMessage}`);
+  } finally {
+    setPdfGenerating(false);
+  }
+}
+
+async function handleDownloadBulkPdf() {
+  setBulkPdfGenerating(true);
+
+  try {
+    if (bulkRepaymentRows.length === 0) {
+      setBulkNoticeMessage(
+        "No unpaid or upcoming repayment schedules found for the selected month."
+      );
+      return;
+    }
+
+    await downloadPdfFromNotices({
+      fileName: `repayment-notice-pack-${bulkTargetMonth}`,
+      notices: bulkRepaymentRows.map((repayment) => {
+        const company = getCompanyForRepayment(repayment);
+
+        const companyName = getString(
+          company,
+          ["company_name", "name", "title"],
+          "Portfolio Company"
+        );
+
+        return {
+          title: "Repayment Notice",
+          companyName,
+          dueDate: formatDate(repayment["due_date"]),
+          noticeText: buildNoticeForRepayment(repayment),
+        };
+      }),
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown bulk PDF error.";
+
+    setBulkNoticeMessage(`Bulk PDF generation failed: ${errorMessage}`);
+  } finally {
+    setBulkPdfGenerating(false);
+  }
+}
   return (
     <main className="app-page">
       <section className="app-shell">
@@ -576,6 +695,14 @@ async function handleCopyBulkNotices() {
                       >
                         {copied ? "Copied" : "Copy Notice"}
                       </button>
+                      <button
+  type="button"
+  className="monitor-btn monitor-btn-secondary"
+  disabled={!selectedRepayment || pdfGenerating}
+  onClick={handleDownloadSinglePdf}
+>
+  {pdfGenerating ? "Generating PDF..." : "Download PDF"}
+</button>
                     </div>
                   </>
                 )}
@@ -638,6 +765,14 @@ async function handleCopyBulkNotices() {
                   >
                     {bulkCopied ? "Copied All Notices" : "Copy All Notices"}
                   </button>
+                  <button
+  type="button"
+  className="monitor-btn monitor-btn-secondary"
+  disabled={bulkRepaymentRows.length === 0 || bulkPdfGenerating}
+  onClick={handleDownloadBulkPdf}
+>
+  {bulkPdfGenerating ? "Generating PDF Pack..." : "Download PDF Pack"}
+</button>
                 </div>
               </div>
 
