@@ -4,7 +4,23 @@ import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 
 type DataRow = Record<string, unknown>;
+type DeckChartItem = {
+  label: string;
+  value: number;
+  displayValue: string;
+};
 
+type DeckChart = {
+  title: string;
+  unit: string;
+  items: DeckChartItem[];
+};
+
+type DeckSlideOption = {
+  includeHighlights: boolean;
+  includeNarrative: boolean;
+  includeChart: boolean;
+};
 type DeckMetricKey =
   | "fundOverview"
   | "fundPerformance"
@@ -153,6 +169,12 @@ export default function ManagingPartnerAIPage() {
   const [editedDeckNarratives, setEditedDeckNarratives] = useState<
   Record<string, string>
 >({});
+const [deckSlideOptions, setDeckSlideOptions] = useState<
+  Record<string, DeckSlideOption>
+>({});
+const [selectedDeckTheme, setSelectedDeckTheme] = useState("ventiq_blue");
+const [selectedDeckLayout, setSelectedDeckLayout] = useState("balanced");
+const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
   const [selectedDeckMetrics, setSelectedDeckMetrics] = useState<
     Record<DeckMetricKey, boolean>
   >({
@@ -794,6 +816,321 @@ function resetDeckNarrative(sectionTitle: string) {
     return updated;
   });
 }
+function getDeckSlideOption(sectionTitle: string): DeckSlideOption {
+  return (
+    deckSlideOptions[sectionTitle] ?? {
+      includeHighlights: true,
+      includeNarrative: true,
+      includeChart: true,
+    }
+  );
+}
+
+function toggleDeckSlideOption(
+  sectionTitle: string,
+  optionName: keyof DeckSlideOption
+) {
+  setDeckSlideOptions((current) => {
+    const currentOption =
+      current[sectionTitle] ?? {
+        includeHighlights: true,
+        includeNarrative: true,
+        includeChart: true,
+      };
+
+    return {
+      ...current,
+      [sectionTitle]: {
+        ...currentOption,
+        [optionName]: !currentOption[optionName],
+      },
+    };
+  });
+}
+
+function toCrValue(value: number) {
+  if (!Number.isFinite(value)) return 0;
+
+  return Number((value / 10000000).toFixed(1));
+}
+
+function getSectionChart(sectionTitle: string): DeckChart | null {
+  if (sectionTitle === "Fund Overview") {
+    return {
+      title: "Fund and portfolio coverage",
+      unit: "Count",
+      items: [
+        {
+          label: "Funds",
+          value: dashboardMetrics.activeFunds,
+          displayValue: String(dashboardMetrics.activeFunds),
+        },
+        {
+          label: "Companies",
+          value: dashboardMetrics.portfolioCompanies,
+          displayValue: String(dashboardMetrics.portfolioCompanies),
+        },
+        {
+          label: "Investments",
+          value: dashboardMetrics.fundInvestments,
+          displayValue: String(dashboardMetrics.fundInvestments),
+        },
+        {
+          label: "Investors",
+          value: dashboardMetrics.investors,
+          displayValue: String(dashboardMetrics.investors),
+        },
+      ],
+    };
+  }
+
+  if (sectionTitle === "Fund Performance") {
+    return {
+      title: "Key return metrics",
+      unit: "Metric value",
+      items: [
+        {
+          label: "Gross IRR",
+          value: dashboardMetrics.grossIrr,
+          displayValue: formatPercent(dashboardMetrics.grossIrr),
+        },
+        {
+          label: "Net IRR",
+          value: dashboardMetrics.netIrr,
+          displayValue: formatPercent(dashboardMetrics.netIrr),
+        },
+        {
+          label: "DPI",
+          value: dashboardMetrics.dpi * 100,
+          displayValue: formatMultiple(dashboardMetrics.dpi),
+        },
+        {
+          label: "TVPI",
+          value: dashboardMetrics.tvpi * 100,
+          displayValue: formatMultiple(dashboardMetrics.tvpi),
+        },
+      ],
+    };
+  }
+
+  if (sectionTitle === "Portfolio Performance") {
+    return {
+      title: "Portfolio value bridge",
+      unit: "₹ Cr",
+      items: [
+        {
+          label: "Cost",
+          value: toCrValue(dashboardMetrics.totalInvestmentCost),
+          displayValue: formatCurrencyCr(dashboardMetrics.totalInvestmentCost),
+        },
+        {
+          label: "Fair value",
+          value: toCrValue(dashboardMetrics.currentFairValue),
+          displayValue: formatCurrencyCr(dashboardMetrics.currentFairValue),
+        },
+        {
+          label: "Realized",
+          value: toCrValue(dashboardMetrics.realizedValue),
+          displayValue: formatCurrencyCr(dashboardMetrics.realizedValue),
+        },
+        {
+          label: "Unrealized",
+          value: toCrValue(dashboardMetrics.unrealizedValue),
+          displayValue: formatCurrencyCr(dashboardMetrics.unrealizedValue),
+        },
+      ],
+    };
+  }
+
+  if (sectionTitle === "Deployment & Dry Powder") {
+    return {
+      title: "Capital deployment",
+      unit: "₹ Cr",
+      items: [
+        {
+          label: "Committed",
+          value: toCrValue(dashboardMetrics.totalCommitted),
+          displayValue: formatCurrencyCr(dashboardMetrics.totalCommitted),
+        },
+        {
+          label: "Called",
+          value: toCrValue(dashboardMetrics.totalCalled),
+          displayValue: formatCurrencyCr(dashboardMetrics.totalCalled),
+        },
+        {
+          label: "Dry powder",
+          value: toCrValue(dashboardMetrics.uncalledCapital),
+          displayValue: formatCurrencyCr(dashboardMetrics.uncalledCapital),
+        },
+      ],
+    };
+  }
+
+  if (sectionTitle === "Capital Calls") {
+    return {
+      title: "Capital call status",
+      unit: "Count / ₹ Cr",
+      items: [
+        {
+          label: "Pending drafts",
+          value: dashboardMetrics.pendingCapitalCalls,
+          displayValue: String(dashboardMetrics.pendingCapitalCalls),
+        },
+        {
+          label: "Called capital",
+          value: toCrValue(dashboardMetrics.totalCalled),
+          displayValue: formatCurrencyCr(dashboardMetrics.totalCalled),
+        },
+        {
+          label: "Investors",
+          value: dashboardMetrics.investors,
+          displayValue: String(dashboardMetrics.investors),
+        },
+      ],
+    };
+  }
+
+  if (sectionTitle === "Distributions") {
+    return {
+      title: "Distribution status",
+      unit: "₹ Cr / Multiple",
+      items: [
+        {
+          label: "Distributed",
+          value: toCrValue(dashboardMetrics.totalDistributed),
+          displayValue: formatCurrencyCr(dashboardMetrics.totalDistributed),
+        },
+        {
+          label: "Pending drafts",
+          value: dashboardMetrics.pendingDistributions,
+          displayValue: String(dashboardMetrics.pendingDistributions),
+        },
+        {
+          label: "DPI",
+          value: dashboardMetrics.dpi * 100,
+          displayValue: formatMultiple(dashboardMetrics.dpi),
+        },
+      ],
+    };
+  }
+
+  if (sectionTitle === "Investor Document Status") {
+    return {
+      title: "Investor communication status",
+      unit: "Count",
+      items: [
+        {
+          label: "Generated",
+          value: dashboardMetrics.generatedDocuments,
+          displayValue: String(dashboardMetrics.generatedDocuments),
+        },
+        {
+          label: "Stored PDFs",
+          value: dashboardMetrics.storedDocuments,
+          displayValue: String(dashboardMetrics.storedDocuments),
+        },
+        {
+          label: "Queued",
+          value: dashboardMetrics.queuedEmails,
+          displayValue: String(dashboardMetrics.queuedEmails),
+        },
+        {
+          label: "Sent",
+          value: dashboardMetrics.sentEmails,
+          displayValue: String(dashboardMetrics.sentEmails),
+        },
+      ],
+    };
+  }
+
+  if (sectionTitle === "Regulatory Updates") {
+    return {
+      title: "Regulatory workload",
+      unit: "Count",
+      items: [
+        {
+          label: "Pending reviews",
+          value: dashboardMetrics.pendingRegulatoryReviews,
+          displayValue: String(dashboardMetrics.pendingRegulatoryReviews),
+        },
+        {
+          label: "High impact",
+          value: dashboardMetrics.highImpactCirculars,
+          displayValue: String(dashboardMetrics.highImpactCirculars),
+        },
+      ],
+    };
+  }
+
+  if (sectionTitle === "Debt Repayment Schedule") {
+    return {
+      title: "Repayment monitoring",
+      unit: "Count",
+      items: [
+        {
+          label: "Upcoming",
+          value: dashboardMetrics.upcomingRepayments,
+          displayValue: String(dashboardMetrics.upcomingRepayments),
+        },
+        {
+          label: "Overdue",
+          value: dashboardMetrics.overdueRepayments,
+          displayValue: String(dashboardMetrics.overdueRepayments),
+        },
+      ],
+    };
+  }
+
+  if (sectionTitle === "Portfolio News & Alerts") {
+    return {
+      title: "Portfolio alert status",
+      unit: "Count",
+      items: [
+        {
+          label: "Open alerts",
+          value: dashboardMetrics.openPortfolioAlerts,
+          displayValue: String(dashboardMetrics.openPortfolioAlerts),
+        },
+        {
+          label: "High-risk items",
+          value: dashboardMetrics.highRiskMetrics,
+          displayValue: String(dashboardMetrics.highRiskMetrics),
+        },
+        {
+          label: "Preview alerts",
+          value: portfolioAlertRows.length,
+          displayValue: String(portfolioAlertRows.length),
+        },
+      ],
+    };
+  }
+
+  if (sectionTitle === "Portfolio Risk Summary") {
+    return {
+      title: "Risk summary",
+      unit: "Count",
+      items: [
+        {
+          label: "High-risk",
+          value: dashboardMetrics.highRiskMetrics,
+          displayValue: String(dashboardMetrics.highRiskMetrics),
+        },
+        {
+          label: "Open alerts",
+          value: dashboardMetrics.openPortfolioAlerts,
+          displayValue: String(dashboardMetrics.openPortfolioAlerts),
+        },
+        {
+          label: "Overdue",
+          value: dashboardMetrics.overdueRepayments,
+          displayValue: String(dashboardMetrics.overdueRepayments),
+        },
+      ],
+    };
+  }
+
+  return null;
+}
 
   function handlePreparePowerPoint() {
     const targetFund = selectedDeckFund?.name ?? "All Funds";
@@ -823,12 +1160,78 @@ setDeckMessage(
   );
 }
 
-function handleGeneratePowerPoint() {
-  const editedNarrativeCount = Object.keys(editedDeckNarratives).length;
+async function handleGeneratePowerPoint() {
+  if (deckPreviewSections.length === 0) {
+    setDeckMessage("Select at least one section before generating PowerPoint.");
+    return;
+  }
 
-  setDeckMessage(
-    `PowerPoint generation is ready for ${deckScopeName} with ${deckPreviewSections.length} slides and ${editedNarrativeCount} edited narratives. Actual .pptx download will be connected in Phase 5.3.`
-  );
+  setDeckMessage("Generating PowerPoint presentation...");
+
+  try {
+    const response = await fetch("/api/lp-deck/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+  deckScopeName,
+  themeKey: selectedDeckTheme,
+  layoutKey: selectedDeckLayout,
+  includeExecutiveSummary,
+  generatedAt: new Date().toISOString(),
+  sections: deckPreviewSections.map((section) => {
+  const slideOption = getDeckSlideOption(section.title);
+  const sectionChart = getSectionChart(section.title);
+
+  return {
+    title: section.title,
+    subtitle: section.subtitle,
+    highlights: slideOption.includeHighlights ? section.highlights : [],
+    narrative: slideOption.includeNarrative
+      ? getEditableNarrative(section.title, section.narrative)
+      : "",
+    includeHighlights: slideOption.includeHighlights,
+    includeNarrative: slideOption.includeNarrative,
+    includeChart: slideOption.includeChart,
+    chart: slideOption.includeChart ? sectionChart : null,
+  };
+}),
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      throw new Error(
+        errorBody?.error || "Could not generate PowerPoint presentation."
+      );
+    }
+
+    const blob = await response.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = downloadUrl;
+    link.download = `${deckScopeName
+      .replace(/[^a-z0-9]+/gi, "-")
+      .replace(/^-|-$/g, "")
+      .toLowerCase()}-investor-presentation.pptx`;
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    window.URL.revokeObjectURL(downloadUrl);
+
+    setDeckMessage(
+      `PowerPoint generated successfully for ${deckScopeName} with ${deckPreviewSections.length} slides.`
+    );
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown PowerPoint error.";
+
+    setDeckMessage(`PowerPoint generation failed: ${errorMessage}`);
+  }
 }
 
   return (
@@ -1329,7 +1732,36 @@ function handleGeneratePowerPoint() {
             </option>
           ))}
         </select>
+<label>Deck theme</label>
+<select
+  value={selectedDeckTheme}
+  onChange={(event) => setSelectedDeckTheme(event.target.value)}
+>
+  <option value="ventiq_blue">VENTIQ Blue</option>
+  <option value="premium_black">Premium Black</option>
+  <option value="institutional_white">Institutional White</option>
+  <option value="emerald_growth">Emerald Growth</option>
+  <option value="burgundy_pe">Burgundy PE</option>
+</select>
 
+<label>Slide layout style</label>
+<select
+  value={selectedDeckLayout}
+  onChange={(event) => setSelectedDeckLayout(event.target.value)}
+>
+  <option value="balanced">Balanced</option>
+  <option value="chart_heavy">Chart Heavy</option>
+  <option value="narrative_heavy">Narrative Heavy</option>
+  <option value="metric_dashboard">Metric Dashboard</option>
+</select>
+<label className="lp-builder-checkbox">
+  <input
+    type="checkbox"
+    checked={includeExecutiveSummary}
+    onChange={(event) => setIncludeExecutiveSummary(event.target.checked)}
+  />
+  Include Executive Summary slide
+</label>
         <div className="logic-note">
           Current deck scope: {selectedDeckFund?.name ?? "All Funds"} •{" "}
           {selectedMetricCount} sections selected
@@ -1388,44 +1820,117 @@ function handleGeneratePowerPoint() {
 
         {deckPreviewSections.length > 0 && (
           <div className="lp-deck-section-grid">
-            {deckPreviewSections.map((section, index) => (
-              <div className="lp-deck-section-card" key={section.title}>
-                <div className="lp-deck-slide-number">
-                  Slide {index + 1}
+            {deckPreviewSections.map((section, index) => {
+  const slideOption = getDeckSlideOption(section.title);
+  const sectionChart = getSectionChart(section.title);
+
+  return (
+    <div className="lp-deck-section-card" key={section.title}>
+      <div className="lp-deck-slide-number">Slide {index + 1}</div>
+
+      <h4>{section.title}</h4>
+      <p className="lp-deck-subtitle">{section.subtitle}</p>
+
+      <div className="lp-slide-option-grid">
+        <label>
+          <input
+            type="checkbox"
+            checked={slideOption.includeHighlights}
+            onChange={() =>
+              toggleDeckSlideOption(section.title, "includeHighlights")
+            }
+          />
+          Highlights
+        </label>
+
+        <label>
+          <input
+            type="checkbox"
+            checked={slideOption.includeChart}
+            disabled={!sectionChart}
+            onChange={() =>
+              toggleDeckSlideOption(section.title, "includeChart")
+            }
+          />
+          Chart
+        </label>
+
+        <label>
+          <input
+            type="checkbox"
+            checked={slideOption.includeNarrative}
+            onChange={() =>
+              toggleDeckSlideOption(section.title, "includeNarrative")
+            }
+          />
+          Narrative
+        </label>
+      </div>
+
+      {slideOption.includeHighlights && (
+        <div className="lp-deck-highlights">
+          {section.highlights.map((highlight) => (
+            <span key={highlight}>{highlight}</span>
+          ))}
+        </div>
+      )}
+
+      {slideOption.includeChart && sectionChart && (
+        <div className="lp-chart-preview-mini">
+          <strong>{sectionChart.title}</strong>
+          <p>{sectionChart.unit}</p>
+
+          <div className="lp-chart-preview-bars">
+            {sectionChart.items.map((item) => {
+              const maxValue = Math.max(
+                ...sectionChart.items.map((chartItem) => chartItem.value),
+                1
+              );
+
+              return (
+                <div className="lp-chart-preview-row" key={item.label}>
+                  <span>{item.label}</span>
+                  <div>
+                    <i
+                      style={{
+                        width: `${Math.max((item.value / maxValue) * 100, 4)}%`,
+                      }}
+                    />
+                  </div>
+                  <strong>{item.displayValue}</strong>
                 </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
-                <h4>{section.title}</h4>
-                <p className="lp-deck-subtitle">{section.subtitle}</p>
+      {slideOption.includeNarrative && (
+        <div className="lp-deck-narrative-editor">
+          <label>Editable slide narrative</label>
 
-                <div className="lp-deck-highlights">
-                  {section.highlights.map((highlight) => (
-                    <span key={highlight}>{highlight}</span>
-                  ))}
-                </div>
+          <textarea
+            value={getEditableNarrative(section.title, section.narrative)}
+            onChange={(event) =>
+              updateDeckNarrative(section.title, event.target.value)
+            }
+            rows={5}
+          />
 
-                <div className="lp-deck-narrative-editor">
-  <label>Editable slide narrative</label>
-
-  <textarea
-    value={getEditableNarrative(section.title, section.narrative)}
-    onChange={(event) =>
-      updateDeckNarrative(section.title, event.target.value)
-    }
-    rows={5}
-  />
-
-  <div className="lp-deck-editor-actions">
-    <button
-      type="button"
-      className="monitor-btn monitor-btn-secondary"
-      onClick={() => resetDeckNarrative(section.title)}
-    >
-      Reset Narrative
-    </button>
-  </div>
-</div>
-              </div>
-            ))}
+          <div className="lp-deck-editor-actions">
+            <button
+              type="button"
+              className="monitor-btn monitor-btn-secondary"
+              onClick={() => resetDeckNarrative(section.title)}
+            >
+              Reset Narrative
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+})}
           </div>
         )}
       </div>
