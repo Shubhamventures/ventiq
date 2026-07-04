@@ -80,6 +80,12 @@ export default function RepaymentNoticePage() {
   const [portfolioCompanies, setPortfolioCompanies] = useState<DataRow[]>([]);
   const [fundInvestments, setFundInvestments] = useState<DataRow[]>([]);
   const [debtRepayments, setDebtRepayments] = useState<DataRow[]>([]);
+  const [repaymentNoticeBatches, setRepaymentNoticeBatches] = useState<DataRow[]>(
+  []
+);
+const [repaymentNoticeHistory, setRepaymentNoticeHistory] = useState<DataRow[]>(
+  []
+);
 
   const [selectedRepaymentId, setSelectedRepaymentId] = useState("");
   const [noticeMessage, setNoticeMessage] = useState("");
@@ -99,47 +105,69 @@ const [bulkPdfGenerating, setBulkPdfGenerating] = useState(false);
     loadRepaymentData();
   }, []);
 
-  async function loadRepaymentData() {
-    if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage("Supabase is not configured. Please check .env.local.");
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setErrorMessage("");
-
-    const [companiesResult, investmentsResult, repaymentsResult] =
-      await Promise.all([
-        supabase.from("portfolio_companies").select("*"),
-        supabase.from("fund_investments").select("*"),
-        supabase.from("debt_repayment_schedules").select("*").order("due_date"),
-      ]);
-
-    const firstError =
-      companiesResult.error || investmentsResult.error || repaymentsResult.error;
-
-    if (firstError) {
-      setErrorMessage(firstError.message);
-      setLoading(false);
-      return;
-    }
-
-    const companies = (companiesResult.data ?? []) as DataRow[];
-    const investments = (investmentsResult.data ?? []) as DataRow[];
-    const repayments = (repaymentsResult.data ?? []) as DataRow[];
-
-    setPortfolioCompanies(companies);
-    setFundInvestments(investments);
-    setDebtRepayments(repayments);
-
-    if (repayments.length > 0) {
-      setSelectedRepaymentId(getId(repayments[0]));
-    }
-
+ async function loadRepaymentData() {
+  if (!isSupabaseConfigured || !supabase) {
+    setErrorMessage("Supabase is not configured. Please check .env.local.");
     setLoading(false);
+    return;
   }
 
+  setLoading(true);
+  setErrorMessage("");
+
+  const [
+    companiesResult,
+    investmentsResult,
+    repaymentsResult,
+    noticeBatchesResult,
+    noticeHistoryResult,
+  ] = await Promise.all([
+    supabase.from("portfolio_companies").select("*"),
+    supabase.from("fund_investments").select("*"),
+    supabase.from("debt_repayment_schedules").select("*").order("due_date"),
+    supabase
+      .from("repayment_notice_batches")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(10),
+    supabase
+      .from("repayment_notices")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(25),
+  ]);
+
+  const firstError =
+    companiesResult.error ||
+    investmentsResult.error ||
+    repaymentsResult.error ||
+    noticeBatchesResult.error ||
+    noticeHistoryResult.error;
+
+  if (firstError) {
+    setErrorMessage(firstError.message);
+    setLoading(false);
+    return;
+  }
+
+  const companies = (companiesResult.data ?? []) as DataRow[];
+  const investments = (investmentsResult.data ?? []) as DataRow[];
+  const repayments = (repaymentsResult.data ?? []) as DataRow[];
+  const noticeBatches = (noticeBatchesResult.data ?? []) as DataRow[];
+  const noticeHistory = (noticeHistoryResult.data ?? []) as DataRow[];
+
+  setPortfolioCompanies(companies);
+  setFundInvestments(investments);
+  setDebtRepayments(repayments);
+  setRepaymentNoticeBatches(noticeBatches);
+  setRepaymentNoticeHistory(noticeHistory);
+
+  if (repayments.length > 0 && !selectedRepaymentId) {
+    setSelectedRepaymentId(getId(repayments[0]));
+  }
+
+  setLoading(false);
+}
   const companyMap = useMemo(() => {
     return new Map(portfolioCompanies.map((company) => [getId(company), company]));
   }, [portfolioCompanies]);
@@ -314,10 +342,24 @@ const bulkRepaymentRows = useMemo(() => {
   });
 }, [debtRepayments, bulkTargetMonth]);
 
-  function handleGenerateNotice() {
-    setNoticeMessage(noticePreview);
-    setCopied(false);
+  async function handleGenerateNotice() {
+  setNoticeMessage(noticePreview);
+  setCopied(false);
+
+  if (selectedRepayment) {
+    try {
+      await saveNoticeHistory({
+        noticeType: "single",
+        repayments: [selectedRepayment],
+      });
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown save error.";
+
+      setNoticeMessage(`${noticePreview}\n\nSave warning: ${errorMessage}`);
+    }
   }
+}
 
   async function handleCopyNotice() {
     if (!noticeMessage) return;
@@ -325,7 +367,7 @@ const bulkRepaymentRows = useMemo(() => {
     await navigator.clipboard.writeText(noticeMessage);
     setCopied(true);
   }
-  function handleGenerateBulkNotices() {
+  async function handleGenerateBulkNotices() {
   if (bulkRepaymentRows.length === 0) {
     setBulkNoticeMessage(
       "No unpaid or upcoming repayment schedules found for the selected month."
@@ -352,7 +394,20 @@ ${buildNoticeForRepayment(repayment)}`;
     .join("\n\n------------------------------------------------------------\n\n");
 
   setBulkNoticeMessage(bulkText);
-  setBulkCopied(false);
+setBulkCopied(false);
+
+try {
+  await saveNoticeHistory({
+    noticeType: "bulk",
+    batchMonth: bulkTargetMonth,
+    repayments: bulkRepaymentRows,
+  });
+} catch (error) {
+  const errorMessage =
+    error instanceof Error ? error.message : "Unknown save error.";
+
+  setBulkNoticeMessage(`${bulkText}\n\nSave warning: ${errorMessage}`);
+}
 }
 
 async function handleCopyBulkNotices() {
@@ -360,6 +415,80 @@ async function handleCopyBulkNotices() {
 
   await navigator.clipboard.writeText(bulkNoticeMessage);
   setBulkCopied(true);
+}
+async function saveNoticeHistory({
+  noticeType,
+  batchMonth,
+  repayments,
+}: {
+  noticeType: "single" | "bulk";
+  batchMonth?: string;
+  repayments: DataRow[];
+}) {
+  if (!supabase || repayments.length === 0) return;
+
+  const batchResult = await supabase
+    .from("repayment_notice_batches")
+    .insert({
+      batch_month: batchMonth ?? null,
+      notice_type: noticeType,
+      status: "generated",
+      total_notices: repayments.length,
+    })
+    .select("id")
+    .single();
+
+  if (batchResult.error) {
+    throw new Error(batchResult.error.message);
+  }
+
+  const batchId = getString(batchResult.data as DataRow, ["id"], "");
+
+  const noticeRows = repayments.map((repayment) => {
+    const investment = getInvestmentForRepayment(repayment);
+    const company = getCompanyForRepayment(repayment);
+
+    const companyName = getString(
+      company,
+      ["company_name", "name", "title"],
+      "Portfolio Company"
+    );
+
+    const dueDateValue = getString(repayment, ["due_date"], "");
+
+    return {
+      batch_id: batchId,
+      repayment_schedule_id: getId(repayment),
+      portfolio_company_id: getString(
+        company,
+        ["id"],
+        getString(repayment, ["portfolio_company_id", "company_id"], "")
+      ),
+      fund_investment_id: getString(
+        investment,
+        ["id"],
+        getString(repayment, ["fund_investment_id", "investment_id"], "")
+      ),
+      company_name: companyName,
+      due_date: dueDateValue || null,
+      notice_subject: `Repayment Notice - Amount Due on ${formatDate(
+        repayment["due_date"]
+      )}`,
+      notice_body: buildNoticeForRepayment(repayment),
+      notice_status: "generated",
+      delivery_status: "not_sent",
+    };
+  });
+
+  const noticesResult = await supabase
+    .from("repayment_notices")
+    .insert(noticeRows);
+
+  if (noticesResult.error) {
+    throw new Error(noticesResult.error.message);
+  }
+
+  await loadRepaymentData();
 }
 async function downloadPdfFromNotices({
   fileName,
@@ -782,6 +911,59 @@ async function handleDownloadBulkPdf() {
             </div>
           </>
         )}
+        {!loading && !errorMessage && (
+  <div className="preview-card">
+    <h2>Repayment Notice History & Send Queue</h2>
+
+    {repaymentNoticeHistory.length === 0 && (
+      <div className="explain-box">
+        No repayment notices generated yet. Generate a single or bulk notice to
+        create history.
+      </div>
+    )}
+
+    {repaymentNoticeHistory.length > 0 && (
+      <div className="review-table-wrap">
+        <table className="review-table">
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th>Due Date</th>
+              <th>Notice Status</th>
+              <th>Delivery Status</th>
+              <th>Generated At</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {repaymentNoticeHistory.map((notice) => (
+              <tr key={getId(notice)}>
+                <td>
+                  <strong>
+                    {getString(notice, ["company_name"], "Portfolio Company")}
+                  </strong>
+                </td>
+                <td>{formatDate(notice["due_date"])}</td>
+                <td>{statusLabel(getString(notice, ["notice_status"], ""))}</td>
+                <td>{statusLabel(getString(notice, ["delivery_status"], ""))}</td>
+                <td>{formatDate(notice["created_at"])}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+
+    {repaymentNoticeBatches.length > 0 && (
+      <div className="logic-note">
+        Latest batch:{" "}
+        {getString(repaymentNoticeBatches[0], ["notice_type"], "-")} •{" "}
+        {getNumber(repaymentNoticeBatches[0], ["total_notices"])} notices •{" "}
+        {formatDate(repaymentNoticeBatches[0]["created_at"])}
+      </div>
+    )}
+  </div>
+)}
       </section>
     </main>
   );
