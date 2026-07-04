@@ -2446,4 +2446,17 @@ button.action-button {
   height: 16px;
   margin: 0;
   accent-color: #60a5fa;
+}.notice-preview-box {
+  min-height: 520px;
+  overflow: auto;
+  white-space: pre-wrap;
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: 20px;
+  background: rgba(2, 6, 23, 0.72);
+  color: rgba(226, 232, 240, 0.92);
+  padding: 20px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.7;
 }

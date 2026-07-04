@@ -1291,6 +1291,9 @@ async function handleGeneratePowerPoint() {
                 <a className="monitor-btn monitor-btn-secondary" href="/document-engine">
                   Review Investor Documents
                 </a>
+                <a className="monitor-btn monitor-btn-secondary" href="/repayment-notice">
+  Generate Repayment Notice
+</a>
               </div>
             </div>
 
