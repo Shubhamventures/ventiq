@@ -16,10 +16,10 @@ export default function Home() {
   function handleDemoSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const subject = encodeURIComponent("VENTIQ Demo Request");
+    const subject = encodeURIComponent("VENTIQ Walkthrough Request");
 
     const body = encodeURIComponent(
-      `New VENTIQ demo request:
+      `New VENTIQ walkthrough request:
 
 Name: ${demoForm.name}
 Email: ${demoForm.email}
@@ -43,16 +43,11 @@ Source: useventiq.com`
           <h2>VENTIQ</h2>
 
           <div className="nav-links">
-            <a href="#solutions">Solutions</a>
-<a href="#all-workspaces">Modules</a>
+                       <a href="#modules">Solutions</a>
+            <a href="#all-workspaces">Modules</a>
             <a href="#about">About</a>
-<button
-  className="nav-link-button"
-  type="button"
-  onClick={() => setIsDemoOpen(true)}
->
-  Contact
-</button>
+            <a href="#contact">Contact</a>
+
           </div>
         </nav>
 
@@ -64,9 +59,9 @@ Source: useventiq.com`
           </h1>
 
           <p>
-            Manage funds, investors, compliance, accounting, fundraising and
-            portfolio intelligence from one intelligent platform built for
-            modern VC, PE, Debt Funds, AIFs and GIFT City managers.
+            VENTIQ connects fund operations, compliance, portfolio intelligence,
+investor reporting and workflow execution into one secure operating
+layer for modern VC, PE, Debt Funds, AIFs and GIFT City managers.
           </p>
 
 <button
@@ -74,633 +69,615 @@ Source: useventiq.com`
   type="button"
   onClick={() => setIsDemoOpen(true)}
 >
-  Request Demo
+  Request Walkthrough
 </button>
         </section>
 
-        <section className="metrics">
-          <div className="card">
-            <h2>₹12,500 Cr</h2>
-            <p>Assets Under Management</p>
-          </div>
-
-          <div className="card">
-            <h2>24.3%</h2>
-            <p>Portfolio IRR</p>
-          </div>
-
-          <div className="card">
-            <h2>98%</h2>
-            <p>Compliance Health</p>
-          </div>
-        </section>
-
-        <section className="section">
-          <h2 className="section-title">AI Command Center</h2>
-
-          <div className="dashboard-card">
-            <div className="dashboard-title">
-              Good Morning Shubham 👋
+                  <div className="hero-metrics">
+            <div className="metric-card">
+              <h3>Single Source of Truth</h3>
+<p>Fund, investor, portfolio, compliance and workflow data connected in one place.</p>
             </div>
 
-            <p>
-              VENTIQ reviewed your investment firm overnight. 5 AI teams
-              analysed 4 active funds, 187 transactions, 14 deals, 6 compliance
-              workflows and ₹640 Cr of fundraising pipeline.
-            </p>
-
-            <br />
-
-            <div className="dashboard-grid">
-              <div className="dashboard-metric">
-                <h3>94%</h3>
-                <p>Firm Health</p>
-              </div>
-
-              <div className="dashboard-metric">
-                <h3>7</h3>
-                <p>Priority Actions</p>
-              </div>
-
-              <div className="dashboard-metric">
-                <h3>2h 18m</h3>
-                <p>Workload Today</p>
-              </div>
+            <div className="metric-card">
+              <h3>Stakeholder Dashboards</h3>
+              <p>Role-based views for partners, finance, compliance, investment teams and LPs.</p>
             </div>
 
-            <div className="alert-box">
-              <p>💰 Finance AI: ₹18.5 Cr distribution ready</p>
-              <p>🛡️ Compliance AI: QCR due in 4 days</p>
-              <p>📈 Investment AI: 3 IC-ready deals</p>
-              <p>🤝 Fundraising AI: Sovereign Fund close probability 82%</p>
-              <p>👔 Managing Partner AI: Fund III TVPI updated to 2.2x</p>
+                       <div className="metric-card">
+              <h3>Workflow Engines</h3>
+              <p>Capital calls, distributions, repayment notices, compliance and reporting workflows.</p>
             </div>
           </div>
-        </section>
 
-        <section className="section" id="modules">
+          <section className="section">
           <h2 className="section-title">
-            One AI. Six Specialists. One Operating System.
+            One fund data core. Live intelligence for every stakeholder.
           </h2>
 
-          <div className="feature-grid">
-            <div className="feature-card">
-              <div className="badge">Finance AI</div>
-
-              <h3>Fund Operations</h3>
+          <div className="premium-os-card">
+            <div className="premium-os-header">
+              <span>VENTIQ Operating System</span>
 
               <p>
-                Bank reconciliation, capital calls, distribution waterfalls,
-                management fees and investor reporting.
-              </p>
-
-              <br />
-
-              <a href="/finance-head-ai">Open Workspace →</a>
-            </div>
-
-            <div className="feature-card">
-              <div className="badge">Managing Partner AI</div>
-
-              <h3>Executive Decisions</h3>
-
-              <p>
-                Dry powder, deployment, exits, TVPI, fundraising strategy and
-                portfolio risk.
-              </p>
-
-              <br />
-
-              <a href="/managing-partner-ai">Open Workspace →</a>
-            </div>
-
-            <div className="feature-card">
-              <div className="badge">Compliance AI</div>
-
-              <h3>Regulatory Control</h3>
-
-              <p>
-                QCR, Form 64C, Form 64D, SEBI, GIFT City and audit readiness.
-              </p>
-
-              <br />
-
-              <a href="/compliance-ai">Open Workspace →</a>
-            </div>
-
-            <div className="feature-card">
-              <div className="badge">Investment AI</div>
-
-              <h3>Investment Engine</h3>
-
-              <p>
-                Deal sourcing, diligence, valuation, IC memos and investment
-                recommendations.
-              </p>
-
-              <br />
-
-              <a href="/investment-team-ai">Open Workspace →</a>
-            </div>
-
-            <div className="feature-card">
-              <div className="badge">Fundraising AI</div>
-
-              <h3>LP Intelligence</h3>
-
-              <p>
-                DDQs, LP meetings, fundraising pipeline, relationship
-                intelligence and follow-ups.
-              </p>
-
-              <br />
-
-              <a href="/fundraising-ai">Open Workspace →</a>
-            </div>
-
-            <div className="feature-card">
-              <div className="badge">Investor Portal</div>
-
-              <h3>LP Experience</h3>
-
-              <p>
-                Capital calls, distributions, fund performance, documents and
-                investor communication.
-              </p>
-
-              <br />
-
-              <a href="/investor-portal">Open Workspace →</a>
-            </div>
-          </div>
-        </section>
-        <section className="section" id="all-workspaces">
-          <h2 className="section-title">
-            Explore All VENTIQ Workspaces
-          </h2>
-
-          <div className="workspace-library-grid">
-            <a className="workspace-link-card" href="/finance-head-ai">
-              <span>Finance AI</span>
-              <strong>AI Finance Head</strong>
-              <p>Fund operations, reconciliations, workflows and approvals.</p>
-            </a>
-
-            <a className="workspace-link-card" href="/managing-partner-ai">
-              <span>Executive AI</span>
-              <strong>AI Managing Partner</strong>
-              <p>Firm health, fund performance, exits and LP storytelling.</p>
-            </a>
-
-            <a className="workspace-link-card" href="/compliance-ai">
-              <span>Compliance AI</span>
-              <strong>AI Compliance Officer</strong>
-              <p>QCR, Form 64C, audit readiness and regulatory tracking.</p>
-            </a>
-
-            <a className="workspace-link-card" href="/investment-team-ai">
-              <span>Investment AI</span>
-              <strong>AI Investment Team</strong>
-              <p>Deal pipeline, diligence, IC memos and valuation insights.</p>
-            </a>
-
-            <a className="workspace-link-card" href="/fundraising-ai">
-              <span>Fundraising AI</span>
-              <strong>AI Fundraising & IR</strong>
-              <p>LP pipeline, DDQs, fundraising decks and investor follow-ups.</p>
-            </a>
-
-            <a className="workspace-link-card" href="/investor-portal">
-              <span>Investor AI</span>
-              <strong>AI Investor Portal</strong>
-              <p>LP view for commitments, distributions, notices and documents.</p>
-            </a>
-
-            <a className="workspace-link-card" href="/capital-call">
-              <span>Workflow Engine</span>
-              <strong>AI Capital Calls</strong>
-              <p>Generate allocations, approval flows, notices and journals.</p>
-            </a>
-
-            <a className="workspace-link-card" href="/distribution-waterfall">
-              <span>Workflow Engine</span>
-              <strong>Distribution Waterfall</strong>
-              <p>Model distributable cash, waterfalls, carry and LP payouts.</p>
-            </a>
-
-            <a className="workspace-link-card" href="/bank-reconciliation">
-              <span>Accounting AI</span>
-              <strong>Bank Reconciliation</strong>
-              <p>Match transactions, review exceptions and create accounting entries.</p>
-            </a>
-
-            <a className="workspace-link-card" href="/knowledge-hub">
-              <span>Knowledge AI</span>
-              <strong>Knowledge Hub AI</strong>
-              <p>Search regulations, circulars, fund documents and internal policies.</p>
-            </a>
-
-            <a className="workspace-link-card" href="/activity-engine">
-              <span>Activity AI</span>
-              <strong>AI Activity Engine</strong>
-              <p>Track AI actions, workflow dependencies and system activity.</p>
-            </a>
-
-            <a className="workspace-link-card" href="/finance">
-              <span>Mission Control</span>
-              <strong>Finance Mission Control</strong>
-              <p>Monitor finance workflows, priorities, risk and fund operations.</p>
-            </a>
-          </div>
-        </section>
-        <section className="section" id="solutions">
-          <h2 className="section-title">
-            One Platform. Three Experiences.
-          </h2>
-
-          <div className="three-users">
-            <div className="user-card">
-              <h3>Managing Partner</h3>
-
-              <ul>
-                <li>IRR, DPI and TVPI tracking</li>
-                <li>Fund deployment monitoring</li>
-                <li>Portfolio health and risk alerts</li>
-                <li>Exit simulation and LP storytelling</li>
-                <li>Fundraising deck generation</li>
-              </ul>
-            </div>
-
-            <div className="user-card">
-              <h3>Finance & Compliance</h3>
-
-              <ul>
-                <li>Bank reconciliation</li>
-                <li>Capital calls and distributions</li>
-                <li>Accounting journals</li>
-                <li>QCR, TCR, Form 64C and Form 64D</li>
-                <li>Audit readiness and evidence tracking</li>
-              </ul>
-            </div>
-
-            <div className="user-card">
-              <h3>Investors and LPs</h3>
-
-              <ul>
-                <li>Capital call notices</li>
-                <li>Distribution updates</li>
-                <li>Fund performance and IRR</li>
-                <li>Document vault and tax certificates</li>
-                <li>AI-powered investor queries</li>
-              </ul>
-            </div>
-          </div>
-        </section>
-
-      <section className="section" id="platform">
-          <h2 className="section-title">
-            Fund Intelligence Platform
-          </h2>
-
-          <div className="feature-grid">
-            <div className="feature-card">
-              <div className="badge">Compliance</div>
-
-              <h3>Compliance Command Center</h3>
-
-              <p>
-                Track QCR, TCR, Form 64C, Form 64D, SEBI filings, GIFT City
-                compliance and custom regulatory workflows.
+                VENTIQ brings fund operations, compliance, portfolio updates,
+investor reporting and workflows into one connected operating layer —
+so every stakeholder sees the right information in real time.
               </p>
             </div>
 
-            <div className="feature-card">
-              <div className="badge">Economics</div>
+            <div className="before-after-grid">
+              <div className="before-card">
+                <p className="premium-label">Today</p>
 
-              <h3>Fee & Carry Engine</h3>
+                <h3>Information is scattered</h3>
 
-              <p>
-                Monitor management fees, carry accruals, waterfall
-                calculations, GP commitments and fund-level revenue.
-              </p>
-            </div>
+                <div className="clean-list">
+                  <div>
+                    <strong>Excel files</strong>
+                    <span>Capital calls, distributions, investor workings</span>
+                  </div>
 
-            <div className="feature-card">
-              <div className="badge">Portfolio</div>
+                  <div>
+                    <strong>Email threads</strong>
+                    <span>Approvals, queries, follow-ups and confirmations</span>
+                  </div>
 
-              <h3>Portfolio Intelligence</h3>
+                  <div>
+                    <strong>Fund admin reports</strong>
+                    <span>NAV files, statements, schedules and investor data</span>
+                  </div>
 
-              <p>
-                Track valuation changes, revenue growth, portfolio risk, exit
-                readiness and quarter-on-quarter performance.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section className="section">
-          <h2 className="section-title">
-            Performance Intelligence Snapshot
-          </h2>
-
-          <div className="dashboard-card">
-            <div className="dashboard-row">
-              <div className="mini-card">
-                <h4>24.3%</h4>
-                <p>Fund IRR</p>
-              </div>
-
-              <div className="mini-card">
-                <h4>1.8x</h4>
-                <p>DPI</p>
-              </div>
-
-              <div className="mini-card">
-                <h4>2.7x</h4>
-                <p>TVPI</p>
-              </div>
-
-              <div className="mini-card">
-                <h4>₹118 Cr</h4>
-                <p>Uncalled Capital</p>
-              </div>
-            </div>
-
-            <div className="alert-list">
-              <p>🟢 Expected Distribution: ₹41 Cr</p>
-              <p>🟡 QCR due in 4 days</p>
-              <p>🔴 ABC Logistics revenue down 12%</p>
-              <p>🟢 Carry Generated: ₹6 Cr</p>
-            </div>
-          </div>
-        </section>
-
-        <section className="section">
-          <h2 className="section-title">
-            AI Collaboration Layer
-          </h2>
-
-          <div className="dashboard-card">
-            <div className="priority-grid">
-              <div className="priority-card">
-                <h3>AI-to-AI Signals</h3>
-
-                <div className="priority-item">
-                  <span>Finance → Compliance</span>
-                  <strong>QCR risk</strong>
-                </div>
-
-                <div className="priority-item">
-                  <span>Investment → Managing Partner</span>
-                  <strong>Exit impact</strong>
-                </div>
-
-                <div className="priority-item">
-                  <span>Fundraising → MP</span>
-                  <strong>LP deck request</strong>
-                </div>
-
-                <div className="priority-item">
-                  <span>Distribution → Investor Portal</span>
-                  <strong>LP update ready</strong>
-                </div>
-
-                <div className="recommendation">
-                  AI Recommendation: Prioritize bank reconciliation and QCR
-                  preparation before releasing investor distribution updates.
+                  <div>
+                    <strong>Shared folders</strong>
+                    <span>Documents, evidence, notices and historical files</span>
+                  </div>
+                                    <div>
+                    <strong>Manual MIS</strong>
+                    <span>Numbers rechecked before every partner or investor update</span>
+                  </div>
                 </div>
               </div>
 
-              <div className="priority-card">
-                <h3>Recommended Actions</h3>
+              <div className="after-card">
+                <p className="premium-label">With VENTIQ</p>
 
-                <a className="action-button" href="/capital-call">
-                  Generate Capital Call
-                </a>
+                <h3>One fund data core powers every dashboard</h3>
 
-                <br />
+                <div className="core-summary-box">
+                  <strong>VENTIQ</strong>
+                  <span>One source of truth for dashboards, workflows and reporting</span>
+                </div>
 
-                <a className="action-button" href="/distribution-waterfall">
-                  Run Distribution Waterfall
-                </a>
-
-                <br />
-
-                <a className="action-button" href="/compliance-ai">
-                  Generate Compliance Pack
-                </a>
-
-                <br />
-
-                <a className="action-button" href="/fundraising-ai">
-                  Prepare LP Deck
-                </a>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="section">
-          <h2 className="section-title">
-            GIFT City Ready
-          </h2>
-
-          <div className="dashboard-card">
-            <div className="dashboard-grid">
-              <div className="dashboard-metric">
-                <h3>IFSCA</h3>
-                <p>Compliance Tracking</p>
-              </div>
-
-              <div className="dashboard-metric">
-                <h3>FATCA</h3>
-                <p>CRS Monitoring</p>
-              </div>
-
-              <div className="dashboard-metric">
-                <h3>AML</h3>
-                <p>KYC Management</p>
+                <div className="dashboard-pill-grid">
+                  <span>Managing Partner Dashboard</span>
+                  <span>Finance Head Workspace</span>
+                  <span>Compliance Officer View</span>
+                  <span>Investment Team Workspace</span>
+                  <span>Investor Relations View</span>
+                  <span>Investor Portal</span>
+                </div>
               </div>
             </div>
 
-            <div className="alert-box">
-              <p>✓ International investor reporting</p>
-              <p>✓ Regulatory calendar</p>
-              <p>✓ Fund-level and investor-level compliance workflows</p>
-            </div>
-          </div>
-        </section>
-
-        <section className="section">
-          <h2 className="section-title">Live Fund Operations Workspace</h2>
-
-          <div className="workspace">
-            <div className="workspace-header">
+            <div className="workflow-proof-row">
               <div>
-                <h3>Today&apos;s Fund Operations</h3>
+                <strong>Workflow-backed dashboards</strong>
                 <p>
-                  Automate the work that finance and compliance teams manually
-                  track every quarter.
+                  Capital calls, distributions, repayment notices, compliance,
+                  portfolio updates and investor reporting feed the same operating layer.
                 </p>
               </div>
 
-              <div className="status-pill">12 tasks need attention</div>
+              <div className="workflow-proof-pills">
+                <span>Capital Calls</span>
+                <span>Distributions</span>
+                <span>Repayment Notices</span>
+                <span>Compliance</span>
+                <span>Portfolio Intelligence</span>
+                <span>Investor Reporting</span>
+              </div>
+            </div>
+          </div>
+        </section>
+                <section className="section" id="modules">
+          <h2 className="section-title">
+            Six stakeholder workspaces. One connected operating experience.
+          </h2>
+
+          <div className="stakeholder-workspace-card">
+            <div className="stakeholder-workspace-header">
+              <span>Role-Based Dashboards</span>
+
+              <p>
+                VENTIQ gives each stakeholder a focused workspace built on the
+                same fund data core — so every team sees what matters to them
+                without waiting for manual MIS, email follow-ups or offline files.
+              </p>
             </div>
 
-            <div className="workflow-grid">
-              <div className="workflow-card">
-                <h3>Bank Reconciliation Queue</h3>
+            <div className="stakeholder-workspace-grid">
+              <a className="stakeholder-workspace-item" href="/managing-partner-ai">
+                <div className="workspace-tag">Leadership</div>
 
-                <div className="workflow-row">
-                  <span>Transactions imported</span>
-                  <strong>184</strong>
+                <h3>Managing Partner Dashboard</h3>
+
+                <p>
+                  Fund performance, deployment, dry powder, portfolio risk,
+                  exits and LP narrative in one executive view.
+                </p>
+
+                <div className="workspace-micro-list">
+                  <span>IRR / DPI / TVPI</span>
+                  <span>Portfolio risk</span>
+                  <span>Fundraising visibility</span>
                 </div>
 
-                <div className="workflow-row">
-                  <span>Auto-mapped</span>
-                  <strong>171</strong>
+                <strong>Open Workspace →</strong>
+              </a>
+
+              <a className="stakeholder-workspace-item" href="/finance-head-ai">
+                <div className="workspace-tag">Finance</div>
+
+                <h3>Finance Head Workspace</h3>
+
+                <p>
+                  Capital calls, distributions, reconciliations, notices,
+                  fees, investor statements and approval workflows.
+                </p>
+
+                <div className="workspace-micro-list">
+                  <span>Capital movement</span>
+                  <span>Repayment notices</span>
+                  <span>Investor reporting</span>
                 </div>
 
-                <div className="workflow-row">
-                  <span>Needs review</span>
-                  <strong>13</strong>
+                <strong>Open Workspace →</strong>
+              </a>
+
+              <a className="stakeholder-workspace-item" href="/compliance-ai">
+                <div className="workspace-tag">Compliance</div>
+
+                <h3>Compliance Officer View</h3>
+
+                <p>
+                  Regulatory obligations, filing calendars, audit evidence,
+                  Form 64C, Form 64D, QCR and GIFT City tracking.
+                </p>
+
+                <div className="workspace-micro-list">
+                  <span>Due dates</span>
+                  <span>Audit trail</span>
+                  <span>Filing evidence</span>
                 </div>
 
-                <a className="workflow-action" href="/finance-head-ai">
-                  Review Transactions
+                <strong>Open Workspace →</strong>
+              </a>
+
+              <a className="stakeholder-workspace-item" href="/investment-team-ai">
+                <div className="workspace-tag">Investment</div>
+
+                <h3>Investment Team Workspace</h3>
+
+                <p>
+                  Portfolio updates, company movement, repayment risk,
+                  valuation changes, operating signals and exit readiness.
+                </p>
+
+                <div className="workspace-micro-list">
+                  <span>Portfolio movement</span>
+                  <span>Risk signals</span>
+                  <span>Exit readiness</span>
+                </div>
+
+                <strong>Open Workspace →</strong>
+              </a>
+
+              <a className="stakeholder-workspace-item" href="/fundraising-ai">
+                <div className="workspace-tag">Investor Relations</div>
+
+                <h3>IR & Fundraising Workspace</h3>
+
+                <p>
+                  LP pipeline, DDQs, investor follow-ups, reporting packs,
+                  fundraising decks and relationship intelligence.
+                </p>
+
+                <div className="workspace-micro-list">
+                  <span>LP pipeline</span>
+                  <span>DDQs</span>
+                  <span>Deck preparation</span>
+                </div>
+
+                <strong>Open Workspace →</strong>
+              </a>
+
+              <a className="stakeholder-workspace-item" href="/investor-portal">
+                <div className="workspace-tag">Investors</div>
+
+                <h3>Investor Portal</h3>
+
+                <p>
+                  Investor-facing access to commitments, capital calls,
+                  distributions, notices, reports, statements and documents.
+                </p>
+
+                <div className="workspace-micro-list">
+                  <span>Statements</span>
+                  <span>Documents</span>
+                  <span>Fund updates</span>
+                </div>
+
+                <strong>Open Workspace →</strong>
+              </a>
+            </div>
+          </div>
+               </section>
+
+                       <section className="section" id="all-workspaces">
+          <h2 className="section-title">
+            Workflow engines powering the operating system.
+          </h2>
+
+          <div className="roadmap-board-card">
+            <div className="roadmap-board-header">
+              <span>Product Roadmap</span>
+
+              <p>
+                The stakeholder dashboards are powered by workflow engines behind
+                the scenes. Some workflows are live for walkthroughs, while
+                others are in foundation or build phase as VENTIQ expands around
+                the same fund data core.
+              </p>
+            </div>
+
+            <div className="roadmap-status-row">
+              <div>
+                <strong>Live workflows</strong>
+                <p>Ready to show in product demos</p>
+              </div>
+
+              <div>
+                <strong>Foundation ready</strong>
+                <p>Core direction and page structure are in place</p>
+              </div>
+
+              <div>
+                <strong>Build phase</strong>
+                <p>Being expanded into deeper automation</p>
+              </div>
+            </div>
+
+            <div className="roadmap-columns">
+              <div className="roadmap-column">
+                <div className="roadmap-column-top">
+                  <span className="status-live">Live</span>
+                  <h3>Ready for walkthrough</h3>
+                </div>
+
+                <a href="/capital-call">
+                  <strong>Capital Call Workflow</strong>
+                  <p>
+                    Generate investor allocations, approval flows, capital call
+                    notices and accounting-ready outputs.
+                  </p>
+                </a>
+
+                <a href="/repayment-notice">
+                  <strong>Repayment Notice Workflow</strong>
+                  <p>
+                    Generate repayment notices, prepare email drafts, track
+                    dispatch status and maintain audit history.
+                  </p>
+                </a>
+
+                <a href="/distribution-waterfall">
+                  <strong>Distribution Waterfall & Notices</strong>
+                  <p>
+                    Model distributable cash, LP payouts, waterfalls, carry and
+                    prepare distribution communication workflows.
+                  </p>
                 </a>
               </div>
 
-              <div className="workflow-card">
-                <h3>Compliance Tracker</h3>
-
-                <div className="workflow-row">
-                  <span>QCR</span>
-                  <strong>Due in 4 days</strong>
+              <div className="roadmap-column">
+                <div className="roadmap-column-top">
+                  <span className="status-ready">Foundation</span>
+                  <h3>Core workflow foundation</h3>
                 </div>
 
-                <div className="workflow-row">
-                  <span>Form 64C</span>
-                  <strong>Pending data</strong>
-                </div>
+                <a href="/portfolio-intelligence">
+                  <strong>Portfolio Intelligence</strong>
+                  <p>
+                    Track portfolio movement, company updates, repayment risk,
+                    valuation changes, news alerts and exit readiness.
+                  </p>
+                </a>
 
-                <div className="workflow-row">
-                  <span>GIFT City filing</span>
-                  <strong>On track</strong>
-                </div>
+                <a href="/document-engine">
+                  <strong>Investor Document Status</strong>
+                  <p>
+                    Organize investor documents, notices, reporting packs,
+                    certificates, workflow evidence and document status.
+                  </p>
+                </a>
 
-                <a className="workflow-action" href="/compliance-ai">
-                  Open Compliance Hub
+                <a href="/compliance-ai">
+                  <strong>Compliance & Regulatory Tracker</strong>
+                  <p>
+                    Track QCR, TCR, Form 64C, Form 64D, SEBI, GIFT City,
+                    audit readiness and regulatory evidence.
+                  </p>
+                </a>
+
+                <a href="/activity-engine">
+                  <strong>Activity Engine</strong>
+                  <p>
+                    Track workflow activity, AI actions, approvals, dependencies
+                    and operating history across the platform.
+                  </p>
                 </a>
               </div>
 
-              <div className="workflow-card">
-                <h3>Capital Call Workflow</h3>
-
-                <div className="workflow-row">
-                  <span>Draft notices</span>
-                  <strong>22</strong>
+              <div className="roadmap-column">
+                <div className="roadmap-column-top">
+                  <span className="status-build">Build phase</span>
+                  <h3>Expansion workflows</h3>
                 </div>
 
-                <div className="workflow-row">
-                  <span>Institutional format</span>
-                  <strong>Required</strong>
-                </div>
-
-                <div className="workflow-row">
-                  <span>Expected call amount</span>
-                  <strong>₹25 Cr</strong>
-                </div>
-
-                <a className="workflow-action" href="/capital-call">
-                  Generate Capital Call
+                <a href="/bank-reconciliation">
+                  <strong>Bank Reconciliation</strong>
+                  <p>
+                    Match bank transactions, review exceptions and prepare
+                    accounting entries for fund operations.
+                  </p>
                 </a>
-              </div>
 
-              <div className="workflow-card">
-                <h3>Investor Communications</h3>
+                <a href="/finance">
+                  <strong>Finance Mission Control</strong>
+                  <p>
+                    Monitor finance workflows, priorities, operating risk,
+                    approvals and fund-level action items.
+                  </p>
+                </a>
 
-                <div className="workflow-row">
-                  <span>Quarterly SOAs</span>
-                  <strong>Ready</strong>
-                </div>
+                <a href="/distribution-waterfall">
+                  <strong>Fee & Carry Engine</strong>
+                  <p>
+                    Monitor management fees, carry accruals, waterfall outputs,
+                    GP commitments and fund-level economics.
+                  </p>
+                </a>
 
-                <div className="workflow-row">
-                  <span>Distribution notices</span>
-                  <strong>Drafted</strong>
-                </div>
-
-                <div className="workflow-row">
-                  <span>Emails pending</span>
-                  <strong>48</strong>
-                </div>
-
-                <a className="workflow-action" href="/investor-portal">
-                  Send Communications
+                <a href="/knowledge-hub">
+                  <strong>Knowledge Hub</strong>
+                  <p>
+                    Search regulations, circulars, fund documents, internal
+                    policies and compliance references.
+                  </p>
                 </a>
               </div>
             </div>
           </div>
         </section>
-        <section className="section" id="about">
-          <div className="about-ventiq-card">
-            <div>
-              <p className="about-label">About VENTIQ</p>
+                <section className="section" id="solutions">
+          <h2 className="section-title">
+            Connected fund data. Clearer decisions. Faster execution.
+          </h2>
 
-              <h2>
-                Built for private capital teams that need one intelligent
-                operating system.
-              </h2>
+          <div className="operating-preview-card">
+            <div className="operating-preview-header">
+              <span>Operating Intelligence Layer</span>
 
               <p>
-                VENTIQ is building an AI operating system for VC, PE, Debt
-                Funds, AIFs and GIFT City managers — helping teams run fund
-                operations, compliance, investor reporting, portfolio
-                intelligence and fundraising from one unified platform.
+                VENTIQ is designed to turn connected fund data into live
+                decisions, task visibility, reporting readiness and stakeholder
+                communication across the firm.
               </p>
             </div>
 
-            <div className="founder-card">
-              <p className="about-label">Founder</p>
+            <div className="operating-preview-grid">
+              <div className="operating-left-panel">
+                <h3>Live operating view</h3>
+
+                <div className="operating-metric-row">
+                  <div>
+                    <strong>24.3%</strong>
+                    <span>Fund IRR</span>
+                  </div>
+
+                  <div>
+                    <strong>1.8x</strong>
+                    <span>DPI</span>
+                  </div>
+
+                  <div>
+                    <strong>₹118 Cr</strong>
+                    <span>Dry Powder</span>
+                  </div>
+                </div>
+
+                <div className="operating-signal-list">
+                  <div>
+                    <span>Expected distribution</span>
+                    <strong>₹41 Cr ready for review</strong>
+                  </div>
+
+                  <div>
+                    <span>Compliance</span>
+                    <strong>QCR due in 4 days</strong>
+                  </div>
+
+                  <div>
+                    <span>Portfolio</span>
+                    <strong>Revenue movement flagged</strong>
+                  </div>
+
+                  <div>
+                    <span>Investor reporting</span>
+                    <strong>LP update pack in progress</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div className="operating-right-panel">
+                <h3>Recommended actions</h3>
+
+                <div className="action-stack">
+                  <a href="/capital-call">
+                    <strong>Generate Capital Call</strong>
+                    <span>Prepare allocation, notice and approval workflow</span>
+                  </a>
+
+                  <a href="/distribution-waterfall">
+                    <strong>Run Distribution Waterfall</strong>
+                    <span>Review payouts, carry and LP communication impact</span>
+                  </a>
+
+                  <a href="/repayment-notice">
+                    <strong>Prepare Repayment Notices</strong>
+                    <span>Draft notices, email text and dispatch history</span>
+                  </a>
+
+                  <a href="/compliance-ai">
+                    <strong>Open Compliance Tracker</strong>
+                    <span>Review QCR, Form 64C, Form 64D and audit evidence</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+
+                       <div className="trust-layer-row">
+              <div>
+                <span>Regulatory Coverage</span>
+                <strong>AIF, GIFT City, IFSCA, FATCA, CRS and AML workflows</strong>
+              </div>
+
+              <div>
+                <span>Control & Evidence</span>
+                <strong>Approvals, notices, audit trail and supporting evidence linked to data</strong>
+              </div>
+
+              <div>
+                <span>Investor Reporting Layer</span>
+                <strong>Capital calls, distribution notices, statements, reports and documents in one place</strong>
+              </div>
+            </div>
+          </div>
+        </section>
+                       <section className="section" id="about">
+          <div className="about-premium-card">
+            <div className="about-premium-left">
+              <span className="about-pill">About VENTIQ</span>
+
+              <h2>Built from real private capital operations.</h2>
+
+              <p>
+                VENTIQ is being built for private capital firms that need one
+                connected operating layer across fund operations, compliance,
+                investor reporting, portfolio intelligence and workflow execution.
+              </p>
+
+              <p>
+                The platform is shaped around a simple operating problem: critical
+                fund information still lives across spreadsheets, emails, fund
+                administrators, shared folders and manual reporting cycles.
+              </p>
+
+              <div className="about-proof-list">
+                <div>
+                  <strong>Private capital focused</strong>
+                  <span>VC, PE, Debt Funds, AIFs and GIFT City managers</span>
+                </div>
+
+                <div>
+                  <strong>Workflow-first</strong>
+                  <span>Capital calls, distributions, notices, compliance and reporting</span>
+                </div>
+
+                <div>
+                  <strong>Stakeholder-ready</strong>
+                  <span>Dashboards for partners, finance, compliance, investment teams and LPs</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="about-founder-card">
+              <span className="about-pill">Founder</span>
 
               <h3>Shubham Jain, CA</h3>
 
               <p>
-                Chartered Accountant with experience across alternative
-                investment funds, fund operations, investor reporting and
+                Chartered Accountant with experience across alternative investment
+                funds, fund operations, investor reporting, fund reporting and
                 private capital workflows.
               </p>
 
+              <p>
+                VENTIQ is being built from practical operating experience — not as
+                another fund admin service, but as a connected operating system for
+                the teams running private capital funds.
+              </p>
+
+              <div className="founder-chip-row">
+                <span>AIF operations</span>
+                <span>Investor reporting</span>
+                <span>Fund workflows</span>
+                <span>Private capital systems</span>
+              </div>
+
               <button
-  className="action-button"
-  type="button"
-  onClick={() => setIsDemoOpen(true)}
->
-  Contact Founder →
-</button>
+                className="action-button"
+                type="button"
+                onClick={() => setIsDemoOpen(true)}
+              >
+                Contact Founder →
+              </button>
             </div>
           </div>
         </section>
-        <section className="section" id="contact">
+                <section className="section" id="contact">
           <div className="final-cta-card">
-            <h2>
-              Ready to see how VENTIQ runs a private capital firm?
-            </h2>
+            <div className="final-cta-left">
+              <span className="about-pill">Request Walkthrough</span>
 
-            <p>
-              Explore the AI workspaces built for finance, compliance,
-              investment teams, managing partners, fundraising teams and LPs.
-            </p>
+              <h2>See how VENTIQ connects private capital operations.</h2>
 
-            <div className="final-cta-actions">
-              <a className="final-primary-button" href="/#all-workspaces">
-                Explore All Workspaces →
-              </a>
+              <p>
+                Walk through the operating layer, stakeholder dashboards and
+                workflow engines being built for fund operations, compliance,
+                investor reporting, portfolio intelligence and LP communication.
+              </p>
+
+              <div className="final-cta-points">
+                <span>Stakeholder dashboards</span>
+                <span>Workflow engines</span>
+                <span>Private capital operating layer</span>
+              </div>
+            </div>
+
+            <div className="final-cta-right">
+              <h3>Built for private capital teams ready to operate from one system.</h3>
+
+              <p>
+                Designed for fund managers, finance heads, compliance teams,
+investment teams, investor relations teams and investors who need
+real-time visibility from the same fund data core.
+              </p>
+
+              <button
+                className="action-button final-cta-button"
+                type="button"
+                onClick={() => setIsDemoOpen(true)}
+              >
+                Request Walkthrough →
+              </button>
             </div>
           </div>
         </section>
-        <footer className="footer">
-          © 2026 VENTIQ — AI Powered Operating System for Private Capital
+                <footer className="footer">
+          <span>© 2026 VENTIQ</span>
+          <span>AI operating system for private capital teams</span>
         </footer>
             </div>
 
@@ -709,9 +686,9 @@ Source: useventiq.com`
           <div className="demo-modal">
             <div className="demo-modal-header">
               <div>
-                <p className="about-label">Request Demo</p>
+                <p className="about-label">Request Walkthrough</p>
 
-                <h2>See how VENTIQ can run your private capital workflows.</h2>
+                <h2>See how VENTIQ connects your private capital workflows.</h2>
 
                 <p>
                   Share your details and we will reach out with a product
