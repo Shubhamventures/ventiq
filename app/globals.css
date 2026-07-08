@@ -8787,4 +8787,36 @@ section[id],
   .legal-info-card {
     padding: 26px;
   }
+}/* =========================================================
+   FAQ PAGE
+========================================================= */
+
+.faq-item {
+  padding: 28px 0;
+  border-bottom: 1px solid rgba(113, 153, 255, 0.18);
+}
+
+.faq-item:first-child {
+  padding-top: 0;
+}
+
+.faq-item:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.faq-item h2 {
+  margin: 0 0 12px;
+  color: #ffffff;
+  font-size: clamp(26px, 2vw, 36px);
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+}
+
+.faq-item p {
+  max-width: 980px;
+  margin: 0;
+  color: #c9d8f5;
+  font-size: 19px;
+  line-height: 1.58;
 }

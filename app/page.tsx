@@ -1289,12 +1289,13 @@ Source: useventiq.com`
           <span>© 2026 VENTIQ</span>
 
           <div className="footer-links">
-            <a href="/security">Security</a>
-            <a href="/privacy">Privacy</a>
-            <a href="/terms">Terms</a>
-            <a href="#about">About</a>
-            <a href="#contact">Contact</a>
-          </div>
+  <a href="/security">Security</a>
+  <a href="/privacy">Privacy</a>
+  <a href="/terms">Terms</a>
+  <a href="/faq">FAQ</a>
+  <a href="#about">About</a>
+  <a href="#contact">Contact</a>
+</div>
 
           <span>AI operating system for private capital teams</span>
         </footer>
