@@ -312,9 +312,55 @@ Source: useventiq.com`
     window.location.href = `mailto:shubham81079@gmail.com?subject=${subject}&body=${body}`;
     setIsDemoOpen(false);
   }
-
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://useventiq.com/#organization",
+        name: "VENTIQ",
+        url: "https://useventiq.com",
+        logo: "https://useventiq.com/icon",
+        description:
+          "VENTIQ is an AI operating system for private capital teams, designed for fund operations, investor reporting, compliance workflows, portfolio intelligence and workflow execution.",
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://useventiq.com/#website",
+        url: "https://useventiq.com",
+        name: "VENTIQ",
+        publisher: {
+          "@id": "https://useventiq.com/#organization",
+        },
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://useventiq.com/#software",
+        name: "VENTIQ",
+        applicationCategory: "BusinessApplication",
+        operatingSystem: "Web",
+        url: "https://useventiq.com",
+        description:
+          "AI operating system for private capital teams covering capital calls, distributions, repayment notices, investor reporting, compliance workflows and portfolio intelligence.",
+        offers: {
+          "@type": "Offer",
+          price: "0",
+          priceCurrency: "INR",
+          availability: "https://schema.org/PreOrder",
+          description:
+            "VENTIQ is available for walkthroughs and product discussions. Pricing depends on funds, users and enabled workflows.",
+        },
+      },
+    ],
+  };
   return (
     <main>
+            <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(structuredData),
+        }}
+      />
       <div className="container">
         <header className="ventiq-header">
   <a className="ventiq-brand" href="#">
