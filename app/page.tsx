@@ -1288,7 +1288,8 @@ Source: useventiq.com`
                 <footer className="footer">
           <span>© 2026 VENTIQ</span>
 
-          <div className="footer-links">
+         <div className="footer-links">
+  <a href="/product-overview">Product Overview</a>
   <a href="/security">Security</a>
   <a href="/privacy">Privacy</a>
   <a href="/terms">Terms</a>
