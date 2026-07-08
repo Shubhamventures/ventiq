@@ -9,13 +9,15 @@ export default function Home() {
   
 
   const [demoForm, setDemoForm] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    company: "",
-    role: "",
-    message: "",
-  });
+  name: "",
+  email: "",
+  phone: "",
+  company: "",
+  role: "",
+  firmType: "",
+  primaryInterest: "",
+  message: "",
+});
     const workspacePreviews = [
     {
       label: "Executive AI View",
@@ -298,6 +300,8 @@ Email: ${demoForm.email}
 Phone: ${demoForm.phone}
 Company / Fund: ${demoForm.company}
 Role: ${demoForm.role}
+Firm Type: ${demoForm.firmType}
+Primary Interest: ${demoForm.primaryInterest}
 
 Message:
 ${demoForm.message}
@@ -1235,11 +1239,13 @@ Source: useventiq.com`
           </div>
         </section>
 
-        <footer className="footer">
+                <footer className="footer">
           <span>© 2026 VENTIQ</span>
 
           <div className="footer-links">
-            <a href="#security">Security</a>
+            <a href="/security">Security</a>
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
             <a href="#about">About</a>
             <a href="#contact">Contact</a>
           </div>
@@ -1336,6 +1342,44 @@ Source: useventiq.com`
                     }
                   />
                 </label>
+                <label>
+  Firm Type
+  <select
+    value={demoForm.firmType}
+    onChange={(event) =>
+      setDemoForm({ ...demoForm, firmType: event.target.value })
+    }
+  >
+    <option value="">Select firm type</option>
+    <option>VC Fund</option>
+    <option>Private Equity Fund</option>
+    <option>Private Credit / Venture Debt Fund</option>
+    <option>Category II AIF</option>
+    <option>GIFT City Fund</option>
+    <option>Family Office</option>
+    <option>Fund Administrator</option>
+    <option>Other</option>
+  </select>
+</label>
+
+<label>
+  Primary Interest
+  <select
+    value={demoForm.primaryInterest}
+    onChange={(event) =>
+      setDemoForm({ ...demoForm, primaryInterest: event.target.value })
+    }
+  >
+    <option value="">Select interest</option>
+    <option>Managing Partner Dashboard</option>
+    <option>Capital Call Workflow</option>
+    <option>Distribution Waterfall</option>
+    <option>Repayment Notices</option>
+    <option>Investor Portal</option>
+    <option>Compliance / Knowledge Hub</option>
+    <option>Full VENTIQ walkthrough</option>
+  </select>
+</label>
 
                 <label className="demo-message-field">
                   Message
@@ -1351,7 +1395,7 @@ Source: useventiq.com`
 
               <div className="demo-modal-actions">
                 <button className="btn" type="submit">
-                  Submit Request
+                  Send Walkthrough Request
                 </button>
 
                 <button
