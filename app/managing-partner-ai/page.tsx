@@ -199,7 +199,9 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
 
   async function loadManagingPartnerDashboard() {
     if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage("Supabase is not configured. Please check .env.local.");
+      setErrorMessage(
+  "The sample Managing Partner workspace is temporarily unavailable. Please request a walkthrough."
+);
       setLoading(false);
       return;
     }
@@ -1253,10 +1255,13 @@ async function handleGeneratePowerPoint() {
           </a>
         </div>
 
-        {loading && (
+                {loading && (
           <div className="preview-card">
-            <h2>Loading Managing Partner Dashboard...</h2>
-            <p>VENTIQ is reading fund, portfolio and deal data from Supabase.</p>
+            <h2>Preparing Managing Partner Workspace...</h2>
+            <p>
+              VENTIQ is preparing the sample fund performance, portfolio,
+              compliance and workflow intelligence view.
+            </p>
           </div>
         )}
 
@@ -1269,8 +1274,11 @@ async function handleGeneratePowerPoint() {
 
         {!loading && !errorMessage && (
           <>
+                      <div className="sample-data-ribbon">
+              Sample workspace preview · Illustrative data
+            </div>
             <div className="preview-card">
-              <h2>Good Morning, Managing Partner</h2>
+              <h2>Managing Partner Workspace Preview</h2>
 
               <div className="explain-box">
                 VENTIQ reviewed {dashboardMetrics.activeFunds} active funds,{" "}

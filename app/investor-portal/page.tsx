@@ -91,7 +91,9 @@ export default function InvestorPortalPage() {
   useEffect(() => {
     async function loadInvestors() {
       if (!isSupabaseConfigured || !supabase) {
-        setErrorMessage("Supabase is not configured. Please check .env.local.");
+        setErrorMessage(
+  "The sample Investor Portal is temporarily unavailable. Please request a walkthrough."
+);
         setLoading(false);
         return;
       }
@@ -249,7 +251,7 @@ export default function InvestorPortalPage() {
 
         {loading && (
           <div className="preview-card">
-            <h2>Loading Investor Portal...</h2>
+            <h2>Preparing Investor Portal Preview...</h2>
             <p>VENTIQ is reading investor, commitment and document records.</p>
           </div>
         )}
@@ -265,6 +267,9 @@ export default function InvestorPortalPage() {
 
         {!loading && !errorMessage && (
           <>
+                      <div className="sample-data-ribbon">
+              Sample investor portal preview · Illustrative data
+            </div>
             <div className="preview-card">
               <h2>Investor Access</h2>
 
@@ -289,10 +294,10 @@ export default function InvestorPortalPage() {
                 </select>
 
                 <div className="logic-note">
-                  This portal is powered by live Supabase data from investors,
+                  This portal is powered by connected investor, fund and document data,
                   commitments and investor_documents. Stored PDFs become
                   available here after the Document Engine uploads them to
-                  Supabase Storage.
+                  the document vault.
                 </div>
               </div>
             </div>
@@ -353,7 +358,7 @@ export default function InvestorPortalPage() {
 
             {loadingInvestorData && (
               <div className="preview-card">
-                <h2>Loading investor data...</h2>
+                <h2>Preparing investor documents and fund data...</h2>
                 <p>VENTIQ is refreshing this investor&apos;s portal records.</p>
               </div>
             )}

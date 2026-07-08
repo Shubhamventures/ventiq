@@ -205,7 +205,9 @@ const [message, setMessage] = useState("");
 
   async function loadDocumentEngine() {
     if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage("Supabase is not configured. Please check .env.local.");
+      setErrorMessage(
+  "The sample Document Engine is temporarily unavailable. Please request a walkthrough."
+);
       setLoading(false);
       return;
     }
@@ -295,7 +297,9 @@ const [message, setMessage] = useState("");
 
   async function handleDeleteInvestorDocument(documentRecord: InvestorDocument) {
     if (!supabase) {
-      setMessage("Supabase is not configured.");
+      setMessage(
+  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
+);
       return;
     }
 
@@ -333,7 +337,9 @@ const [message, setMessage] = useState("");
   nextStatus: string
 ) {
   if (!supabase) {
-    setMessage("Supabase is not configured.");
+    setMessage(
+  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -399,7 +405,9 @@ async function handleMarkInvestorDocumentEmailSent(
 
 async function handleQueueAllStoredEmails() {
   if (!supabase) {
-    setMessage("Supabase is not configured.");
+    setMessage(
+  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -456,7 +464,9 @@ async function handleQueueAllStoredEmails() {
 
 async function handleMarkAllQueuedEmailsSent() {
   if (!supabase) {
-    setMessage("Supabase is not configured.");
+    setMessage(
+  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -744,7 +754,9 @@ function buildPdfBlobFromDocumentRecord(documentRecord: InvestorDocument) {
 }
 async function handleStorePdfInSupabase() {
   if (!supabase) {
-    setMessage("Supabase is not configured.");
+    setMessage(
+  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -805,7 +817,7 @@ async function handleStorePdfInSupabase() {
 
     await loadDocumentsOnly();
 
-    setMessage(`PDF stored in Supabase Storage: ${fileName}`);
+    setMessage(`PDF stored in document vault: ${fileName}`);
   } catch (error) {
     setMessage(
       `Could not store PDF: ${
@@ -818,7 +830,9 @@ async function handleStorePdfInSupabase() {
 }
 async function handleStoreAllPdfsInSupabase() {
   if (!supabase) {
-    setMessage("Supabase is not configured.");
+    setMessage(
+  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -906,7 +920,9 @@ async function handleStoreAllPdfsInSupabase() {
 
   async function generateCapitalCallDocuments() {
     if (!supabase) {
-      setMessage("Supabase is not configured.");
+      setMessage(
+  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
+);
       return;
     }
 
@@ -1022,7 +1038,9 @@ async function handleStoreAllPdfsInSupabase() {
 
   async function generateDistributionDocuments() {
     if (!supabase) {
-      setMessage("Supabase is not configured.");
+      setMessage(
+  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
+);
       return;
     }
 
@@ -1153,10 +1171,12 @@ async function handleStoreAllPdfsInSupabase() {
             Back to Home
           </a>
         </div>
-
+        <div className="sample-data-ribbon">
+          Live document workflow preview · Sample data shown for demonstration
+        </div>
         {loading && (
           <div className="preview-card">
-            <h2>Loading Document Engine...</h2>
+            <h2>Preparing Document Engine Preview...</h2>
             <p>
               VENTIQ is reading approved capital calls, distributions and
               investor document records.
@@ -1318,7 +1338,7 @@ async function handleStoreAllPdfsInSupabase() {
   <h2>Generated Investor Documents</h2>
 
   <p className="eyebrow">
-    Latest investor document records from Supabase
+    Latest investor document records
   </p>
   <div className="action-row">
   <button
@@ -1893,7 +1913,7 @@ async function handleStoreAllPdfsInSupabase() {
     <div className="explain-box">
       This is now a PDF-style preview. In Phase 3.4, we will convert this
       template into an actual downloadable PDF and later store the PDF link in
-      Supabase Storage.
+      the document vault.
     </div>
   </div>
 )}
@@ -1923,7 +1943,7 @@ async function handleStoreAllPdfsInSupabase() {
                 </div>
 
                 <div className="queue-item">
-                  🟡 Supabase Storage file link pending
+                  🟡 Document vault file link pending
                 </div>
 
                 <div className="queue-item">

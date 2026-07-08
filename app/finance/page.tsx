@@ -20,7 +20,10 @@ investor reporting, valuation and cash intelligence.
         </div>
 
         <div className="preview-card">
-          <h2>Good Morning, Shubham 👋</h2>
+          <div className="sample-data-ribbon">
+  Sample finance dashboard preview · Illustrative data
+</div>
+          <h2>Finance Workspace Preview</h2>
 
           <div className="explain-box">
             VENTIQ has reviewed today&apos;s fund operations. There are 2

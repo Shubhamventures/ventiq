@@ -96,7 +96,9 @@ export default function PortfolioIntelligencePage() {
 
   async function loadPortfolioIntelligence() {
     if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage("Supabase is not configured. Please check .env.local.");
+      setErrorMessage(
+  "The sample Portfolio Intelligence workspace is temporarily unavailable. Please request a walkthrough."
+);
       setLoading(false);
       return;
     }
@@ -267,13 +269,18 @@ export default function PortfolioIntelligencePage() {
             Back to Home
           </a>
         </div>
-
+<div className="sample-data-ribbon">
+  Sample portfolio intelligence preview · Illustrative data
+</div>
         {loading && (
-          <div className="preview-card">
-            <h2>Loading Portfolio Intelligence...</h2>
-            <p>VENTIQ is reading portfolio and deal data from Supabase.</p>
-          </div>
-        )}
+  <div className="preview-card">
+    <h2>Preparing Portfolio Intelligence Preview...</h2>
+    <p>
+      VENTIQ is preparing the sample portfolio company, investment, repayment
+      and performance intelligence view.
+    </p>
+  </div>
+)}
 
         {!loading && errorMessage && (
           <div className="preview-card">

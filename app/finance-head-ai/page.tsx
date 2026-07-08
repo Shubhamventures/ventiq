@@ -19,7 +19,10 @@ export default function FinanceHeadAIPage() {
         </div>
 
         <div className="preview-card">
-          <h2>Good Morning, Shubham</h2>
+          <div className="sample-data-ribbon">
+  Sample finance workspace preview · Illustrative data
+</div>
+          <h2>Finance Head Workspace Preview</h2>
 
           <div className="explain-box">
             VENTIQ reviewed your fund operations overnight. You have 2 capital

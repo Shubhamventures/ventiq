@@ -671,7 +671,7 @@ return (
               <h2>AI Morning Brief</h2>
 
               <div className="explain-box">
-                <strong>Good Morning.</strong>
+                <strong>AI Capital Call Brief.</strong>
                 <br />
                 <br />
                 VENTIQ analysed all active funds overnight.

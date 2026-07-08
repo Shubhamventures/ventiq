@@ -18,7 +18,10 @@ export default function InvestmentTeamAIPage() {
         </div>
 
         <div className="preview-card">
-          <h2>Good Morning, Investment Team</h2>
+          <div className="sample-data-ribbon">
+  Sample investment workspace preview · Illustrative data
+</div>
+          <h2>Investment Team Workspace Preview</h2>
 
           <div className="explain-box">
             VENTIQ reviewed your deal pipeline overnight. 14 active deals are in

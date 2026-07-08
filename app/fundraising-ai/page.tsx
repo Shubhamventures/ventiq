@@ -19,7 +19,10 @@ export default function FundraisingAIPage() {
         </div>
 
         <div className="preview-card">
-          <h2>Good Morning, Investor Relations Team</h2>
+          <div className="sample-data-ribbon">
+  Sample investor relations workspace preview · Illustrative data
+</div>
+          <h2>Investor Relations Workspace Preview</h2>
 
           <div className="explain-box">
             VENTIQ reviewed your fundraising pipeline overnight. Fund IV is 64%

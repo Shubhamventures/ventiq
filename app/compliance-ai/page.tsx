@@ -18,7 +18,10 @@ export default function ComplianceAIPage() {
         </div>
 
         <div className="preview-card">
-          <h2>Good Morning, Compliance Team</h2>
+          <div className="sample-data-ribbon">
+  Sample compliance workspace preview · Illustrative data
+</div>
+          <h2>Compliance Workspace Preview</h2>
 
           <div className="explain-box">
             VENTIQ reviewed all compliance obligations overnight. QCR is due in

@@ -138,7 +138,9 @@ const [errorMessage, setErrorMessage] = useState("");
 
   async function loadRepaymentData() {
     if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage("Supabase is not configured. Please check .env.local.");
+      setErrorMessage(
+  "The sample Repayment Notice workflow is temporarily unavailable. Please request a walkthrough."
+);
       setLoading(false);
       return;
     }
@@ -828,7 +830,9 @@ function getQueueCompletionLabel(notice: DataRow | undefined) {
 }
 async function handleDeleteGeneratedNotice() {
   if (!supabase) {
-    setQueueActionMessage("Supabase is not configured.");
+    setQueueActionMessage(
+  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -1077,7 +1081,9 @@ email_ready_note: emailReadyDetails.emailReadyNote,
   }
 async function handleMarkNoticeSent(notice: DataRow) {
   if (!supabase) {
-    setQueueActionMessage("Supabase is not configured.");
+    setQueueActionMessage(
+  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -1134,7 +1140,9 @@ async function handleMarkNoticeSent(notice: DataRow) {
 
 async function handleMarkReminderSent(notice: DataRow) {
   if (!supabase) {
-    setQueueActionMessage("Supabase is not configured.");
+    setQueueActionMessage(
+  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -1213,7 +1221,9 @@ async function handleCopyNoticeFromQueue(notice: DataRow) {
 }
 async function handlePrepareEmailDraft(notice: DataRow) {
   if (!supabase) {
-    setQueueActionMessage("Supabase is not configured.");
+    setQueueActionMessage(
+  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -1268,7 +1278,9 @@ async function handlePrepareEmailDraft(notice: DataRow) {
 }
 async function handleSimulateEmailDispatch(notice: DataRow) {
   if (!supabase) {
-    setQueueActionMessage("Supabase is not configured.");
+    setQueueActionMessage(
+  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -1354,7 +1366,9 @@ async function handleSimulateEmailDispatch(notice: DataRow) {
 }
 async function handleResetEmailDispatch(notice: DataRow) {
   if (!supabase) {
-    setQueueActionMessage("Supabase is not configured.");
+    setQueueActionMessage(
+  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -1425,7 +1439,9 @@ setQueueActionMessage("");
 }
 async function handleCleanupStaleNoticeBatches() {
   if (!supabase) {
-    setQueueActionMessage("Supabase is not configured.");
+    setQueueActionMessage(
+  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -1696,13 +1712,18 @@ async function handleDownloadQueueNoticePdf(notice: DataRow) {
             Back to Managing Partner AI
           </a>
         </div>
-
-        {loading && (
-          <div className="preview-card">
-            <h2>Loading repayment schedules...</h2>
-            <p>VENTIQ is reading portfolio and repayment data from Supabase.</p>
-          </div>
-        )}
+<div className="sample-data-ribbon">
+  Live repayment notice workflow preview · Sample data shown for demonstration
+</div>
+       {loading && (
+  <div className="preview-card">
+    <h2>Preparing Repayment Notice Workflow...</h2>
+    <p>
+      VENTIQ is preparing the sample portfolio, investment and repayment
+      schedule workflow.
+    </p>
+  </div>
+)}
 
         {!loading && errorMessage && (
           <div className="preview-card">

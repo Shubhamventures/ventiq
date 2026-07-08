@@ -154,7 +154,9 @@ const [distributionActionMessage, setDistributionActionMessage] = useState("");
   useEffect(() => {
     async function loadFunds() {
       if (!isSupabaseConfigured || !supabase) {
-        setErrorMessage("Supabase is not configured. Please check .env.local.");
+        setErrorMessage(
+  "The sample Distribution Waterfall workflow is temporarily unavailable. Please request a walkthrough."
+);
         setLoading(false);
         return;
       }
@@ -342,7 +344,9 @@ const readyInvestorCount = savedDistributionAllocations.filter(
   }
 async function handleOpenSavedDistribution(distribution: SavedDistribution) {
   if (!supabase) {
-    setDistributionAllocationMessage("Supabase is not configured.");
+    setDistributionAllocationMessage(
+  "The sample distribution allocation workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -376,7 +380,9 @@ async function handleOpenSavedDistribution(distribution: SavedDistribution) {
 
 async function handleDeleteSavedDistribution(distribution: SavedDistribution) {
   if (!supabase) {
-    setDistributionActionMessage("Supabase is not configured.");
+    setDistributionActionMessage(
+  "The sample distribution workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -431,7 +437,9 @@ async function handleDeleteSavedDistribution(distribution: SavedDistribution) {
 
 async function handleApproveSavedDistribution(distribution: SavedDistribution) {
   if (!supabase) {
-    setDistributionActionMessage("Supabase is not configured.");
+    setDistributionActionMessage(
+  "The sample distribution workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -493,7 +501,9 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
 }
   async function handleSaveDistributionDraft() {
     if (!supabase) {
-      setSaveMessage("Supabase is not configured.");
+      setSaveMessage(
+  "The sample distribution draft workflow is temporarily unavailable. Please request a walkthrough."
+);
       return;
     }
 
@@ -595,13 +605,18 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
             Back to Home
           </a>
         </div>
-
+<div className="sample-data-ribbon">
+  Live workflow preview · Sample data shown for demonstration
+</div>
         {loading && (
-          <div className="preview-card">
-            <h2>Loading Distribution Engine...</h2>
-            <p>VENTIQ is reading fund and investor data from Supabase.</p>
-          </div>
-        )}
+  <div className="preview-card">
+    <h2>Preparing Distribution Waterfall Preview...</h2>
+    <p>
+      VENTIQ is preparing the sample fund, investor commitment and distribution
+      allocation workflow.
+    </p>
+  </div>
+)}
 
         {!loading && errorMessage && (
           <div className="preview-card">
@@ -624,7 +639,7 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
                 <strong>99%</strong>. The recommendation is based on realised
                 exit proceeds, interest collections, pending liabilities,
                 management fees, fund liquidity policy and live investor
-                commitment data from Supabase.
+                connected commitment data.
               </div>
             </div>
 
@@ -654,7 +669,7 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
   <h2>Saved Distribution Drafts</h2>
 
   <p className="eyebrow">
-    Latest saved distribution drafts from Supabase
+    Latest saved distribution drafts
   </p>
 
   {distributionActionMessage && (
@@ -826,7 +841,7 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
     <h2>Opened Distribution Allocation</h2>
 
     <p className="eyebrow">
-      Saved LP-wise distribution allocation from Supabase
+      Saved LP-wise distribution allocation preview
     </p>
 
     <div className="impact-grid">
@@ -1018,7 +1033,7 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
       </div>
 
       <div className="audit-item">
-        <strong>09:32</strong> ✓ LP-wise allocation loaded from Supabase
+        <strong>09:32</strong> ✓ LP-wise allocation loaded from connected fund data
       </div>
 
       <div className="audit-item">
@@ -1079,12 +1094,12 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
                 </div>
 
                 <div className="journal-row">
-                  <span>Total Commitments From Supabase</span>
+                  <span>Total Commitments</span>
                   <strong>{formatCr(totalCommitment)}</strong>
                 </div>
 
                 <div className="journal-row">
-                  <span>Called Capital From Supabase</span>
+                  <span>Called Capital</span>
                   <strong>{formatCr(totalCalledTillDate)}</strong>
                 </div>
 
@@ -1229,7 +1244,7 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
                 </select>
 
                 <div className="logic-note">
-                  VENTIQ pre-filled this distribution using live Supabase fund,
+                  VENTIQ pre-filled this distribution using connected fund,
                   investor and commitment data, realised exits, interest
                   collections, liquidity policy and the fund&apos;s waterfall
                   rules.

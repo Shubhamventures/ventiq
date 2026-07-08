@@ -266,7 +266,9 @@ const [savingApprovalReview, setSavingApprovalReview] = useState(false);
 
   async function loadRegulatoryCirculars() {
     if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage("Supabase is not configured. Please check .env.local.");
+      setErrorMessage(
+  "The sample Knowledge Hub is temporarily unavailable. Please request a walkthrough."
+);
       setLoading(false);
       return;
     }
@@ -497,7 +499,9 @@ function buildCircularSlugFromMatch(match: SourceMatch) {
 
 async function handleApproveSourceMatch(match: SourceMatch) {
   if (!supabase) {
-    setSourceMatchMessage("Supabase is not configured.");
+    setSourceMatchMessage(
+  "The sample source matching workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -596,7 +600,9 @@ async function handleApproveSourceMatch(match: SourceMatch) {
 
 async function handleRejectSourceMatch(match: SourceMatch) {
   if (!supabase) {
-    setSourceMatchMessage("Supabase is not configured.");
+    setSourceMatchMessage(
+  "The sample source matching workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -673,7 +679,9 @@ function openApprovalReview(match: SourceMatch) {
 
 async function handleSaveApprovedSourceMatch() {
   if (!supabase) {
-    setSourceMatchMessage("Supabase is not configured.");
+    setSourceMatchMessage(
+  "The sample source matching workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -970,8 +978,10 @@ async function handleAiFillFromPdf() {
 
   async function handleCreateCircular() {
   if (!supabase) {
-    alert("Supabase is not configured.");
-    setActionMessage("Supabase is not configured.");
+    alert("The sample Knowledge Hub workflow is temporarily unavailable.");
+setActionMessage(
+  "The sample Knowledge Hub workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -1213,13 +1223,18 @@ const selectedReviewMatches = selectedReviewAuthority
             Back to Home
           </a>
         </div>
-
+<div className="sample-data-ribbon">
+  Sample Knowledge Hub preview · Illustrative regulatory data
+</div>
         {loading && (
-          <div className="preview-card">
-            <h2>Loading Knowledge Hub...</h2>
-            <p>VENTIQ is reading regulatory circulars from Supabase.</p>
-          </div>
-        )}
+  <div className="preview-card">
+    <h2>Preparing Knowledge Hub Preview...</h2>
+    <p>
+      VENTIQ is preparing the sample regulatory circulars, SOPs and source
+      matching workspace.
+    </p>
+  </div>
+)}
 
         {!loading && errorMessage && (
           <div className="preview-card">
@@ -1236,7 +1251,7 @@ const selectedReviewMatches = selectedReviewAuthority
             <h2>No Circulars Found</h2>
 
             <div className="explain-box">
-              No active circular records found in Supabase. Please add records
+              No active circular records found for this preview. Please add sample records
               in the regulatory_circulars table.
             </div>
           </div>
@@ -1258,7 +1273,7 @@ const selectedReviewMatches = selectedReviewAuthority
 
                 <div className="logic-note">
                   Natural Language Search • AI Summary • Regulatory Impact •
-                  Fund Workflows • SOP Generation • Supabase Knowledge Base
+                  Fund Workflows • SOP Generation • Regulatory Knowledge Base
                 </div>
               </div>
             </div>
@@ -1996,7 +2011,7 @@ const selectedReviewMatches = selectedReviewAuthority
   {sourceMonitors.length === 0 && (
     <div className="explain-box">
       No source monitors found. Please check regulatory_source_monitors in
-      Supabase.
+      the knowledge base.
     </div>
   )}
 
@@ -2173,7 +2188,7 @@ const selectedReviewMatches = selectedReviewAuthority
 
               <div className="impact-card">
                 <h3>Live DB</h3>
-                <p>Supabase connected</p>
+                <p>Knowledge base connected</p>
               </div>
             </div>
 
