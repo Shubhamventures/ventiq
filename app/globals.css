@@ -8828,4 +8828,43 @@ section[id],
   gap: 16px;
   flex-wrap: wrap;
   margin-top: 34px;
+}/* =========================================================
+   FINAL TYPOGRAPHY TUNING
+   Slightly reduce oversized headings/cards
+========================================================= */
+
+.hero h1 {
+  font-size: clamp(60px, 6.8vw, 104px) !important;
+}
+
+.section .section-title,
+#ai-intelligence .section-title {
+  font-size: clamp(38px, 4.2vw, 62px) !important;
+  line-height: 1.02 !important;
+}
+
+.workspace-preview-left h3 {
+  font-size: clamp(38px, 3.8vw, 58px) !important;
+}
+
+.ai-opinion-box h4 {
+  font-size: clamp(30px, 2.7vw, 46px) !important;
+}
+
+.hero-metrics .metric-card h3,
+.security-control-strip .trust-card h3 {
+  font-size: clamp(25px, 1.8vw, 32px) !important;
+}
+
+.hero-metrics .metric-card p,
+.security-control-strip .trust-card p {
+  font-size: clamp(17px, 1.15vw, 21px) !important;
+}
+
+.ai-intelligence-grid h3 {
+  font-size: clamp(25px, 1.8vw, 32px) !important;
+}
+
+.legal-hero h1 {
+  font-size: clamp(42px, 5.2vw, 76px) !important;
 }
