@@ -158,7 +158,8 @@ export default function CapitalCallPage() {
   const [investorBatch, setInvestorBatch] = useState("All investors");
   const [excludedInvestor, setExcludedInvestor] = useState("None");
   const [isApproved, setIsApproved] = useState(false);
-  const [savingDraft, setSavingDraft] = useState(false);
+const [hasGeneratedCapitalCall, setHasGeneratedCapitalCall] = useState(false);
+const [savingDraft, setSavingDraft] = useState(false);
 const [saveMessage, setSaveMessage] = useState("");
 const [savedDrafts, setSavedDrafts] = useState<SavedCapitalCall[]>([]);
 const [loadingSavedDrafts, setLoadingSavedDrafts] = useState(false);
@@ -179,7 +180,7 @@ const [approvingDraftId, setApprovingDraftId] = useState("");
   useEffect(() => {
     async function loadFunds() {
       if (!isSupabaseConfigured || !supabase) {
-        setErrorMessage("Supabase is not configured. Please check .env.local.");
+        setErrorMessage("The sample workflow is temporarily unavailable. Please request a walkthrough.");
         setLoading(false);
         return;
       }
@@ -360,7 +361,9 @@ const [approvingDraftId, setApprovingDraftId] = useState("");
 }
 async function handleOpenSavedDraft(draft: SavedCapitalCall) {
   if (!supabase) {
-    setDraftAllocationMessage("Supabase is not configured.");
+    setDraftAllocationMessage(
+  "The sample allocation workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -392,9 +395,16 @@ setSavedDraftAllocations([]);
 
   setLoadingDraftAllocation(false);
 }
+function handleCloseSavedDraftPreview() {
+  setSelectedSavedDraft(null);
+  setSavedDraftAllocations([]);
+  setDraftAllocationMessage("");
+}
 async function handleDeleteSavedDraft(draft: SavedCapitalCall) {
   if (!supabase) {
-    setDraftActionMessage("Supabase is not configured.");
+    setDraftActionMessage(
+  "The sample capital call workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -446,7 +456,9 @@ async function handleDeleteSavedDraft(draft: SavedCapitalCall) {
 }
 async function handleApproveSavedDraft(draft: SavedCapitalCall) {
   if (!supabase) {
-    setDraftActionMessage("Supabase is not configured.");
+    setDraftActionMessage(
+  "The sample capital call workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
@@ -506,21 +518,46 @@ await loadSavedDrafts();
 setDraftActionMessage("Capital call draft approved successfully.");
 setApprovingDraftId("");
 }
+function handleProceedWithCapitalCall() {
+  if (!selectedFundId) {
+    setSaveMessage("Please select a fund before proceeding.");
+    return;
+  }
+
+  setHasGeneratedCapitalCall(true);
+  setIsApproved(false);
+
+  setSaveMessage(
+    "Capital call draft generated. Review the draft preview below, then save the draft."
+  );
+
+  setTimeout(() => {
+    document
+      .getElementById("capital-call-draft-preview")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 100);
+}
 async function handleSaveDraft() {
   if (!supabase) {
-    setSaveMessage("Supabase is not configured.");
+    setSaveMessage(
+  "The sample draft workflow is temporarily unavailable. Please request a walkthrough."
+);
     return;
   }
 
   if (!selectedFundId) {
-    setSaveMessage("Please select a fund before saving.");
-    return;
-  }
+  setSaveMessage("Please select a fund before saving.");
+  return;
+}
 
-  if (calculatedInvestors.length === 0) {
-    setSaveMessage("No investor allocation found to save.");
-    return;
+if (!hasGeneratedCapitalCall) {
+  setSaveMessage("Please click Proceed with Capital Call before saving the draft.");
+  return;
+}
 
+if (calculatedInvestors.length === 0) {
+  setSaveMessage("No investor allocation found to save.");
+  return;
 }
   setSavingDraft(true);
   setSaveMessage("");
@@ -540,7 +577,7 @@ const { data: savedCall, error: callError } = await supabase
   due_date: dueDate,
   fund_id: selectedFundId,
     call_amount: callAmount * 10000000,
-    status: isApproved ? "approved" : "draft",
+    status: "draft",
     allocation_method: allocationMethod,
     investor_batch: investorBatch,
     excluded_investor: excludedInvestor === "None" ? null : excludedInvestor,
@@ -608,11 +645,14 @@ return (
             Back to Home
           </a>
         </div>
+                <div className="sample-data-ribbon">
+          Live workflow preview · Sample data shown for demonstration
+        </div>
 
         {loading && (
           <div className="preview-card">
-            <h2>Loading Capital Call Engine...</h2>
-            <p>VENTIQ is reading fund and commitment data from Supabase.</p>
+            <h2>Preparing Capital Call Workspace...</h2>
+<p>VENTIQ is preparing the sample fund, investor commitment and allocation workflow.</p>
           </div>
         )}
 
@@ -691,7 +731,7 @@ return (
 <div className="preview-card">
   <h2>Saved Capital Call Drafts</h2>
 
-  <p className="eyebrow">Latest saved drafts from Supabase</p>
+  <p className="eyebrow">Latest saved capital call drafts</p>
   {draftActionMessage && (
   <div className="logic-note">{draftActionMessage}</div>
 )}
@@ -732,12 +772,24 @@ return (
             </td>
 <td>
   <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-    <button
+        <button
       type="button"
-      onClick={() => handleOpenSavedDraft(draft)}
+      onClick={() => {
+        if (selectedSavedDraft?.id === draft.id) {
+          handleCloseSavedDraftPreview();
+        } else {
+          handleOpenSavedDraft(draft);
+        }
+      }}
       style={{
-        border: "1px solid rgba(96, 165, 250, 0.45)",
-        background: "rgba(37, 99, 235, 0.16)",
+        border:
+          selectedSavedDraft?.id === draft.id
+            ? "1px solid rgba(148, 163, 184, 0.45)"
+            : "1px solid rgba(96, 165, 250, 0.45)",
+        background:
+          selectedSavedDraft?.id === draft.id
+            ? "rgba(71, 85, 105, 0.22)"
+            : "rgba(37, 99, 235, 0.16)",
         color: "#dbeafe",
         borderRadius: "999px",
         padding: "8px 16px",
@@ -746,35 +798,39 @@ return (
         cursor: "pointer",
       }}
     >
-      Open
+      {selectedSavedDraft?.id === draft.id ? "Close Preview" : "Open Preview"}
     </button>
 
-    <button
-      type="button"
-      onClick={() => handleApproveSavedDraft(draft)}
-      disabled={draft.status === "approved" || approvingDraftId === draft.id}
-      style={{
-        border: "1px solid rgba(74, 222, 128, 0.45)",
-        background: "rgba(22, 101, 52, 0.18)",
-        color: "#bbf7d0",
-        borderRadius: "999px",
-        padding: "8px 16px",
-        fontSize: "14px",
-        fontWeight: 700,
-        cursor:
-          draft.status === "approved" || approvingDraftId === draft.id
-            ? "not-allowed"
-            : "pointer",
-        opacity:
-          draft.status === "approved" || approvingDraftId === draft.id ? 0.6 : 1,
-      }}
-    >
-      {approvingDraftId === draft.id
-        ? "Approving..."
-        : draft.status === "approved"
-        ? "Approved"
-        : "Approve"}
-    </button>
+    {selectedSavedDraft?.id === draft.id && (
+      <button
+        type="button"
+        onClick={() => handleApproveSavedDraft(draft)}
+        disabled={draft.status === "approved" || approvingDraftId === draft.id}
+        style={{
+          border: "1px solid rgba(74, 222, 128, 0.45)",
+          background: "rgba(22, 101, 52, 0.18)",
+          color: "#bbf7d0",
+          borderRadius: "999px",
+          padding: "8px 16px",
+          fontSize: "14px",
+          fontWeight: 700,
+          cursor:
+            draft.status === "approved" || approvingDraftId === draft.id
+              ? "not-allowed"
+              : "pointer",
+          opacity:
+            draft.status === "approved" || approvingDraftId === draft.id
+              ? 0.6
+              : 1,
+        }}
+      >
+        {approvingDraftId === draft.id
+          ? "Approving..."
+          : draft.status === "approved"
+          ? "Approved"
+          : "Approve"}
+      </button>
+    )}
 
     <button
       type="button"
@@ -806,9 +862,9 @@ return (
   <div className="preview-card">
     <h2>Opened Draft Allocation</h2>
 
-    <p className="eyebrow">
-      Saved investor-wise allocation from Supabase
-    </p>
+   <p className="eyebrow">
+  Saved investor-wise allocation preview
+</p>
 
     <div className="impact-grid">
       <div className="impact-card">
@@ -903,7 +959,7 @@ return (
                 </div>
 
                 <div className="journal-row">
-                  <span>Total Commitments From Supabase</span>
+                  <span>Total Commitments</span>
                   <strong>{formatCr(totalCommitment)}</strong>
                 </div>
 
@@ -1020,6 +1076,7 @@ return (
                     setInvestorBatch("All investors");
                     setExcludedInvestor("None");
                     setIsApproved(false);
+                    setHasGeneratedCapitalCall(false);
                   }}
                 >
                   {funds.map((fund) => (
@@ -1032,7 +1089,11 @@ return (
                 <label>Fund Structure</label>
                 <select
                   value={fundType}
-                  onChange={(event) => setFundType(event.target.value)}
+                  onChange={(event) => {
+  setFundType(event.target.value);
+  setIsApproved(false);
+  setHasGeneratedCapitalCall(false);
+}}
                 >
                   <option>Close-ended Fund</option>
                   <option>Open-ended Fund</option>
@@ -1045,6 +1106,7 @@ return (
                   onChange={(event) => {
                     setCallAmount(Number(event.target.value));
                     setIsApproved(false);
+                    setHasGeneratedCapitalCall(false);
                   }}
                 />
 
@@ -1054,6 +1116,7 @@ return (
                   onChange={(event) => {
                     setAllocationMethod(event.target.value);
                     setIsApproved(false);
+                    setHasGeneratedCapitalCall(false);
                   }}
                 >
                   <option>Pro-rata based on committed capital</option>
@@ -1066,6 +1129,7 @@ return (
                   onChange={(event) => {
                     setInvestorBatch(event.target.value);
                     setIsApproved(false);
+                    setHasGeneratedCapitalCall(false);
                   }}
                 >
                   {batchOptions.map((batch) => (
@@ -1079,6 +1143,7 @@ return (
                   onChange={(event) => {
                     setExcludedInvestor(event.target.value);
                     setIsApproved(false);
+                    setHasGeneratedCapitalCall(false);
                   }}
                 >
                   <option>None</option>
@@ -1088,92 +1153,170 @@ return (
                 </select>
 
                 <div className="logic-note">
-                  VENTIQ pre-filled this capital call using live Supabase fund,
-                  investor and commitment data, while keeping the allocation
-                  editable before approval.
+                 VENTIQ pre-filled this capital call using connected fund,
+investor and commitment data, while keeping the allocation
+editable before approval.
                 </div>
 
-                <div className="action-row">
-                  <button onClick={() => setIsApproved(true)}>
-                    {isApproved ? "✓ Approval Complete" : "Approve Capital Call"}
-                  </button>
-
-                <button
+                                <div className="action-row">
+                  <button
   type="button"
-  onClick={handleSaveDraft}
-  disabled={savingDraft || calculatedInvestors.length === 0}
+  onClick={handleProceedWithCapitalCall}
+  disabled={loadingCommitments || !selectedFundId}
 >
-  {savingDraft ? "Saving..." : "Save Draft"}
-</button>                </div>
-{saveMessage && <div className="logic-note">{saveMessage}</div>}
+  {hasGeneratedCapitalCall
+    ? "✓ Draft Generated"
+    : "Proceed with Capital Call"}
+</button>
+                </div>
+
+                {!hasGeneratedCapitalCall && (
+                  <div className="logic-note">
+                    Choose the fund, amount, allocation method and investor batch.
+                    Then click Proceed with Capital Call to generate the draft preview.
+                  </div>
+                )}
+
+                {saveMessage && <div className="logic-note">{saveMessage}</div>}
               </div>
             </div>
 
-            <div className="preview-card">
-              <h2>AI Allocation Preview</h2>
+                        <div id="capital-call-draft-preview" className="preview-card">
+              <h2>Draft Preview Before Saving</h2>
 
-              {loadingCommitments && <p>Loading investor commitments...</p>}
-
-              {!loadingCommitments && calculatedInvestors.length === 0 && (
+              {!hasGeneratedCapitalCall && (
                 <div className="explain-box">
-                  No investor commitments found for this fund.
+                  Draft preview will appear here after you click Proceed with
+                  Capital Call.
                 </div>
               )}
+              {hasGeneratedCapitalCall && calculatedInvestors.length === 0 && (
+  <div className="explain-box">
+    Draft generated, but no investor commitment rows are available for this
+    fund. Please check the selected fund or investor commitment data.
+  </div>
+)}
 
-              {!loadingCommitments && calculatedInvestors.length > 0 && (
-                <table className="investor-table">
-                  <thead>
-                    <tr>
-                      <th>Investor</th>
-                      <th>Preference</th>
-                      <th>Basis</th>
-                      <th>Call</th>
-                      <th>Risk</th>
-                      <th>ETA</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
+              {hasGeneratedCapitalCall && (
+                <>
+                  <div className="impact-grid">
+                    <div className="impact-card">
+                      <h3>{selectedFundName}</h3>
+                      <p>Fund selected</p>
+                    </div>
 
-                  <tbody>
-                    {calculatedInvestors.map((investor) => (
-                      <tr key={investor.id}>
-                        <td>{investor.name}</td>
-                        <td>{investor.preference}</td>
-                        <td>
-                          {investor.isEligible
-                            ? `${(investor.ratio * 100).toFixed(2)}%`
-                            : "Excluded"}
-                        </td>
-                        <td>{formatCr(investor.investorCall)}</td>
-                        <td>{investor.risk}</td>
-                        <td>{investor.isEligible ? investor.eta : "Excluded"}</td>
-                        <td>
-                          <span className="small-pill">
-                            {investor.isEligible ? "Ready" : "Skipped"}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    <div className="impact-card">
+                      <h3>{formatCr(callAmount)}</h3>
+                      <p>Draft call amount</p>
+                    </div>
+
+                    <div className="impact-card">
+                      <h3>{eligibleCount}</h3>
+                      <p>Eligible LPs</p>
+                    </div>
+
+                    <div className="impact-card">
+                      <h3>{excludedCount}</h3>
+                      <p>Excluded LPs</p>
+                    </div>
+                  </div>
+
+                  <div className="explain-box">
+                    This is the draft capital call allocation before saving.
+                    Review investor-wise allocation, basis, call amount, risk
+                    and ETA before creating the saved draft.
+                  </div>
+
+                  {loadingCommitments && <p>Loading investor commitments...</p>}
+
+                  {!loadingCommitments && calculatedInvestors.length === 0 && (
+                    <div className="explain-box">
+                      No investor commitments found for this fund.
+                    </div>
+                  )}
+
+                  {!loadingCommitments && calculatedInvestors.length > 0 && (
+                    <table className="investor-table">
+                      <thead>
+                        <tr>
+                          <th>Investor</th>
+                          <th>Preference</th>
+                          <th>Basis</th>
+                          <th>Call</th>
+                          <th>Risk</th>
+                          <th>ETA</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {calculatedInvestors.map((investor) => (
+                          <tr key={investor.id}>
+                            <td>{investor.name}</td>
+                            <td>{investor.preference}</td>
+                            <td>
+                              {investor.isEligible
+                                ? `${(investor.ratio * 100).toFixed(2)}%`
+                                : "Excluded"}
+                            </td>
+                            <td>{formatCr(investor.investorCall)}</td>
+                            <td>{investor.risk}</td>
+                            <td>
+                              {investor.isEligible ? investor.eta : "Excluded"}
+                            </td>
+                            <td>
+                              <span className="small-pill">
+                                {investor.isEligible ? "Ready" : "Skipped"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  <div className="action-row">
+                    <button
+                      type="button"
+                      onClick={handleSaveDraft}
+                      disabled={savingDraft || calculatedInvestors.length === 0}
+                    >
+                      {savingDraft ? "Saving Draft..." : "Save Draft"}
+                    </button>
+                  </div>
+                </>
               )}
             </div>
 
-            <div className="preview-card">
-              <h2>Approval Workflow</h2>
+                        {selectedSavedDraft && (
+              <div className="preview-card">
+                <h2>Approval Workflow</h2>
 
-              <div className="approval-flow">
-                <div className="approval-step">Draft</div>
-                <div className={isApproved ? "approval-step" : "approval-step current"}>
-                  Finance Head Review
+                <div className="approval-flow">
+                  <div className="approval-step">Draft Saved</div>
+
+                  <div
+                    className={
+                      isApproved ? "approval-step" : "approval-step current"
+                    }
+                  >
+                    Finance Head Review
+                  </div>
+
+                  <div className="approval-step">Managing Partner</div>
+
+                  <div
+                    className={
+                      isApproved ? "approval-step current" : "approval-step"
+                    }
+                  >
+                    Approved
+                  </div>
+
+                  <div className="approval-step">Posted</div>
                 </div>
-                <div className="approval-step">Managing Partner</div>
-                <div className={isApproved ? "approval-step current" : "approval-step"}>
-                  Approved
-                </div>
-                <div className="approval-step">Posted</div>
               </div>
-            </div>
+            )}
 
             <div className="preview-card">
               <h2>Post-Approval Automation</h2>
@@ -1269,7 +1412,7 @@ return (
         textDecoration: "none",
       }}
     >
-      Generate Investor Documents
+      Generate Capital Call Notices
     </a>
   </div>
 )}
@@ -1389,7 +1532,7 @@ return (
                 </div>
 
                 <div className="audit-item">
-                  <strong>09:37</strong> ✓ Allocation generated from Supabase
+                  <strong>09:37</strong> ✓ Allocation generated from connected fund data
                 </div>
 
                 <div className="audit-item">
