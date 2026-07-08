@@ -3,6 +3,7 @@ import { ImageResponse } from "next/og";
 export const runtime = "edge";
 
 export const alt = "VENTIQ — AI Operating System for Private Capital";
+
 export const size = {
   width: 1200,
   height: 630,
@@ -21,10 +22,10 @@ export default function OpenGraphImage() {
           flexDirection: "column",
           justifyContent: "space-between",
           padding: "72px",
-          color: "white",
+          color: "#ffffff",
           background:
-            "radial-gradient(circle at 80% 10%, rgba(57, 112, 255, 0.42), transparent 34%), linear-gradient(135deg, #050a16 0%, #08152e 52%, #040814 100%)",
-          fontFamily: "Arial",
+            "linear-gradient(135deg, #050a16 0%, #08152e 55%, #040814 100%)",
+          fontFamily: "Arial, sans-serif",
         }}
       >
         <div
@@ -32,47 +33,60 @@ export default function OpenGraphImage() {
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            fontSize: "30px",
-            fontWeight: 800,
-            letterSpacing: "-0.04em",
+            width: "100%",
           }}
         >
-          <div>VENTIQ</div>
           <div
             style={{
-              fontSize: "18px",
-              color: "#a8c5ff",
-              border: "1px solid rgba(168, 197, 255, 0.38)",
+              fontSize: "36px",
+              fontWeight: 900,
+              letterSpacing: "-0.06em",
+            }}
+          >
+            VENTIQ
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              border: "1px solid rgba(168, 197, 255, 0.42)",
               borderRadius: "999px",
               padding: "12px 20px",
+              color: "#bcd0ff",
+              fontSize: "18px",
+              fontWeight: 700,
             }}
           >
             Private Capital Operating Layer
           </div>
         </div>
 
-        <div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            maxWidth: "960px",
+          }}
+        >
           <div
             style={{
-              display: "inline-flex",
-              width: "fit-content",
-              marginBottom: "26px",
+              display: "flex",
+              alignSelf: "flex-start",
+              marginBottom: "28px",
               padding: "12px 18px",
               borderRadius: "999px",
-              background: "rgba(47, 109, 242, 0.22)",
+              background: "rgba(47, 109, 242, 0.24)",
               color: "#bcd0ff",
               fontSize: "18px",
               fontWeight: 800,
               letterSpacing: "0.08em",
-              textTransform: "uppercase",
             }}
           >
-            AI Operating System
+            AI OPERATING SYSTEM
           </div>
 
           <div
             style={{
-              maxWidth: "930px",
               fontSize: "82px",
               lineHeight: "0.95",
               fontWeight: 900,
@@ -84,11 +98,11 @@ export default function OpenGraphImage() {
 
           <div
             style={{
-              maxWidth: "900px",
               marginTop: "30px",
               color: "#c9d8f5",
               fontSize: "28px",
               lineHeight: "1.35",
+              maxWidth: "930px",
             }}
           >
             Capital calls, distributions, repayment notices, compliance,
@@ -101,7 +115,7 @@ export default function OpenGraphImage() {
             display: "flex",
             gap: "18px",
             color: "#dbe8ff",
-            fontSize: "20px",
+            fontSize: "22px",
             fontWeight: 700,
           }}
         >
