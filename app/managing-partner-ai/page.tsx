@@ -21,6 +21,14 @@ type DeckSlideOption = {
   includeNarrative: boolean;
   includeChart: boolean;
 };
+type ConnectedActivityEvent = {
+  id: string;
+  time: string;
+  module: string;
+  title: string;
+  description: string;
+  status: string;
+};
 type DeckMetricKey =
   | "fundOverview"
   | "fundPerformance"
@@ -114,6 +122,29 @@ function formatDate(value: unknown) {
     month: "short",
     year: "numeric",
   });
+}
+function formatDateTime(value: unknown) {
+  if (typeof value !== "string" || !value) return "-";
+
+  return new Date(value).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getActivityIcon(status: string) {
+  const value = status.toLowerCase();
+
+  if (value.includes("approved")) return "🟢";
+  if (value.includes("generated")) return "🔵";
+  if (value.includes("available")) return "🟢";
+  if (value.includes("stored")) return "🟣";
+  if (value.includes("queued")) return "🟡";
+  if (value.includes("sent")) return "🟢";
+
+  return "⚪";
 }
 
 function statusLabel(value: string) {
@@ -468,7 +499,116 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     portfolioCompanyMetrics,
     portfolioCompanies,
   ]);
+  const connectedActivityEvents = useMemo(() => {
+    const events: ConnectedActivityEvent[] = [];
 
+    capitalCalls.forEach((call) => {
+      const status = getString(call, ["status"], "draft");
+      const callAmount = getNumber(call, [
+        "call_amount",
+        "capital_call_amount",
+        "total_amount",
+        "amount",
+      ]);
+
+      events.push({
+        id: `capital-call-${getId(call)}`,
+        time: getString(call, ["created_at", "call_date"], ""),
+        module: "Capital Call",
+        title:
+          status === "approved"
+            ? "Capital call approved"
+            : "Capital call draft created",
+        description: `${getString(
+          call,
+          ["call_name", "name"],
+          "Capital Call"
+        )} • ${formatCurrencyCr(callAmount)}`,
+        status,
+      });
+    });
+
+    investorDocuments.forEach((documentRecord) => {
+      const documentId = getId(documentRecord);
+      const documentType = getString(
+        documentRecord,
+        ["document_type"],
+        "Investor Document"
+      );
+      const documentName = getString(
+        documentRecord,
+        ["document_name"],
+        "Investor Document"
+      );
+      const investorName = getString(
+        documentRecord,
+        ["investor_name"],
+        "Investor"
+      );
+      const amount = getNumber(documentRecord, ["amount"]);
+      const generatedAt = getString(documentRecord, ["generated_at"], "");
+
+      events.push({
+        id: `document-generated-${documentId}`,
+        time: generatedAt,
+        module: "Document Engine",
+        title: `${documentType} generated`,
+        description: `${documentName} for ${investorName} • ${formatCurrencyCr(
+          amount
+        )}`,
+        status: getString(documentRecord, ["status"], "generated"),
+      });
+
+      if (getString(documentRecord, ["portal_status"], "") === "available") {
+        events.push({
+          id: `portal-${documentId}`,
+          time: generatedAt,
+          module: "Investor Portal",
+          title: "Investor portal updated",
+          description: `${documentType} made available to ${investorName}`,
+          status: "available",
+        });
+      }
+
+      if (getString(documentRecord, ["storage_url"], "")) {
+        events.push({
+          id: `vault-${documentId}`,
+          time: generatedAt,
+          module: "Document Vault",
+          title: "PDF stored in portal vault",
+          description: `${documentName} is stored and ready for investor access`,
+          status: "stored",
+        });
+      }
+
+      const emailStatus = getString(documentRecord, ["email_status"], "");
+
+      if (emailStatus === "queued" || emailStatus === "sent") {
+        events.push({
+          id: `email-${documentId}`,
+          time: generatedAt,
+          module: "Email Dispatch",
+          title:
+            emailStatus === "sent"
+              ? "Investor email marked sent"
+              : "Investor email queued",
+          description: `${documentName} email ${emailStatus} for ${getString(
+            documentRecord,
+            ["investor_email"],
+            "investor"
+          )}`,
+          status: emailStatus,
+        });
+      }
+    });
+
+    return events.sort((a, b) => {
+      const aTime = new Date(a.time || 0).getTime();
+      const bTime = new Date(b.time || 0).getTime();
+
+      return bTime - aTime;
+    });
+  }, [capitalCalls, investorDocuments]);
   const fundRows = useMemo(() => {
     return funds.map((fund) => {
       const fundId = getId(fund);
@@ -1348,8 +1488,81 @@ async function handleGeneratePowerPoint() {
                 <p>Unrealized value</p>
               </div>
             </div>
-
             <div className="preview-card">
+              <div className="source-monitor-header">
+                <div>
+                  <h2>Today&apos;s Connected Fund Activity</h2>
+                  <p>
+                    Live activity from Capital Call, Document Engine, Investor
+                    Portal, Document Vault and Email Dispatch.
+                  </p>
+                </div>
+
+                <a
+                  className="monitor-btn monitor-btn-primary"
+                  href="/activity-engine"
+                >
+                  Open Activity Engine
+                </a>
+              </div>
+
+              <div className="impact-grid">
+                <div className="impact-card">
+                  <h3>{connectedActivityEvents.length}</h3>
+                  <p>Workflow evidence points</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{dashboardMetrics.generatedDocuments}</h3>
+                  <p>Documents generated</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{dashboardMetrics.storedDocuments}</h3>
+                  <p>Stored PDFs</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>
+                    {dashboardMetrics.queuedEmails +
+                      dashboardMetrics.sentEmails}
+                  </h3>
+                  <p>Email actions</p>
+                </div>
+              </div>
+
+              {connectedActivityEvents.length === 0 && (
+                <div className="explain-box">
+                  No connected fund activity found yet. Approve a capital call,
+                  generate notices in Document Engine and publish them to the
+                  Investor Portal to create the first activity trail.
+                </div>
+              )}
+
+              {connectedActivityEvents.length > 0 && (
+                <div className="audit-timeline">
+                  {connectedActivityEvents.slice(0, 8).map((event) => (
+                    <div className="audit-item" key={event.id}>
+                      <strong>{formatDateTime(event.time)}</strong>{" "}
+                      {getActivityIcon(event.status)} {event.title}
+                      <br />
+                      <span>
+                        {event.module} — {event.description}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="explain-box">
+                This gives the Managing Partner a live operating view of the
+                connected VENTIQ loop: Finance approval, document generation,
+                investor portal visibility, storage status, email dispatch and
+                audit evidence.
+              </div>
+            </div>
+
+                       <div className="preview-card">
               <h2>Executive Attention Queue</h2>
 
               <div className="queue-grid">
