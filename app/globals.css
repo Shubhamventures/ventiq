@@ -8867,4 +8867,206 @@ section[id],
 
 .legal-hero h1 {
   font-size: clamp(42px, 5.2vw, 76px) !important;
+}/* =========================================================
+   VENTIQ HOMEPAGE REPOSITIONING POLISH
+   Dashboard-first narrative: One fund. Six stakeholders.
+========================================================= */
+
+.hero {
+  max-width: 1320px !important;
+}
+
+.hero h1 {
+  max-width: 1180px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  font-size: clamp(56px, 6.2vw, 98px) !important;
+  line-height: 0.98 !important;
+  letter-spacing: -0.065em !important;
+}
+
+.hero p {
+  max-width: 1120px !important;
+  font-size: clamp(21px, 1.65vw, 30px) !important;
+  line-height: 1.42 !important;
+}
+
+.hero-founder-signal {
+  max-width: 900px !important;
+}
+
+#why-ventiq .premium-os-header p {
+  max-width: 1060px !important;
+}
+
+#why-ventiq .before-after-grid {
+  align-items: stretch !important;
+}
+
+#why-ventiq .before-card,
+#why-ventiq .after-card {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+#why-ventiq .before-card h3,
+#why-ventiq .after-card h3 {
+  font-size: clamp(32px, 2.7vw, 48px) !important;
+  line-height: 1.08 !important;
+}
+
+#why-ventiq .clean-list {
+  display: grid !important;
+  gap: 14px !important;
+}
+
+#why-ventiq .clean-list > div {
+  min-height: 92px !important;
+}
+
+#why-ventiq .clean-list strong {
+  font-size: clamp(18px, 1.35vw, 23px) !important;
+  line-height: 1.2 !important;
+}
+
+#why-ventiq .clean-list span {
+  font-size: clamp(15px, 1.05vw, 18px) !important;
+  line-height: 1.38 !important;
+}
+
+#modules {
+  scroll-margin-top: 135px !important;
+}
+
+.stakeholder-workspace-header p,
+.ai-preview-header p,
+.roadmap-board-header p,
+.operating-preview-header p {
+  max-width: 1120px !important;
+}
+
+.roadmap-status-row strong {
+  font-size: clamp(22px, 1.6vw, 30px) !important;
+}
+
+.footer span:last-child {
+  color: #dbe8ff !important;
+  font-weight: 800 !important;
+}
+
+@media (max-width: 900px) {
+  .hero h1 {
+    font-size: 48px !important;
+  }
+
+  #why-ventiq .clean-list > div {
+    min-height: auto !important;
+  }
+}/* =========================================================
+   HERO REFINEMENT — PLATFORM + DASHBOARD POSITIONING
+========================================================= */
+
+.hero {
+  max-width: 1320px !important;
+  padding-top: 118px !important;
+}
+
+.hero-eyebrow {
+  margin-bottom: 34px !important;
+  padding: 14px 28px !important;
+  font-size: clamp(13px, 1vw, 16px) !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+}
+
+.hero h1 {
+  max-width: 1160px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  font-size: clamp(58px, 6.1vw, 98px) !important;
+  line-height: 0.98 !important;
+  letter-spacing: -0.065em !important;
+}
+
+.hero p {
+  max-width: 1080px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  font-size: clamp(21px, 1.6vw, 28px) !important;
+  line-height: 1.42 !important;
+}
+
+.hero-founder-signal {
+  max-width: 880px !important;
+  margin-top: 34px !important;
+  font-size: clamp(16px, 1.15vw, 20px) !important;
+  line-height: 1.35 !important;
+}
+
+.hero-actions {
+  margin-top: 44px !important;
+}
+
+/* Reduce headline heaviness slightly on medium screens */
+@media (max-width: 1100px) {
+  .hero h1 {
+    font-size: clamp(52px, 7vw, 76px) !important;
+  }
+
+  .hero p {
+    font-size: 22px !important;
+  }
+}
+
+/* Mobile hero */
+@media (max-width: 640px) {
+  .hero {
+    padding-top: 96px !important;
+  }
+
+  .hero-eyebrow {
+    font-size: 12px !important;
+    padding: 12px 18px !important;
+    margin-bottom: 26px !important;
+  }
+
+  .hero h1 {
+    font-size: 44px !important;
+    line-height: 1.02 !important;
+    letter-spacing: -0.055em !important;
+  }
+
+  .hero p {
+    font-size: 18px !important;
+    line-height: 1.5 !important;
+  }
+
+  .hero-founder-signal {
+    font-size: 15px !important;
+  }
+}/* =========================================================
+   FINAL HERO SCALE TUNING
+========================================================= */
+
+.hero h1 {
+  max-width: 1060px !important;
+  font-size: clamp(54px, 5.6vw, 88px) !important;
+  line-height: 0.98 !important;
+  letter-spacing: -0.062em !important;
+}
+
+.hero p {
+  max-width: 1040px !important;
+  font-size: clamp(20px, 1.48vw, 26px) !important;
+  line-height: 1.42 !important;
+}
+
+.hero-eyebrow {
+  max-width: fit-content !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.hero-founder-signal {
+  max-width: 860px !important;
 }
