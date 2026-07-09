@@ -268,9 +268,25 @@ const [message, setMessage] = useState("");
     setDistributions(approvedDistributions);
     setDocuments((documentData as unknown as InvestorDocument[]) ?? []);
 
-    if (approvedCalls[0]) {
-      setSelectedCapitalCallId(approvedCalls[0].id);
-    }
+    const capitalCallIdFromUrl =
+  typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).get("capitalCallId")
+    : "";
+
+const matchedCapitalCall = capitalCallIdFromUrl
+  ? approvedCalls.find((call) => call.id === capitalCallIdFromUrl)
+  : null;
+
+if (matchedCapitalCall) {
+  setSelectedCapitalCallId(matchedCapitalCall.id);
+  setMessage(
+    `Capital Call Notice Batch received: ${
+      matchedCapitalCall.call_name ?? "Approved Capital Call"
+    }. Review and generate notices below.`
+  );
+} else if (approvedCalls[0]) {
+  setSelectedCapitalCallId(approvedCalls[0].id);
+}
 
     if (approvedDistributions[0]) {
       setSelectedDistributionId(approvedDistributions[0].id);
@@ -1153,7 +1169,9 @@ async function handleStoreAllPdfsInSupabase() {
     );
     setGeneratingDistributionId("");
   }
-
+const selectedCapitalCall = capitalCalls.find(
+  (call) => call.id === selectedCapitalCallId
+);
   return (
     <main className="app-page">
       <section className="app-shell">
@@ -1228,7 +1246,43 @@ async function handleStoreAllPdfsInSupabase() {
 
               {message && <div className="logic-note">{message}</div>}
             </div>
+{selectedCapitalCall && (
+  <div className="preview-card">
+    <h2>Capital Call Notice Batch Received</h2>
 
+    <p className="eyebrow">
+      Approved capital call selected from Finance workflow
+    </p>
+
+    <div className="impact-grid">
+      <div className="impact-card">
+        <h3>{getFundName(selectedCapitalCall.funds)}</h3>
+        <p>Fund</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{formatCr(toCr(selectedCapitalCall.call_amount))}</h3>
+        <p>Approved call amount</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{formatDate(selectedCapitalCall.due_date)}</h3>
+        <p>Due date</p>
+      </div>
+
+      <div className="impact-card">
+        <h3>{selectedCapitalCall.status ?? "approved"}</h3>
+        <p>Workflow status</p>
+      </div>
+    </div>
+
+    <div className="explain-box">
+      This approved capital call is ready for investor-wise notice generation.
+      Once notices are generated, the records become available in the Investor
+      Portal document library.
+    </div>
+  </div>
+)}
             <div className="preview-card">
               <h2>Generate Capital Call Notices</h2>
 

@@ -1397,23 +1397,27 @@ editable before approval.
               {isApproved && (
   <div className="action-row">
     <a
-      href="/document-engine"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        border: "1px solid rgba(96, 165, 250, 0.45)",
-        background: "rgba(37, 99, 235, 0.2)",
-        color: "#dbeafe",
-        borderRadius: "999px",
-        padding: "12px 18px",
-        fontSize: "15px",
-        fontWeight: 800,
-        textDecoration: "none",
-      }}
-    >
-      Generate Capital Call Notices
-    </a>
+  href={
+    selectedSavedDraft
+      ? `/document-engine?capitalCallId=${selectedSavedDraft.id}`
+      : "/document-engine"
+  }
+  style={{
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid rgba(96, 165, 250, 0.45)",
+    background: "rgba(37, 99, 235, 0.2)",
+    color: "#dbeafe",
+    borderRadius: "999px",
+    padding: "12px 18px",
+    fontSize: "15px",
+    fontWeight: 800,
+    textDecoration: "none",
+  }}
+>
+  Generate Capital Call Notices
+</a>
   </div>
 )}
             </div>
@@ -1447,7 +1451,11 @@ editable before approval.
 
               <div className="action-row">
                 <a
-  href="/document-engine"
+  href={
+  selectedSavedDraft
+    ? `/document-engine?capitalCallId=${selectedSavedDraft.id}`
+    : "/document-engine"
+}
   style={{
     display: "inline-flex",
     alignItems: "center",
@@ -1461,7 +1469,7 @@ editable before approval.
     textDecoration: "none",
   }}
 >
-  Generate Investor Documents
+  Generate Capital Call Notices
 </a>
                 <button>Request Approval</button>
                 <button>Preview LP Notice</button>
