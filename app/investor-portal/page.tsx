@@ -115,14 +115,25 @@ export default function InvestorPortalPage() {
       const investorData = (data as Investor[]) ?? [];
       setInvestors(investorData);
 
-      const recommendedInvestor =
-        investorData.find((investor) =>
-          investor.name.toLowerCase().includes("sidbi")
-        ) ?? investorData[0];
+      const investorIdFromUrl =
+  typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).get("investorId")
+    : "";
 
-      if (recommendedInvestor) {
-        setSelectedInvestorId(recommendedInvestor.id);
-      }
+const investorFromUrl = investorIdFromUrl
+  ? investorData.find((investor) => investor.id === investorIdFromUrl)
+  : null;
+
+const recommendedInvestor =
+  investorFromUrl ??
+  investorData.find((investor) =>
+    investor.name.toLowerCase().includes("sidbi")
+  ) ??
+  investorData[0];
+
+if (recommendedInvestor) {
+  setSelectedInvestorId(recommendedInvestor.id);
+}
 
       setLoading(false);
     }

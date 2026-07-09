@@ -73,6 +73,7 @@ type DistributionInvestorRow = {
 
 type InvestorDocument = {
   id: string;
+  investor_id: string | null;
   document_type: string;
   document_name: string;
   investor_name: string | null;
@@ -248,7 +249,7 @@ const [message, setMessage] = useState("");
     const { data: documentData, error: documentError } = await supabase
       .from("investor_documents")
       .select(
-        "id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, storage_path, storage_url, generated_at"
+        "id, investor_id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, storage_path, storage_url, generated_at"
       )
       .order("generated_at", { ascending: false })
       .limit(20);
@@ -301,7 +302,7 @@ if (matchedCapitalCall) {
     const { data, error } = await supabase
       .from("investor_documents")
       .select(
-        "id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, storage_path, storage_url, generated_at"
+        "id, investor_id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, storage_path, storage_url, generated_at"
       )
       .order("generated_at", { ascending: false })
       .limit(20);
@@ -1522,6 +1523,29 @@ const selectedCapitalCall = capitalCalls.find(
           >
             Preview
           </button>
+          {documentRecord.investor_id ? (
+  <a
+    href={`/investor-portal?investorId=${documentRecord.investor_id}`}
+    style={{
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      border: "1px solid rgba(74, 222, 128, 0.45)",
+      background: "rgba(22, 101, 52, 0.18)",
+      color: "#bbf7d0",
+      borderRadius: "999px",
+      padding: "8px 16px",
+      fontSize: "14px",
+      fontWeight: 700,
+      textDecoration: "none",
+      whiteSpace: "nowrap",
+    }}
+  >
+    View in Portal
+  </a>
+) : (
+  <span className="small-pill">No Investor Link</span>
+)}
 
           {!documentRecord.storage_url && (
             <span className="small-pill">Store PDF First</span>
