@@ -38,6 +38,14 @@ type ImportedDataRoomDocument = UploadedFilePreview & {
   importedAt: string;
   ddqImpact: string;
 };
+type InvestorEngagementEvent = {
+  id: string;
+  investorName: string;
+  documentName: string;
+  action: "Viewed" | "Downloaded" | "Asked Question";
+  time: string;
+  note: string;
+};
 
 function getString(row: DataRow | undefined, keys: string[], fallback = "-") {
   if (!row) return fallback;
@@ -256,6 +264,11 @@ export default function DataRoomPage() {
     ImportedDataRoomDocument[]
   >([]);
   const [selectedAccessView, setSelectedAccessView] = useState("All LPs");
+    const [selectedEngagementInvestor, setSelectedEngagementInvestor] =
+    useState("Prospective LP");
+  const [engagementEvents, setEngagementEvents] = useState<
+    InvestorEngagementEvent[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -441,6 +454,32 @@ export default function DataRoomPage() {
     });
 
        setUploadedFiles([]);
+  }
+    function handleRecordEngagement(
+    file: ImportedDataRoomDocument,
+    action: InvestorEngagementEvent["action"]
+  ) {
+    const investorName =
+      selectedEngagementInvestor ||
+      getString(investors[0], ["name"], "Prospective LP");
+
+    const note =
+      action === "Viewed"
+        ? "Investor opened the document in the data room."
+        : action === "Downloaded"
+        ? "Investor downloaded the document for offline review."
+        : "Investor raised a DDQ follow-up question on this document.";
+
+    const event: InvestorEngagementEvent = {
+      id: `${file.id}-${action}-${Date.now()}`,
+      investorName,
+      documentName: file.name,
+      action,
+      time: new Date().toISOString(),
+      note,
+    };
+
+    setEngagementEvents((current) => [event, ...current]);
   }
 
   return (
@@ -673,6 +712,30 @@ export default function DataRoomPage() {
                     {importedDocuments.length === 1 ? "" : "s"} imported into
                     the Investor Data Room workflow.
                   </div>
+                                    <div className="form-card">
+                    <label>Simulate investor engagement as</label>
+                    <select
+                      value={selectedEngagementInvestor}
+                      onChange={(event) =>
+                        setSelectedEngagementInvestor(event.target.value)
+                      }
+                    >
+                      <option>Prospective LP</option>
+                      {investors.map((investor) => (
+                        <option
+                          key={getString(investor, ["id"], getString(investor, ["name"]))}
+                          value={getString(investor, ["name"])}
+                        >
+                          {getString(investor, ["name"])}
+                        </option>
+                      ))}
+                    </select>
+
+                    <div className="logic-note">
+                      Use this to preview how VENTIQ will track LP views,
+                      downloads and DDQ questions once the data room is shared.
+                    </div>
+                  </div>
 
                                     <div className="queue-grid">
                     {importedDocuments.map((file) => (
@@ -689,6 +752,34 @@ export default function DataRoomPage() {
                         DDQ Impact: {file.ddqImpact}
                         <br />
                         Imported: {formatDate(file.importedAt)}
+                                                <br />
+                        <br />
+                        <div className="action-row">
+                          <button
+                            type="button"
+                            onClick={() => handleRecordEngagement(file, "Viewed")}
+                          >
+                            Record View
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleRecordEngagement(file, "Downloaded")
+                            }
+                          >
+                            Record Download
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleRecordEngagement(file, "Asked Question")
+                            }
+                          >
+                            Add DDQ Question
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -701,12 +792,37 @@ export default function DataRoomPage() {
                         <br />
                         <span>
                           {file.name} classified as {file.detectedType}, mapped
-                          to {file.suggestedDestination} with {file.accessLevel}
-                          access.
+                          to {file.suggestedDestination} with {file.accessLevel}{" "}
+access.
                         </span>
                       </div>
                     ))}
                   </div>
+                                    {engagementEvents.length > 0 && (
+                    <>
+                      <div className="logic-note">
+                        Investor engagement trail
+                      </div>
+
+                      <div className="audit-timeline">
+                        {engagementEvents.slice(0, 10).map((event) => (
+                          <div className="audit-item" key={event.id}>
+                            <strong>{formatDate(event.time)}</strong>{" "}
+                            {event.action === "Viewed"
+                              ? "👁️"
+                              : event.action === "Downloaded"
+                              ? "⬇️"
+                              : "❓"}{" "}
+                            {event.investorName} {event.action.toLowerCase()}
+                            <br />
+                            <span>{event.documentName}</span>
+                            <br />
+                            <span>{event.note}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -899,8 +1015,8 @@ export default function DataRoomPage() {
               )}
             </div>
 
-            <div className="preview-card">
-              <h2>Investor Engagement Preview</h2>
+                                      <div className="preview-card">
+              <h2>Investor Engagement Tracker</h2>
 
               <div className="queue-grid">
                 <div className="queue-item">
@@ -927,6 +1043,34 @@ export default function DataRoomPage() {
                   {dataRoomMetrics.missingDDQItems} DDQ item missing
                 </div>
               </div>
+
+              {engagementEvents.length === 0 && (
+                <div className="explain-box">
+                  No investor engagement recorded yet. Import a document, then
+                  record a view, download or DDQ question to create the first
+                  LP engagement trail.
+                </div>
+              )}
+
+              {engagementEvents.length > 0 && (
+                <div className="audit-timeline">
+                  {engagementEvents.slice(0, 10).map((event) => (
+                    <div className="audit-item" key={event.id}>
+                      <strong>{formatDate(event.time)}</strong>{" "}
+                      {event.action === "Viewed"
+                        ? "👁️"
+                        : event.action === "Downloaded"
+                        ? "⬇️"
+                        : "❓"}{" "}
+                      {event.investorName} {event.action.toLowerCase()}
+                      <br />
+                      <span>{event.documentName}</span>
+                      <br />
+                      <span>{event.note}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <div className="explain-box">
                 In the next phase, this section will track investor views,
