@@ -18,12 +18,25 @@ type DDQItem = {
   source: string;
 };
 
+type DataRoomAccessLevel =
+  | "All LPs"
+  | "Restricted LP Access"
+  | "Internal Only"
+  | "Prospective LPs Only";
+
 type UploadedFilePreview = {
   id: string;
   name: string;
   size: number;
   detectedType: string;
   suggestedDestination: string;
+  accessLevel: DataRoomAccessLevel;
+  status: "Ready to map" | "Imported";
+};
+
+type ImportedDataRoomDocument = UploadedFilePreview & {
+  importedAt: string;
+  ddqImpact: string;
 };
 
 function getString(row: DataRow | undefined, keys: string[], fallback = "-") {
@@ -125,7 +138,33 @@ function suggestDestination(documentType: string) {
 
   return "General Investor Documents";
 }
+function getDDQImpact(documentType: string, destination: string) {
+  if (destination === "DDQ & Q&A") {
+    return "Can support DDQ response drafting";
+  }
 
+  if (destination === "Track Record & Performance") {
+    return "Can support performance DDQ questions";
+  }
+
+  if (destination === "Legal & Compliance") {
+    return "Can support legal and compliance diligence";
+  }
+
+  if (destination === "Investor Reporting Samples") {
+    return "Can support operations and reporting DDQ questions";
+  }
+
+  if (destination === "Tax & Regulatory") {
+    return "Can support tax and regulatory DDQ questions";
+  }
+
+  if (documentType.includes("Investor Document")) {
+    return "Available for investor reference";
+  }
+
+  return "Ready for data room review";
+}
 const dataRoomFolders: DataRoomFolder[] = [
   {
     name: "Fund Overview",
@@ -213,6 +252,9 @@ export default function DataRoomPage() {
   const [funds, setFunds] = useState<DataRow[]>([]);
   const [documents, setDocuments] = useState<DataRow[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFilePreview[]>([]);
+    const [importedDocuments, setImportedDocuments] = useState<
+    ImportedDataRoomDocument[]
+  >([]);
   const [selectedAccessView, setSelectedAccessView] = useState("All LPs");
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -306,9 +348,11 @@ export default function DataRoomPage() {
       readyDDQItems: readyDDQItems.length,
       needsReviewDDQItems: needsReviewDDQItems.length,
       missingDDQItems: missingDDQItems.length,
-      readinessScore,
+            readinessScore,
+      importedDocuments: importedDocuments.length,
+      totalDataRoomDocuments: documents.length + importedDocuments.length,
     };
-  }, [documents, investors.length, funds.length]);
+    }, [documents, investors.length, funds.length, importedDocuments.length]);
 
   const recentDocuments = documents.slice(0, 8);
 
@@ -318,16 +362,85 @@ export default function DataRoomPage() {
     const previews = Array.from(files).map((file) => {
       const detectedType = detectDocumentType(file.name);
 
-      return {
+            return {
         id: `${file.name}-${file.size}-${file.lastModified}`,
         name: file.name,
         size: file.size,
         detectedType,
         suggestedDestination: suggestDestination(detectedType),
+        accessLevel: "Internal Only" as DataRoomAccessLevel,
+        status: "Ready to map" as const,
       };
     });
 
     setUploadedFiles(previews);
+  }
+    function updateUploadedFileAccessLevel(
+    fileId: string,
+    accessLevel: DataRoomAccessLevel
+  ) {
+    setUploadedFiles((current) =>
+      current.map((file) =>
+        file.id === fileId
+          ? {
+              ...file,
+              accessLevel,
+            }
+          : file
+      )
+    );
+  }
+
+  function handleApproveImport(fileId: string) {
+    const fileToImport = uploadedFiles.find((file) => file.id === fileId);
+
+    if (!fileToImport || fileToImport.status === "Imported") return;
+
+    const importedDocument: ImportedDataRoomDocument = {
+      ...fileToImport,
+      status: "Imported",
+      importedAt: new Date().toISOString(),
+      ddqImpact: getDDQImpact(
+        fileToImport.detectedType,
+        fileToImport.suggestedDestination
+      ),
+    };
+
+    setImportedDocuments((current) => {
+      const alreadyImported = current.some((file) => file.id === fileId);
+
+      if (alreadyImported) return current;
+
+      return [importedDocument, ...current];
+    });
+
+        setUploadedFiles((current) =>
+      current.filter((file) => file.id !== fileId)
+    );
+  }
+
+  function handleApproveAllImports() {
+    const readyFiles = uploadedFiles.filter(
+      (file) => file.status !== "Imported"
+    );
+
+    if (readyFiles.length === 0) return;
+
+    const importedBatch: ImportedDataRoomDocument[] = readyFiles.map((file) => ({
+      ...file,
+      status: "Imported",
+      importedAt: new Date().toISOString(),
+      ddqImpact: getDDQImpact(file.detectedType, file.suggestedDestination),
+    }));
+
+    setImportedDocuments((current) => {
+      const existingIds = new Set(current.map((file) => file.id));
+      const newFiles = importedBatch.filter((file) => !existingIds.has(file.id));
+
+      return [...newFiles, ...current];
+    });
+
+       setUploadedFiles([]);
   }
 
   return (
@@ -408,9 +521,9 @@ export default function DataRoomPage() {
                 <p>LP / investor records</p>
               </div>
 
-              <div className="impact-card">
-                <h3>{dataRoomMetrics.documents}</h3>
-                <p>Investor documents</p>
+                            <div className="impact-card">
+                <h3>{dataRoomMetrics.totalDataRoomDocuments}</h3>
+                <p>Total data room documents</p>
               </div>
 
               <div className="impact-card">
@@ -419,10 +532,10 @@ export default function DataRoomPage() {
               </div>
             </div>
 
-            <div className="impact-grid">
+                        <div className="impact-grid">
               <div className="impact-card">
-                <h3>{dataRoomMetrics.portalAvailableDocuments}</h3>
-                <p>Portal available documents</p>
+                <h3>{dataRoomMetrics.importedDocuments}</h3>
+                <p>Imported legacy files</p>
               </div>
 
               <div className="impact-card">
@@ -469,43 +582,132 @@ export default function DataRoomPage() {
                 </div>
               </div>
 
-              {uploadedFiles.length === 0 && (
+                            {uploadedFiles.length === 0 && importedDocuments.length === 0 && (
                 <div className="explain-box">
                   No files selected yet. Upload sample PDFs, Excels or DDQ files
                   to preview how VENTIQ would classify legacy data.
                 </div>
               )}
 
-              {uploadedFiles.length > 0 && (
-                <div className="review-table-wrap">
-                  <table className="review-table">
-                    <thead>
-                      <tr>
-                        <th>File</th>
-                        <th>Size</th>
-                        <th>Detected Type</th>
-                        <th>Suggested Destination</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {uploadedFiles.map((file) => (
-                        <tr key={file.id}>
-                          <td>
-                            <strong>{file.name}</strong>
-                          </td>
-                          <td>{formatFileSize(file.size)}</td>
-                          <td>{file.detectedType}</td>
-                          <td>{file.suggestedDestination}</td>
-                          <td>
-                            <span className="small-pill">Ready to map</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {uploadedFiles.length === 0 && importedDocuments.length > 0 && (
+                <div className="explain-box">
+                  All selected files have been imported. Upload more files to
+                  classify and add additional records to the data room.
                 </div>
+              )}
+
+                           {uploadedFiles.length > 0 && (
+                <>
+                  <div className="action-row">
+                    <button type="button" onClick={handleApproveAllImports}>
+                      Approve All Imports
+                    </button>
+                  </div>
+
+                  <div className="review-table-wrap">
+                    <table className="review-table">
+                      <thead>
+                        <tr>
+                          <th>File</th>
+                          <th>Size</th>
+                          <th>Detected Type</th>
+                          <th>Suggested Destination</th>
+                          <th>Access Level</th>
+                          <th>Status</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {uploadedFiles.map((file) => (
+                          <tr key={file.id}>
+                            <td>
+                              <strong>{file.name}</strong>
+                            </td>
+                            <td>{formatFileSize(file.size)}</td>
+                            <td>{file.detectedType}</td>
+                            <td>{file.suggestedDestination}</td>
+                            <td>
+                              <select
+                                value={file.accessLevel}
+                                disabled={file.status === "Imported"}
+                                onChange={(event) =>
+                                  updateUploadedFileAccessLevel(
+                                    file.id,
+                                    event.target.value as DataRoomAccessLevel
+                                  )
+                                }
+                              >
+                                <option>All LPs</option>
+                                <option>Restricted LP Access</option>
+                                <option>Internal Only</option>
+                                <option>Prospective LPs Only</option>
+                              </select>
+                            </td>
+                            <td>
+                              <span className="small-pill">{file.status}</span>
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                disabled={file.status === "Imported"}
+                                onClick={() => handleApproveImport(file.id)}
+                              >
+                                {file.status === "Imported"
+                                  ? "Imported"
+                                  : "Approve Import"}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+
+              {importedDocuments.length > 0 && (
+                <>
+                  <div className="logic-note">
+                    {importedDocuments.length} legacy file
+                    {importedDocuments.length === 1 ? "" : "s"} imported into
+                    the Investor Data Room workflow.
+                  </div>
+
+                                    <div className="queue-grid">
+                    {importedDocuments.map((file) => (
+                      <div className="queue-item" key={`imported-${file.id}`}>
+                        <strong>{file.name}</strong>
+                        <br />
+                        <span>{file.detectedType}</span>
+                        <br />
+                        <br />
+                        Folder: {file.suggestedDestination}
+                        <br />
+                        Access: {file.accessLevel}
+                        <br />
+                        DDQ Impact: {file.ddqImpact}
+                        <br />
+                        Imported: {formatDate(file.importedAt)}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="audit-timeline">
+                    {importedDocuments.slice(0, 6).map((file) => (
+                      <div className="audit-item" key={`activity-${file.id}`}>
+                        <strong>{formatDate(file.importedAt)}</strong> 🟢 Legacy
+                        file imported
+                        <br />
+                        <span>
+                          {file.name} classified as {file.detectedType}, mapped
+                          to {file.suggestedDestination} with {file.accessLevel}
+                          access.
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
 
