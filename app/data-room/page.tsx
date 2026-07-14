@@ -348,6 +348,33 @@ export default function DataRoomPage() {
         ddqItems.length) *
         100
     );
+        const importedFolderSet = new Set(
+      importedDocuments.map((file) => file.suggestedDestination)
+    );
+
+    const hasFundOverview = importedFolderSet.has("Fund Overview");
+    const hasLegalCompliance = importedFolderSet.has("Legal & Compliance");
+    const hasTrackRecord = importedFolderSet.has("Track Record & Performance");
+    const hasInvestorReporting = importedFolderSet.has(
+      "Investor Reporting Samples"
+    );
+    const hasTaxRegulatory = importedFolderSet.has("Tax & Regulatory");
+    const hasDDQHub = importedFolderSet.has("DDQ & Q&A");
+
+    const dynamicReadinessScore = Math.min(
+      100,
+      Math.round(
+        readinessScore +
+          Math.min(importedDocuments.length * 4, 20) +
+          Math.min(engagementEvents.length * 2, 10) +
+          (hasFundOverview ? 5 : 0) +
+          (hasLegalCompliance ? 5 : 0) +
+          (hasTrackRecord ? 5 : 0) +
+          (hasInvestorReporting ? 5 : 0) +
+          (hasTaxRegulatory ? 3 : 0) +
+          (hasDDQHub ? 3 : 0)
+      )
+    );
 
     return {
       investors: investors.length,
@@ -361,11 +388,25 @@ export default function DataRoomPage() {
       readyDDQItems: readyDDQItems.length,
       needsReviewDDQItems: needsReviewDDQItems.length,
       missingDDQItems: missingDDQItems.length,
-            readinessScore,
+               readinessScore,
+      dynamicReadinessScore,
       importedDocuments: importedDocuments.length,
       totalDataRoomDocuments: documents.length + importedDocuments.length,
+      engagementEvents: engagementEvents.length,
+      hasFundOverview,
+      hasLegalCompliance,
+      hasTrackRecord,
+      hasInvestorReporting,
+      hasTaxRegulatory,
+      hasDDQHub,
     };
-    }, [documents, investors.length, funds.length, importedDocuments.length]);
+      }, [
+    documents,
+    investors.length,
+    funds.length,
+    importedDocuments,
+    engagementEvents.length,
+  ]);
 
   const recentDocuments = documents.slice(0, 8);
 
@@ -479,7 +520,39 @@ export default function DataRoomPage() {
       note,
     };
 
-    setEngagementEvents((current) => [event, ...current]);
+     setEngagementEvents((current) => [event, ...current]);
+  }
+
+  function getDataRoomReadinessRecommendation() {
+    if (importedDocuments.length === 0) {
+      return "Import legacy fund documents, DDQs, investor reports and track record files first.";
+    }
+
+    if (!dataRoomMetrics.hasFundOverview) {
+      return "Upload fund deck or fund overview documents.";
+    }
+
+    if (!dataRoomMetrics.hasLegalCompliance) {
+      return "Upload PPM, trust deed, regulatory or compliance documents.";
+    }
+
+    if (!dataRoomMetrics.hasTrackRecord) {
+      return "Upload track record, IRR, DPI, TVPI or performance summary files.";
+    }
+
+    if (!dataRoomMetrics.hasInvestorReporting) {
+      return "Upload sample capital call, distribution notice or SOA documents.";
+    }
+
+    if (dataRoomMetrics.missingDDQItems > 0) {
+      return "Complete missing DDQ sections before sharing with prospective LPs.";
+    }
+
+    if (engagementEvents.length === 0) {
+      return "Share the data room and start tracking LP views, downloads and DDQ questions.";
+    }
+
+    return "Data room is ready for active LP diligence and investor engagement tracking.";
   }
 
   return (
@@ -551,8 +624,8 @@ export default function DataRoomPage() {
 
             <div className="impact-grid">
               <div className="impact-card">
-                <h3>{dataRoomMetrics.readinessScore}%</h3>
-                <p>DDQ readiness score</p>
+                                <h3>{dataRoomMetrics.dynamicReadinessScore}%</h3>
+                <p>Data room readiness score</p>
               </div>
 
               <div className="impact-card">
@@ -1082,34 +1155,58 @@ access.
             <div className="preview-card">
               <h2>AI Readiness Review</h2>
 
-              <div className="journal-preview">
+                           <div className="journal-preview">
+                <div className="journal-row">
+                  <span>Data room readiness score</span>
+                  <strong>{dataRoomMetrics.dynamicReadinessScore}%</strong>
+                </div>
+
                 <div className="journal-row">
                   <span>DDQ readiness score</span>
                   <strong>{dataRoomMetrics.readinessScore}%</strong>
                 </div>
 
                 <div className="journal-row">
-                  <span>Ready DDQ sections</span>
-                  <strong>{dataRoomMetrics.readyDDQItems}</strong>
+                  <span>Imported legacy documents</span>
+                  <strong>{dataRoomMetrics.importedDocuments}</strong>
                 </div>
 
                 <div className="journal-row">
-                  <span>Needs review</span>
-                  <strong>{dataRoomMetrics.needsReviewDDQItems}</strong>
+                  <span>Investor engagement events</span>
+                  <strong>{dataRoomMetrics.engagementEvents}</strong>
                 </div>
 
                 <div className="journal-row">
-                  <span>Missing sections</span>
-                  <strong>{dataRoomMetrics.missingDDQItems}</strong>
+                  <span>Fund overview coverage</span>
+                  <strong>
+                    {dataRoomMetrics.hasFundOverview ? "Ready" : "Missing"}
+                  </strong>
+                </div>
+
+                <div className="journal-row">
+                  <span>Legal & compliance coverage</span>
+                  <strong>
+                    {dataRoomMetrics.hasLegalCompliance ? "Ready" : "Missing"}
+                  </strong>
+                </div>
+
+                <div className="journal-row">
+                  <span>Track record coverage</span>
+                  <strong>
+                    {dataRoomMetrics.hasTrackRecord ? "Ready" : "Missing"}
+                  </strong>
+                </div>
+
+                <div className="journal-row">
+                  <span>Investor reporting samples</span>
+                  <strong>
+                    {dataRoomMetrics.hasInvestorReporting ? "Ready" : "Missing"}
+                  </strong>
                 </div>
 
                 <div className="journal-row">
                   <span>Recommended action</span>
-                  <strong>
-                    {dataRoomMetrics.missingDDQItems > 0
-                      ? "Upload missing portfolio and DDQ documents"
-                      : "Review DDQ answers before sharing"}
-                  </strong>
+                  <strong>{getDataRoomReadinessRecommendation()}</strong>
                 </div>
               </div>
             </div>
