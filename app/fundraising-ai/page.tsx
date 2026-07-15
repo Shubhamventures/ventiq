@@ -18,16 +18,27 @@ export default function FundraisingAIPage() {
           </a>
         </div>
 
-        <div className="preview-card">
+                <div className="preview-card">
           <div className="sample-data-ribbon">
-  Sample investor relations workspace preview · Illustrative data
-</div>
+            Sample investor relations workspace preview · Illustrative data
+          </div>
+
           <h2>Investor Relations Workspace Preview</h2>
 
           <div className="explain-box">
             VENTIQ reviewed your fundraising pipeline overnight. Fund IV is 64%
             subscribed, ₹640 Cr soft commitments are active, 3 DDQs are pending,
             and 2 LP meetings need preparation this week.
+          </div>
+
+          <div className="action-row">
+            <a className="monitor-btn monitor-btn-primary" href="/data-room">
+              Open Investor Data Room
+            </a>
+
+            <a className="monitor-btn monitor-btn-secondary" href="/investor-portal">
+              Open Investor Portal
+            </a>
           </div>
         </div>
 
@@ -136,9 +147,14 @@ export default function FundraisingAIPage() {
               <div className="queue-item">✓ Identify next best action</div>
             </div>
 
-            <div className="action-row">
-              <button>Generate Meeting Brief</button>
-              <button>Prepare DDQ Pack</button>
+                      <div className="action-row">
+              <a className="monitor-btn monitor-btn-primary" href="/data-room">
+                View DDQ Tracker
+              </a>
+
+              <a className="monitor-btn monitor-btn-secondary" href="/data-room">
+                Review LP Engagement
+              </a>
             </div>
           </div>
 
@@ -162,7 +178,65 @@ export default function FundraisingAIPage() {
             </div>
           </div>
         </div>
+        <div className="preview-card">
+          <h2>Connected Investor Data Room</h2>
 
+          <div className="explain-box">
+            Fundraising and investor relations do not stop at pipeline tracking.
+            VENTIQ connects LP interest, DDQ requests, data room access,
+            investor engagement and readiness scoring into one workflow.
+          </div>
+
+          <div className="impact-grid">
+            <div className="impact-card">
+              <h3>3</h3>
+              <p>Open DDQ questions</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>82%</h3>
+              <p>Data room readiness</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>4</h3>
+              <p>LP engagement events</p>
+            </div>
+
+            <div className="impact-card">
+              <h3>Ready</h3>
+              <p>Investor follow-up pack</p>
+            </div>
+          </div>
+
+          <div className="queue-grid">
+            <div className="queue-item">
+              ✓ Upload and classify legacy fund documents
+            </div>
+
+            <div className="queue-item">
+              ✓ Track investor views, downloads and DDQ questions
+            </div>
+
+            <div className="queue-item">
+              ✓ Monitor data room readiness before LP sharing
+            </div>
+
+            <div className="queue-item">
+              ✓ Move from DDQ request to answered question trail
+            </div>
+          </div>
+
+          <div className="action-row">
+            <a className="monitor-btn monitor-btn-primary" href="/data-room">
+              Open Data Room & DDQ Hub
+            </a>
+
+            <a className="monitor-btn monitor-btn-secondary" href="/product-overview">
+              View Product Overview
+            </a>
+          </div>
+        </div>
         <div className="preview-card">
           <h2>Fundraising AI Answer Preview</h2>
 
@@ -191,9 +265,14 @@ export default function FundraisingAIPage() {
             <div className="queue-item">✓ Final review queue</div>
           </div>
 
-          <div className="action-row">
-            <button>Generate DDQ Pack</button>
-            <button>Create LP Data Room</button>
+                   <div className="action-row">
+            <a className="monitor-btn monitor-btn-primary" href="/data-room">
+              Generate DDQ Pack
+            </a>
+
+            <a className="monitor-btn monitor-btn-secondary" href="/data-room">
+              Create LP Data Room
+            </a>
           </div>
         </div>
       </section>
