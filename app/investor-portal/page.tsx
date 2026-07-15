@@ -248,10 +248,10 @@ if (recommendedInvestor) {
           <div>
             <p className="eyebrow">VENTIQ Investor Experience</p>
             <h1>AI Investor Portal</h1>
-            <p>
+                        <p>
               One intelligent view for LP commitments, capital calls,
-              distributions, performance, documents and AI-powered investor
-              queries.
+              distributions, performance, documents, data room access and
+              AI-powered investor queries.
             </p>
           </div>
 
@@ -313,13 +313,60 @@ if (recommendedInvestor) {
               </div>
             </div>
 
-            <div className="preview-card">
+                       <div className="preview-card">
               <h2>Welcome back, {selectedInvestor?.name ?? "Investor"}</h2>
 
               <div className="explain-box">
                 VENTIQ has reviewed your fund commitments, capital call notices,
-                distribution notices and stored reporting documents. Your latest
-                investor documents are available in the portal library below.
+                distribution notices, data room access and stored reporting
+                documents. Your latest investor documents are available in the
+                portal library below.
+              </div>
+            </div>
+
+            <div className="preview-card">
+              <h2>Investor Data Room Access</h2>
+
+              <div className="explain-box">
+                Data room documents, DDQ responses and diligence updates can
+                flow into the investor experience once they are approved for LP
+                access. This connects fundraising diligence with the LP-facing
+                portal.
+              </div>
+
+              <div className="impact-grid">
+                <div className="impact-card">
+                  <h3>{documents.length}</h3>
+                  <p>Portal-linked documents</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{storedDocuments.length}</h3>
+                  <p>Download-ready files</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>DDQ</h3>
+                  <p>Question trail available</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>Ready</h3>
+                  <p>LP diligence workspace</p>
+                </div>
+              </div>
+
+              <div className="action-row">
+                <a className="monitor-btn monitor-btn-primary" href="/data-room">
+                  Open Investor Data Room
+                </a>
+
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/fundraising-ai"
+                >
+                  Open IR Workspace
+                </a>
               </div>
             </div>
 
@@ -446,9 +493,10 @@ if (recommendedInvestor) {
                 <div className="preview-card">
                   <h2>Investor Document Library</h2>
 
-                  <p className="eyebrow">
-                    Capital call notices, distribution notices and stored PDF
-                    documents available to this investor
+                                   <p className="eyebrow">
+                    Capital call notices, distribution notices, data room files,
+                    DDQ outputs and stored PDF documents available to this
+                    investor
                   </p>
 
                   <div className="form-card">
@@ -612,11 +660,11 @@ if (recommendedInvestor) {
                       {storedDocuments.length} ready for download
                     </div>
 
-                    <div className="queue-item">
-                      🟡 Email Dispatch
+                                       <a className="queue-item" href="/data-room">
+                      🟡 Data Room Requests
                       <br />
-                      Coming in later phase
-                    </div>
+                      Review DDQ questions and LP diligence access
+                    </a>
                   </div>
                 </div>
 
@@ -660,6 +708,9 @@ if (recommendedInvestor) {
                     <div className="chat-message">
                       Ask: “Show documents for Growth Fund II.”
                     </div>
+                                        <div className="chat-message">
+                      Ask: “Show my data room documents and DDQ updates.”
+                    </div>
                   </div>
                 </div>
 
@@ -681,7 +732,7 @@ if (recommendedInvestor) {
                   </div>
                 </div>
 
-                <div className="preview-card">
+                                <div className="preview-card">
                   <h2>Quick Actions</h2>
 
                   <div className="queue-grid">
@@ -689,8 +740,14 @@ if (recommendedInvestor) {
                     <div className="queue-item">📑 Tax Certificate</div>
                     <div className="queue-item">💰 Capital Call Notice</div>
                     <div className="queue-item">📊 Performance Report</div>
-                    <div className="queue-item">📧 Contact Fund Manager</div>
-                    <div className="queue-item">🤖 Ask AI</div>
+
+                    <a className="queue-item" href="/data-room">
+                      🗂️ Open Data Room
+                    </a>
+
+                    <a className="queue-item" href="/fundraising-ai">
+                      ❓ View DDQ Updates
+                    </a>
                   </div>
                 </div>
               </>
