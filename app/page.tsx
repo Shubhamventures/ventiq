@@ -719,23 +719,23 @@ Source: useventiq.com`
                 <strong>Open Workspace →</strong>
               </a>
 
-              <a className="stakeholder-workspace-item" href="/fundraising-ai">
+                            <a className="stakeholder-workspace-item" href="/data-room">
                 <div className="workspace-tag">Investor Relations</div>
 
-                <h3>IR & Fundraising Workspace</h3>
+                <h3>IR, Fundraising & Data Room</h3>
 
                 <p>
-                  LP pipeline, DDQs, investor follow-ups, reporting packs,
-                  fundraising decks and relationship intelligence.
+                  LP pipeline, DDQs, investor follow-ups, fundraising decks,
+                  data room readiness and investor engagement tracking.
                 </p>
 
                 <div className="workspace-micro-list">
                   <span>LP pipeline</span>
-                  <span>DDQs</span>
-                  <span>Deck preparation</span>
+                  <span>DDQ tracker</span>
+                  <span>Data room</span>
                 </div>
 
-                <strong>Open Workspace →</strong>
+                <strong>Open Data Room →</strong>
               </a>
 
               <a className="stakeholder-workspace-item" href="/investor-portal">
@@ -1001,6 +1001,14 @@ Source: useventiq.com`
                     prepare distribution communication workflows.
                   </p>
                 </a>
+                                <a href="/data-room">
+                  <strong>Investor Data Room & DDQ Hub</strong>
+                  <p>
+                    Upload legacy documents, classify files, manage DDQ
+                    questions, track LP engagement and monitor data room
+                    readiness before sharing with investors.
+                  </p>
+                </a>
               </div>
 
               <div className="roadmap-column">
@@ -1157,10 +1165,14 @@ Source: useventiq.com`
                     <strong>Run Distribution Waterfall</strong>
                     <span>Review payouts, carry and LP communication impact</span>
                   </a>
-
                   <a href="/repayment-notice">
                     <strong>Prepare Repayment Notices</strong>
                     <span>Draft notices, email text and dispatch history</span>
+                  </a>
+
+                  <a href="/data-room">
+                    <strong>Open Investor Data Room</strong>
+                    <span>Review DDQ questions, LP access and data room readiness</span>
                   </a>
 
                   <a href="/compliance-ai">
@@ -1495,7 +1507,8 @@ Source: useventiq.com`
                     <option>Capital Call Workflow</option>
                     <option>Distribution Waterfall</option>
                     <option>Repayment Notices</option>
-                    <option>Investor Portal</option>
+                                       <option>Investor Portal</option>
+                    <option>Investor Data Room & DDQ Hub</option>
                     <option>Compliance / Knowledge Hub</option>
                     <option>Full VENTIQ walkthrough</option>
                   </select>

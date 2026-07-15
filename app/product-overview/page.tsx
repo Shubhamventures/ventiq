@@ -3,7 +3,7 @@ import Link from "next/link";
 export const metadata = {
   title: "Product Overview | VENTIQ",
   description:
-    "Product overview of VENTIQ, the AI operating system for private capital teams across fund operations, workflows, investor reporting and portfolio intelligence.",
+    "Product overview of VENTIQ, the AI operating system for private capital teams across fund operations, investor data rooms, DDQ tracking, investor reporting and portfolio intelligence.",
 };
 
 const overviewSections = [
@@ -35,6 +35,7 @@ const workflows = [
   "Repayment Notices",
   "Document Engine",
   "Investor Portal",
+  "Investor Data Room & DDQ Hub",
   "Managing Partner Dashboard",
   "Portfolio Intelligence",
   "Compliance Knowledge Hub",
@@ -66,6 +67,9 @@ export default function ProductOverviewPage() {
           <Link href="/capital-call" className="public-secondary-cta">
             See Capital Call Workflow
           </Link>
+                    <Link href="/data-room" className="public-secondary-cta">
+            Explore Data Room
+          </Link>
         </div>
       </section>
 
@@ -87,7 +91,26 @@ export default function ProductOverviewPage() {
           ))}
         </div>
       </section>
+      <section className="legal-content-card">
+        <h2>Investor Data Room & DDQ Hub</h2>
 
+        <p>
+          VENTIQ includes an investor data room workflow for fundraising and LP
+          diligence. Teams can upload legacy documents, classify files, map
+          access levels, track investor engagement, manage DDQ questions and
+          monitor readiness before sharing information with prospective LPs.
+        </p>
+
+        <p>
+          This allows firms to start with a modular investor-facing use case —
+          such as an LP data room or investor portal — before adopting the full
+          VENTIQ operating system.
+        </p>
+
+        <Link href="/data-room" className="public-secondary-cta">
+          Open Investor Data Room
+        </Link>
+      </section>
       <section className="legal-content-card">
         <h2>Built for fund operations reality</h2>
 
