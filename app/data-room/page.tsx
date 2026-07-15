@@ -259,7 +259,38 @@ const ddqItems: DDQItem[] = [
     source: "Portfolio Summary",
   },
 ];
-
+const dataRoomFaqItems = [
+  {
+    question: "What is the Investor Data Room & DDQ Hub?",
+    answer:
+      "It is a VENTIQ workspace for managing LP diligence, fundraising documents, DDQ questions, investor access and engagement tracking in one connected flow.",
+  },
+  {
+    question: "Can a fund use only the data room without adopting full VENTIQ?",
+    answer:
+      "Yes. A fund can start with the Investor Data Room or Investor Portal by uploading legacy documents, historical notices, investor reports and DDQ files before expanding into the full VENTIQ operating system.",
+  },
+  {
+    question: "What documents can be uploaded?",
+    answer:
+      "Teams can upload fund decks, PPMs, trust deeds, track records, capital call notices, distribution notices, SOAs, tax documents, compliance files, DDQs and investor reporting packs.",
+  },
+  {
+    question: "How does VENTIQ classify uploaded files?",
+    answer:
+      "VENTIQ previews the uploaded file name, detects the likely document type and suggests a destination folder such as Fund Overview, Legal & Compliance, Track Record, Investor Reporting Samples or DDQ & Q&A.",
+  },
+  {
+    question: "How does the DDQ question tracker work?",
+    answer:
+      "Investor or LP questions can be linked to a document, category and investor. The team can then track open questions, mark them answered and use the readiness score to understand what still needs attention.",
+  },
+  {
+    question: "What does the data room readiness score measure?",
+    answer:
+      "The readiness score reflects imported documents, folder coverage, investor engagement, answered DDQ questions and open diligence items before the data room is shared with prospective LPs.",
+  },
+];
 function getDDQStatusIcon(status: DDQItem["status"]) {
   if (status === "Ready") return "🟢";
   if (status === "Needs Review") return "🟡";
@@ -1474,7 +1505,26 @@ access.
                 </div>
               </div>
             </div>
+            <div className="preview-card">
+              <h2>Investor Data Room FAQ</h2>
 
+              <div className="explain-box">
+                Common questions for private capital teams evaluating VENTIQ as
+                an investor data room, DDQ tracker or modular investor-facing
+                workflow.
+              </div>
+
+              <div className="queue-grid">
+                {dataRoomFaqItems.map((item) => (
+                  <div className="queue-item" key={item.question}>
+                    <strong>{item.question}</strong>
+                    <br />
+                    <br />
+                    <span>{item.answer}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
             <div className="preview-card">
               <h2>Modular Adoption Path</h2>
 
