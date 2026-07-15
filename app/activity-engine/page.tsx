@@ -67,13 +67,23 @@ function getFundName(value: CapitalCall["funds"]) {
 }
 
 function getStatusIcon(status: string) {
-  if (status.toLowerCase().includes("approved")) return "🟢";
-  if (status.toLowerCase().includes("generated")) return "🔵";
-  if (status.toLowerCase().includes("stored")) return "🟣";
-  if (status.toLowerCase().includes("portal")) return "🟢";
-  if (status.toLowerCase().includes("email")) return "🟡";
+  const normalizedStatus = status.toLowerCase();
+
+  if (normalizedStatus.includes("approved")) return "🟢";
+  if (normalizedStatus.includes("generated")) return "🔵";
+  if (normalizedStatus.includes("stored")) return "🟣";
+  if (normalizedStatus.includes("portal")) return "🟢";
+  if (normalizedStatus.includes("email")) return "🟡";
+  if (normalizedStatus.includes("data room")) return "🗂️";
+  if (normalizedStatus.includes("imported")) return "📥";
+  if (normalizedStatus.includes("viewed")) return "👁️";
+  if (normalizedStatus.includes("downloaded")) return "⬇️";
+  if (normalizedStatus.includes("ddq")) return "❓";
+  if (normalizedStatus.includes("readiness")) return "📊";
+
   return "⚪";
 }
+
 
 export default function ActivityEnginePage() {
   const [capitalCalls, setCapitalCalls] = useState<CapitalCall[]>([]);
@@ -218,7 +228,75 @@ export default function ActivityEnginePage() {
         });
       }
     });
+    const now = Date.now();
 
+    const dataRoomActivityEvents: ActivityEvent[] = [
+      {
+        id: "data-room-opened",
+        time: new Date(now - 1000 * 60 * 12).toISOString(),
+        module: "Investor Data Room",
+        title: "Investor data room opened",
+        description:
+          "Investor Relations opened the Data Room & DDQ Hub to review LP diligence readiness.",
+        status: "data room opened",
+      },
+      {
+        id: "data-room-imported-files",
+        time: new Date(now - 1000 * 60 * 24).toISOString(),
+        module: "Investor Data Room",
+        title: "Legacy documents imported",
+        description:
+          "Historical fund documents were uploaded, classified and mapped to data room folders.",
+        status: "imported",
+      },
+      {
+        id: "data-room-lp-viewed",
+        time: new Date(now - 1000 * 60 * 37).toISOString(),
+        module: "LP Engagement",
+        title: "LP viewed data room document",
+        description:
+          "Prospective LP viewed the fund overview and reporting sample inside the data room.",
+        status: "viewed data room document",
+      },
+      {
+        id: "data-room-lp-downloaded",
+        time: new Date(now - 1000 * 60 * 52).toISOString(),
+        module: "LP Engagement",
+        title: "LP downloaded diligence file",
+        description:
+          "Investor downloaded a data room file for offline review and internal discussion.",
+        status: "downloaded data room document",
+      },
+      {
+        id: "data-room-ddq-question",
+        time: new Date(now - 1000 * 60 * 68).toISOString(),
+        module: "DDQ Hub",
+        title: "DDQ question raised",
+        description:
+          "LP raised a diligence question linked to fund operations and reporting documents.",
+        status: "ddq question open",
+      },
+      {
+        id: "data-room-ddq-answered",
+        time: new Date(now - 1000 * 60 * 91).toISOString(),
+        module: "DDQ Hub",
+        title: "DDQ question answered",
+        description:
+          "Investor Relations marked a DDQ response as answered and ready for LP review.",
+        status: "ddq answered",
+      },
+      {
+        id: "data-room-readiness-updated",
+        time: new Date(now - 1000 * 60 * 115).toISOString(),
+        module: "Data Room Readiness",
+        title: "Readiness score updated",
+        description:
+          "VENTIQ recalculated data room readiness after imports, engagement and DDQ activity.",
+        status: "readiness updated",
+      },
+    ];
+
+    events.push(...dataRoomActivityEvents);
     return events.sort((a, b) => {
       const aTime = new Date(a.time || 0).getTime();
       const bTime = new Date(b.time || 0).getTime();
@@ -226,6 +304,12 @@ export default function ActivityEnginePage() {
     });
   }, [capitalCalls, documents]);
 
+    const dataRoomEvents = activityEvents.filter(
+    (event) =>
+      event.module.includes("Data Room") ||
+      event.module.includes("DDQ") ||
+      event.module.includes("LP Engagement")
+  );
   const approvedCapitalCalls = capitalCalls.filter(
     (call) => call.status === "approved"
   );
@@ -256,10 +340,10 @@ export default function ActivityEnginePage() {
           <div>
             <p className="eyebrow">VENTIQ Intelligence Layer</p>
             <h1>AI Activity Engine</h1>
-            <p>
+                       <p>
               A connected audit and intelligence layer showing how fund actions,
-              document generation, portal updates and investor communication
-              move across VENTIQ.
+              document generation, portal updates, data room activity, DDQ
+              questions and investor communication move across VENTIQ.
             </p>
           </div>
 
@@ -268,10 +352,9 @@ export default function ActivityEnginePage() {
           </a>
         </div>
 
-        <div className="sample-data-ribbon">
-          Connected activity preview · Reading capital calls and investor document records
+              <div className="sample-data-ribbon">
+          Connected activity preview · Reading capital calls, investor documents and data room activity
         </div>
-
         {loading && (
           <div className="preview-card">
             <h2>Preparing Activity Engine...</h2>
@@ -293,7 +376,7 @@ export default function ActivityEnginePage() {
 
         {!loading && !errorMessage && (
           <>
-            <div className="impact-grid">
+                       <div className="impact-grid">
               <div className="impact-card">
                 <h3>{activityEvents.length}</h3>
                 <p>Connected activity events</p>
@@ -310,19 +393,19 @@ export default function ActivityEnginePage() {
               </div>
 
               <div className="impact-card">
-                <h3>{formatCr(totalDocumentAmount)}</h3>
-                <p>Investor document value</p>
+                <h3>{dataRoomEvents.length}</h3>
+                <p>Data room events</p>
               </div>
             </div>
 
             <div className="preview-card">
               <h2>Connected Workflow Summary</h2>
 
-              <div className="explain-box">
+                            <div className="explain-box">
                 The Activity Engine is now reading the same fund workflow data
-                used by Capital Call, Document Engine and Investor Portal. This
-                proves the VENTIQ operating layer: one action creates downstream
-                evidence across modules.
+                used by Capital Call, Document Engine, Investor Portal and Data
+                Room. This proves the VENTIQ operating layer: one action creates
+                downstream evidence across modules.
               </div>
 
               <div className="queue-grid">
@@ -343,7 +426,11 @@ export default function ActivityEnginePage() {
                   <br />
                   {portalAvailableDocuments.length} documents available
                 </div>
-
+                <div className="queue-item">
+                  🗂️ Investor Data Room
+                  <br />
+                  {dataRoomEvents.length} diligence events tracked
+                </div>
                 <div className="queue-item">
                   🟣 Document Vault
                   <br />
@@ -414,28 +501,38 @@ export default function ActivityEnginePage() {
                 <div className="chat-message">
                   Ask: “Which investor communications are still pending?”
                 </div>
+                                <div className="chat-message">
+                  Ask: “What happened in the data room today?”
+                </div>
+
+                <div className="chat-message">
+                  Ask: “Which DDQ questions are still open?”
+                </div>
               </div>
             </div>
 
             <div className="preview-card">
               <h2>Workflow Dependency Graph</h2>
 
-              <div className="queue-grid">
+                            <div className="queue-grid">
                 <div className="queue-item">Capital Call Approved</div>
                 <div className="queue-item">Document Batch Received</div>
                 <div className="queue-item">Investor Notices Generated</div>
                 <div className="queue-item">PDF Stored in Vault</div>
                 <div className="queue-item">Investor Portal Updated</div>
-                <div className="queue-item">Email Queue Prepared</div>
-                <div className="queue-item">Investor Access Confirmed</div>
+                <div className="queue-item">Data Room Opened</div>
+                <div className="queue-item">LP Viewed / Downloaded File</div>
+                <div className="queue-item">DDQ Question Tracked</div>
+                <div className="queue-item">Readiness Score Updated</div>
                 <div className="queue-item">Audit Trail Recorded</div>
               </div>
 
-              <div className="explain-box">
+                            <div className="explain-box">
                 This is the connected VENTIQ loop: Finance approval flows into
                 document generation, document vault, investor portal visibility,
-                communication status and audit evidence without rebuilding the
-                same information in separate tools.
+                data room diligence, DDQ tracking, communication status and audit
+                evidence without rebuilding the same information in separate
+                tools.
               </div>
             </div>
 
@@ -446,7 +543,7 @@ export default function ActivityEnginePage() {
                 <div className="journal-row">
                   <span>Observed Workflow</span>
                   <strong>
-                    Capital Call → Document Engine → Investor Portal
+                                        Capital Call → Document Engine → Investor Portal → Data Room
                   </strong>
                 </div>
 
@@ -463,6 +560,10 @@ export default function ActivityEnginePage() {
                 <div className="journal-row">
                   <span>Stored PDFs</span>
                   <strong>{storedDocuments.length}</strong>
+                </div>
+                                <div className="journal-row">
+                  <span>Data Room Events</span>
+                  <strong>{dataRoomEvents.length}</strong>
                 </div>
 
                 <div className="journal-row">
@@ -495,7 +596,9 @@ export default function ActivityEnginePage() {
                 <div className="queue-item">✓ Portal visibility tracked</div>
                 <div className="queue-item">✓ PDF storage status visible</div>
                 <div className="queue-item">✓ Email queue status visible</div>
-                <div className="queue-item">✓ Investor access connected</div>
+                              <div className="queue-item">✓ Investor access connected</div>
+                <div className="queue-item">✓ Data room diligence tracked</div>
+                <div className="queue-item">✓ DDQ activity captured</div>
                 <div className="queue-item">✓ Audit trail generated</div>
               </div>
             </div>
@@ -518,6 +621,9 @@ export default function ActivityEnginePage() {
 
                 <div className="queue-item">
                   Investor Portal — {portalAvailableDocuments.length} available
+                </div>
+                                <div className="queue-item">
+                  Investor Data Room — {dataRoomEvents.length} events
                 </div>
 
                 <div className="queue-item">
