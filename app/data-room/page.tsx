@@ -28,6 +28,7 @@ type UploadedFilePreview = {
   id: string;
   name: string;
   size: number;
+  fileType: string;
   detectedType: string;
   suggestedDestination: string;
   accessLevel: DataRoomAccessLevel;
@@ -38,17 +39,21 @@ type ImportedDataRoomDocument = UploadedFilePreview & {
   importedAt: string;
   ddqImpact: string;
 };
+
 type InvestorEngagementEvent = {
   id: string;
   investorName: string;
+  documentId: string | null;
   documentName: string;
   action: "Viewed" | "Downloaded" | "Asked Question";
   time: string;
   note: string;
 };
+
 type DataRoomQuestion = {
   id: string;
   investorName: string;
+  documentId: string | null;
   documentName: string;
   category: string;
   question: string;
@@ -111,6 +116,7 @@ function formatDate(value: unknown) {
 }
 
 function formatFileSize(size: number) {
+  if (!Number.isFinite(size) || size <= 0) return "-";
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
 
@@ -129,6 +135,7 @@ function detectDocumentType(fileName: string) {
   if (value.includes("capital call")) return "Capital Call Notice";
   if (value.includes("distribution")) return "Distribution Notice";
   if (value.includes("soa")) return "Statement of Account";
+
   if (value.includes("tax") || value.includes("64c") || value.includes("64d")) {
     return "Tax / Regulatory Document";
   }
@@ -137,7 +144,11 @@ function detectDocumentType(fileName: string) {
     return "Fundraising Deck";
   }
 
-  if (value.includes("compliance") || value.includes("sebi") || value.includes("gift")) {
+  if (
+    value.includes("compliance") ||
+    value.includes("sebi") ||
+    value.includes("gift")
+  ) {
     return "Compliance Document";
   }
 
@@ -157,6 +168,7 @@ function suggestDestination(documentType: string) {
 
   return "General Investor Documents";
 }
+
 function getDDQImpact(documentType: string, destination: string) {
   if (destination === "DDQ & Q&A") {
     return "Can support DDQ response drafting";
@@ -184,6 +196,91 @@ function getDDQImpact(documentType: string, destination: string) {
 
   return "Ready for data room review";
 }
+
+function normalizeAccessLevel(value: string): DataRoomAccessLevel {
+  if (
+    value === "All LPs" ||
+    value === "Restricted LP Access" ||
+    value === "Internal Only" ||
+    value === "Prospective LPs Only"
+  ) {
+    return value;
+  }
+
+  return "Internal Only";
+}
+
+function normalizeEngagementAction(
+  value: string
+): InvestorEngagementEvent["action"] {
+  if (value === "Viewed" || value === "Downloaded" || value === "Asked Question") {
+    return value;
+  }
+
+  return "Viewed";
+}
+
+function normalizeQuestionStatus(value: string): DataRoomQuestion["status"] {
+  if (
+    value === "Open" ||
+    value === "Answered" ||
+    value === "Needs Internal Review"
+  ) {
+    return value;
+  }
+
+  return "Open";
+}
+
+function mapImportedDocument(row: DataRow): ImportedDataRoomDocument {
+  const detectedType = getString(row, ["detected_type"], "Investor Document");
+  const destination = getString(
+    row,
+    ["suggested_folder"],
+    suggestDestination(detectedType)
+  );
+
+  return {
+    id: getString(row, ["id"], `${getString(row, ["file_name"])}-${Date.now()}`),
+    name: getString(row, ["file_name"], "Imported Document"),
+    size: getNumber(row, ["file_size"]),
+    fileType: getString(row, ["file_type"], ""),
+    detectedType,
+    suggestedDestination: destination,
+    accessLevel: normalizeAccessLevel(getString(row, ["access_level"], "")),
+    status: "Imported",
+    importedAt: getString(row, ["imported_at", "created_at"], ""),
+    ddqImpact: getString(row, ["ddq_impact"], getDDQImpact(detectedType, destination)),
+  };
+}
+
+function mapEngagementEvent(row: DataRow): InvestorEngagementEvent {
+  return {
+    id: getString(row, ["id"], `${Date.now()}`),
+    investorName: getString(row, ["investor_name"], "Prospective LP"),
+    documentId: getString(row, ["document_id"], "") || null,
+    documentName: getString(row, ["document_name"], "Data Room Document"),
+    action: normalizeEngagementAction(getString(row, ["action"], "Viewed")),
+    time: getString(row, ["event_time", "created_at"], ""),
+    note: getString(row, ["note"], "Investor engagement recorded."),
+  };
+}
+
+function mapDataRoomQuestion(row: DataRow): DataRoomQuestion {
+  return {
+    id: getString(row, ["id"], `${Date.now()}`),
+    investorName: getString(row, ["investor_name"], "Prospective LP"),
+    documentId: getString(row, ["document_id"], "") || null,
+    documentName: getString(row, ["document_name"], "General Data Room Question"),
+    category: getString(row, ["category"], "Fund Operations"),
+    question: getString(row, ["question"], ""),
+    status: normalizeQuestionStatus(getString(row, ["status"], "Open")),
+    askedAt: getString(row, ["asked_at", "created_at"], ""),
+    answer: getString(row, ["answer"], ""),
+    answeredAt: getString(row, ["answered_at"], ""),
+  };
+}
+
 const dataRoomFolders: DataRoomFolder[] = [
   {
     name: "Fund Overview",
@@ -248,7 +345,8 @@ const ddqItems: DDQItem[] = [
   },
   {
     category: "Compliance",
-    question: "Provide regulatory registration, compliance policy and tax reporting process.",
+    question:
+      "Provide regulatory registration, compliance policy and tax reporting process.",
     status: "Needs Review",
     source: "Legal & Compliance",
   },
@@ -259,6 +357,7 @@ const ddqItems: DDQItem[] = [
     source: "Portfolio Summary",
   },
 ];
+
 const dataRoomFaqItems = [
   {
     question: "What is the Investor Data Room & DDQ Hub?",
@@ -291,6 +390,7 @@ const dataRoomFaqItems = [
       "The readiness score reflects imported documents, folder coverage, investor engagement, answered DDQ questions and open diligence items before the data room is shared with prospective LPs.",
   },
 ];
+
 function getDDQStatusIcon(status: DDQItem["status"]) {
   if (status === "Ready") return "🟢";
   if (status === "Needs Review") return "🟡";
@@ -302,16 +402,16 @@ export default function DataRoomPage() {
   const [funds, setFunds] = useState<DataRow[]>([]);
   const [documents, setDocuments] = useState<DataRow[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFilePreview[]>([]);
-    const [importedDocuments, setImportedDocuments] = useState<
+  const [importedDocuments, setImportedDocuments] = useState<
     ImportedDataRoomDocument[]
   >([]);
   const [selectedAccessView, setSelectedAccessView] = useState("All LPs");
-    const [selectedEngagementInvestor, setSelectedEngagementInvestor] =
+  const [selectedEngagementInvestor, setSelectedEngagementInvestor] =
     useState("Prospective LP");
   const [engagementEvents, setEngagementEvents] = useState<
     InvestorEngagementEvent[]
   >([]);
-    const [ddqQuestions, setDdqQuestions] = useState<DataRoomQuestion[]>([]);
+  const [ddqQuestions, setDdqQuestions] = useState<DataRoomQuestion[]>([]);
   const [manualDDQQuestion, setManualDDQQuestion] = useState("");
   const [selectedQuestionDocumentId, setSelectedQuestionDocumentId] =
     useState("");
@@ -319,47 +419,80 @@ export default function DataRoomPage() {
     useState("Fund Operations");
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
 
-  useEffect(() => {
-    async function loadDataRoom() {
-      if (!isSupabaseConfigured || !supabase) {
-        setErrorMessage(
-          "The sample Investor Data Room is temporarily unavailable. Please request a walkthrough."
-        );
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      setErrorMessage("");
-
-      const [investorsResult, fundsResult, documentsResult] = await Promise.all([
-        supabase
-          .from("investors")
-          .select("*")
-          .order("name", { ascending: true }),
-        supabase.from("funds").select("*"),
-        supabase
-          .from("investor_documents")
-          .select("*")
-          .order("generated_at", { ascending: false }),
-      ]);
-
-      const firstError =
-        investorsResult.error || fundsResult.error || documentsResult.error;
-
-      if (firstError) {
-        setErrorMessage(firstError.message);
-        setLoading(false);
-        return;
-      }
-
-      setInvestors((investorsResult.data ?? []) as DataRow[]);
-      setFunds((fundsResult.data ?? []) as DataRow[]);
-      setDocuments((documentsResult.data ?? []) as DataRow[]);
+  async function loadDataRoom() {
+    if (!isSupabaseConfigured || !supabase) {
+      setErrorMessage(
+        "The sample Investor Data Room is temporarily unavailable. Please request a walkthrough."
+      );
       setLoading(false);
+      return;
     }
 
+    setLoading(true);
+    setErrorMessage("");
+    setActionMessage("");
+
+    const [
+      investorsResult,
+      fundsResult,
+      documentsResult,
+      dataRoomDocumentsResult,
+      questionsResult,
+      engagementResult,
+    ] = await Promise.all([
+      supabase.from("investors").select("*").order("name", { ascending: true }),
+      supabase.from("funds").select("*"),
+      supabase
+        .from("investor_documents")
+        .select("*")
+        .order("generated_at", { ascending: false }),
+      supabase
+        .from("data_room_documents")
+        .select("*")
+        .order("imported_at", { ascending: false }),
+      supabase
+        .from("data_room_questions")
+        .select("*")
+        .order("asked_at", { ascending: false }),
+      supabase
+        .from("data_room_engagement_events")
+        .select("*")
+        .order("event_time", { ascending: false }),
+    ]);
+
+    const firstError =
+      investorsResult.error ||
+      fundsResult.error ||
+      documentsResult.error ||
+      dataRoomDocumentsResult.error ||
+      questionsResult.error ||
+      engagementResult.error;
+
+    if (firstError) {
+      setErrorMessage(firstError.message);
+      setLoading(false);
+      return;
+    }
+
+    setInvestors((investorsResult.data ?? []) as DataRow[]);
+    setFunds((fundsResult.data ?? []) as DataRow[]);
+    setDocuments((documentsResult.data ?? []) as DataRow[]);
+    setImportedDocuments(
+      ((dataRoomDocumentsResult.data ?? []) as DataRow[]).map(mapImportedDocument)
+    );
+    setDdqQuestions(
+      ((questionsResult.data ?? []) as DataRow[]).map(mapDataRoomQuestion)
+    );
+    setEngagementEvents(
+      ((engagementResult.data ?? []) as DataRow[]).map(mapEngagementEvent)
+    );
+
+    setLoading(false);
+  }
+
+  useEffect(() => {
     loadDataRoom();
   }, []);
 
@@ -390,7 +523,8 @@ export default function DataRoomPage() {
       (item) => item.status === "Needs Review"
     );
     const missingDDQItems = ddqItems.filter((item) => item.status === "Missing");
-        const openDataRoomQuestions = ddqQuestions.filter(
+
+    const openDataRoomQuestions = ddqQuestions.filter(
       (question) => question.status !== "Answered"
     ).length;
 
@@ -403,7 +537,8 @@ export default function DataRoomPage() {
         ddqItems.length) *
         100
     );
-        const importedFolderSet = new Set(
+
+    const importedFolderSet = new Set(
       importedDocuments.map((file) => file.suggestedDestination)
     );
 
@@ -421,7 +556,7 @@ export default function DataRoomPage() {
       Math.round(
         readinessScore +
           Math.min(importedDocuments.length * 4, 20) +
-                    Math.min(engagementEvents.length * 2, 10) +
+          Math.min(engagementEvents.length * 2, 10) +
           Math.min(answeredDataRoomQuestions * 2, 8) -
           Math.min(openDataRoomQuestions * 2, 6) +
           (hasFundOverview ? 5 : 0) +
@@ -445,12 +580,12 @@ export default function DataRoomPage() {
       readyDDQItems: readyDDQItems.length,
       needsReviewDDQItems: needsReviewDDQItems.length,
       missingDDQItems: missingDDQItems.length,
-               readinessScore,
+      readinessScore,
       dynamicReadinessScore,
       importedDocuments: importedDocuments.length,
       totalDataRoomDocuments: documents.length + importedDocuments.length,
       engagementEvents: engagementEvents.length,
-            totalDataRoomQuestions: ddqQuestions.length,
+      totalDataRoomQuestions: ddqQuestions.length,
       openDataRoomQuestions,
       answeredDataRoomQuestions,
       hasFundOverview,
@@ -460,17 +595,18 @@ export default function DataRoomPage() {
       hasTaxRegulatory,
       hasDDQHub,
     };
-      }, [
+  }, [
     documents,
     investors.length,
     funds.length,
     importedDocuments,
-        engagementEvents.length,
+    engagementEvents.length,
     ddqQuestions,
   ]);
 
   const recentDocuments = documents.slice(0, 8);
-    const dataRoomFaqStructuredData = {
+
+  const dataRoomFaqStructuredData = {
     "@context": "https://schema.org",
     "@type": "FAQPage",
     mainEntity: dataRoomFaqItems.map((item) => ({
@@ -489,10 +625,11 @@ export default function DataRoomPage() {
     const previews = Array.from(files).map((file) => {
       const detectedType = detectDocumentType(file.name);
 
-            return {
+      return {
         id: `${file.name}-${file.size}-${file.lastModified}`,
         name: file.name,
         size: file.size,
+        fileType: file.type,
         detectedType,
         suggestedDestination: suggestDestination(detectedType),
         accessLevel: "Internal Only" as DataRoomAccessLevel,
@@ -501,8 +638,12 @@ export default function DataRoomPage() {
     });
 
     setUploadedFiles(previews);
+    setActionMessage(
+      `${previews.length} file${previews.length === 1 ? "" : "s"} ready for review.`
+    );
   }
-    function updateUploadedFileAccessLevel(
+
+  function updateUploadedFileAccessLevel(
     fileId: string,
     accessLevel: DataRoomAccessLevel
   ) {
@@ -518,61 +659,148 @@ export default function DataRoomPage() {
     );
   }
 
-  function handleApproveImport(fileId: string) {
+  async function handleApproveImport(fileId: string) {
+    if (!supabase) return;
+
     const fileToImport = uploadedFiles.find((file) => file.id === fileId);
 
     if (!fileToImport || fileToImport.status === "Imported") return;
 
-    const importedDocument: ImportedDataRoomDocument = {
-      ...fileToImport,
+    setActionMessage("Saving imported data room document...");
+
+    const payload = {
+      file_name: fileToImport.name,
+      file_size: fileToImport.size,
+      file_type: fileToImport.fileType,
+      detected_type: fileToImport.detectedType,
+      suggested_folder: fileToImport.suggestedDestination,
+      access_level: fileToImport.accessLevel,
       status: "Imported",
-      importedAt: new Date().toISOString(),
-      ddqImpact: getDDQImpact(
+      ddq_impact: getDDQImpact(
         fileToImport.detectedType,
         fileToImport.suggestedDestination
       ),
+      imported_at: new Date().toISOString(),
+      uploaded_by: "VENTIQ Investor Relations",
+      updated_at: new Date().toISOString(),
     };
 
-    setImportedDocuments((current) => {
-      const alreadyImported = current.some((file) => file.id === fileId);
+    const { data, error } = await supabase
+      .from("data_room_documents")
+      .insert(payload)
+      .select("*")
+      .single();
 
-      if (alreadyImported) return current;
+    if (error || !data) {
+      setActionMessage(`Could not import document: ${error?.message ?? "No record returned"}`);
+      return;
+    }
 
-      return [importedDocument, ...current];
-    });
+    const importedDocument = mapImportedDocument(data as DataRow);
 
-        setUploadedFiles((current) =>
-      current.filter((file) => file.id !== fileId)
-    );
+    setImportedDocuments((current) => [importedDocument, ...current]);
+    setUploadedFiles((current) => current.filter((file) => file.id !== fileId));
+    setActionMessage(`${importedDocument.name} imported into Data Room.`);
   }
 
-  function handleApproveAllImports() {
-    const readyFiles = uploadedFiles.filter(
-      (file) => file.status !== "Imported"
-    );
+  async function handleApproveAllImports() {
+    if (!supabase) return;
+
+    const readyFiles = uploadedFiles.filter((file) => file.status !== "Imported");
 
     if (readyFiles.length === 0) return;
 
-    const importedBatch: ImportedDataRoomDocument[] = readyFiles.map((file) => ({
-      ...file,
+    setActionMessage("Saving imported data room documents...");
+
+    const now = new Date().toISOString();
+
+    const payload = readyFiles.map((file) => ({
+      file_name: file.name,
+      file_size: file.size,
+      file_type: file.fileType,
+      detected_type: file.detectedType,
+      suggested_folder: file.suggestedDestination,
+      access_level: file.accessLevel,
       status: "Imported",
-      importedAt: new Date().toISOString(),
-      ddqImpact: getDDQImpact(file.detectedType, file.suggestedDestination),
+      ddq_impact: getDDQImpact(file.detectedType, file.suggestedDestination),
+      imported_at: now,
+      uploaded_by: "VENTIQ Investor Relations",
+      updated_at: now,
     }));
 
-    setImportedDocuments((current) => {
-      const existingIds = new Set(current.map((file) => file.id));
-      const newFiles = importedBatch.filter((file) => !existingIds.has(file.id));
+    const { data, error } = await supabase
+      .from("data_room_documents")
+      .insert(payload)
+      .select("*");
 
-      return [...newFiles, ...current];
-    });
+    if (error) {
+      setActionMessage(`Could not import documents: ${error.message}`);
+      return;
+    }
 
-       setUploadedFiles([]);
+    const importedBatch = ((data ?? []) as DataRow[]).map(mapImportedDocument);
+
+    setImportedDocuments((current) => [...importedBatch, ...current]);
+    setUploadedFiles([]);
+    setActionMessage(
+      `${importedBatch.length} file${importedBatch.length === 1 ? "" : "s"} imported into Data Room.`
+    );
   }
-    function handleRecordEngagement(
+
+  async function createDataRoomQuestion({
+    investorName,
+    documentId,
+    documentName,
+    category,
+    question,
+  }: {
+    investorName: string;
+    documentId: string | null;
+    documentName: string;
+    category: string;
+    question: string;
+  }) {
+    if (!supabase) return null;
+
+    const now = new Date().toISOString();
+
+    const payload = {
+      investor_name: investorName,
+      document_id: documentId,
+      document_name: documentName,
+      category,
+      question,
+      status: "Open",
+      answer: "",
+      asked_at: now,
+      updated_at: now,
+    };
+
+    const { data, error } = await supabase
+      .from("data_room_questions")
+      .insert(payload)
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      setActionMessage(`Could not add DDQ question: ${error?.message ?? "No record returned"}`);
+      return null;
+    }
+
+    const newQuestion = mapDataRoomQuestion(data as DataRow);
+
+    setDdqQuestions((current) => [newQuestion, ...current]);
+    setActionMessage("DDQ question saved.");
+
+    return newQuestion;
+  }
+
+  async function handleRecordEngagement(
     file: ImportedDataRoomDocument,
     action: InvestorEngagementEvent["action"]
   ) {
+    if (!supabase) return;
+
     const investorName =
       selectedEngagementInvestor ||
       getString(investors[0], ["name"], "Prospective LP");
@@ -584,63 +812,53 @@ export default function DataRoomPage() {
         ? "Investor downloaded the document for offline review."
         : "Investor raised a DDQ follow-up question on this document.";
 
-        const eventTime = new Date().toISOString();
+    const now = new Date().toISOString();
 
-    const event: InvestorEngagementEvent = {
-      id: `${file.id}-${action}-${Date.now()}`,
-      investorName,
-      documentName: file.name,
-      action,
-      time: eventTime,
-      note,
-    };
+    const { data, error } = await supabase
+      .from("data_room_engagement_events")
+      .insert({
+        investor_name: investorName,
+        document_id: file.id,
+        document_name: file.name,
+        action,
+        note,
+        event_time: now,
+      })
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      setActionMessage(`Could not record engagement: ${error?.message ?? "No record returned"}`);
+      return;
+    }
+
+    const event = mapEngagementEvent(data as DataRow);
+
+    setEngagementEvents((current) => [event, ...current]);
 
     if (action === "Asked Question") {
-      createDataRoomQuestion({
+      await createDataRoomQuestion({
         investorName,
+        documentId: file.id,
         documentName: file.name,
         category: "Document Follow-up",
         question: `Please clarify ${file.name} and provide supporting diligence context.`,
       });
     }
 
-    setEngagementEvents((current) => [event, ...current]);
+    setActionMessage(`${action} recorded for ${file.name}.`);
   }
 
-   function createDataRoomQuestion({
-    investorName,
-    documentName,
-    category,
-    question,
-  }: {
-    investorName: string;
-    documentName: string;
-    category: string;
-    question: string;
-  }) {
-    const newQuestion: DataRoomQuestion = {
-      id: `${investorName}-${documentName}-${Date.now()}`,
-      investorName,
-      documentName,
-      category,
-      question,
-      status: "Open",
-      askedAt: new Date().toISOString(),
-      answer: "",
-    };
-
-    setDdqQuestions((current) => [newQuestion, ...current]);
-  }
-
-  function handleAddManualDDQQuestion() {
+  async function handleAddManualDDQQuestion() {
     if (!manualDDQQuestion.trim()) return;
 
     const selectedDocument = importedDocuments.find(
       (file) => file.id === selectedQuestionDocumentId
     );
 
-    createDataRoomQuestion({
+    await createDataRoomQuestion({
       investorName: selectedEngagementInvestor,
+      documentId: selectedDocument?.id ?? null,
       documentName: selectedDocument?.name ?? "General Data Room Question",
       category: selectedQuestionCategory,
       question: manualDDQQuestion.trim(),
@@ -649,20 +867,38 @@ export default function DataRoomPage() {
     setManualDDQQuestion("");
   }
 
-  function handleMarkQuestionAnswered(questionId: string) {
+  async function handleMarkQuestionAnswered(questionId: string) {
+    if (!supabase) return;
+
+    const answer =
+      "Draft response prepared from available data room documents and DDQ context.";
+
+    const { data, error } = await supabase
+      .from("data_room_questions")
+      .update({
+        status: "Answered",
+        answered_at: new Date().toISOString(),
+        answer,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", questionId)
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      setActionMessage(`Could not mark question answered: ${error?.message ?? "No record returned"}`);
+      return;
+    }
+
+    const updatedQuestion = mapDataRoomQuestion(data as DataRow);
+
     setDdqQuestions((current) =>
       current.map((question) =>
-        question.id === questionId
-          ? {
-              ...question,
-              status: "Answered",
-              answeredAt: new Date().toISOString(),
-              answer:
-                "Draft response prepared from available data room documents and DDQ context.",
-            }
-          : question
+        question.id === questionId ? updatedQuestion : question
       )
     );
+
+    setActionMessage("DDQ question marked answered.");
   }
 
   function getDataRoomReadinessRecommendation() {
@@ -701,7 +937,7 @@ export default function DataRoomPage() {
     return "Data room is ready for active LP diligence and investor engagement tracking.";
   }
 
-    return (
+  return (
     <main className="app-page">
       <script
         type="application/ld+json"
@@ -727,15 +963,16 @@ export default function DataRoomPage() {
         </div>
 
         <div className="sample-data-ribbon">
-          Connected data room preview · Reading investors, funds and investor documents
+          Persistent data room preview · Reading investors, funds, investor
+          documents, imported files, DDQ questions and engagement events
         </div>
 
         {loading && (
           <div className="preview-card">
             <h2>Preparing Investor Data Room...</h2>
             <p>
-              VENTIQ is reading investors, fund records and investor document
-              history.
+              VENTIQ is reading investors, fund records, investor document
+              history and persisted data room activity.
             </p>
           </div>
         )}
@@ -749,6 +986,12 @@ export default function DataRoomPage() {
 
         {!loading && !errorMessage && (
           <>
+            {actionMessage && (
+              <div className="preview-card">
+                <div className="logic-note">{actionMessage}</div>
+              </div>
+            )}
+
             <div className="preview-card">
               <h2>Data Room Overview</h2>
 
@@ -756,8 +999,8 @@ export default function DataRoomPage() {
                 VENTIQ allows a fund manager to launch an investor portal or
                 investor data room without adopting the full operating system on
                 day one. Existing investor documents, historical notices, DDQs,
-                fund reports and data room files can be uploaded, classified and
-                made available to selected LPs.
+                fund reports and data room files can be uploaded, classified,
+                saved and made available to selected LPs.
               </div>
 
               <div className="action-row">
@@ -772,12 +1015,16 @@ export default function DataRoomPage() {
                 <a className="monitor-btn monitor-btn-secondary" href="/activity-engine">
                   View Activity Trail
                 </a>
+
+                <button type="button" onClick={loadDataRoom}>
+                  Refresh Data Room
+                </button>
               </div>
             </div>
 
             <div className="impact-grid">
               <div className="impact-card">
-                                <h3>{dataRoomMetrics.dynamicReadinessScore}%</h3>
+                <h3>{dataRoomMetrics.dynamicReadinessScore}%</h3>
                 <p>Data room readiness score</p>
               </div>
 
@@ -786,18 +1033,18 @@ export default function DataRoomPage() {
                 <p>LP / investor records</p>
               </div>
 
-                            <div className="impact-card">
+              <div className="impact-card">
                 <h3>{dataRoomMetrics.totalDataRoomDocuments}</h3>
                 <p>Total data room documents</p>
               </div>
 
               <div className="impact-card">
-                <h3>{dataRoomMetrics.storedDocuments}</h3>
-                <p>Stored PDFs</p>
+                <h3>{dataRoomMetrics.engagementEvents}</h3>
+                <p>Persisted engagement events</p>
               </div>
             </div>
 
-                        <div className="impact-grid">
+            <div className="impact-grid">
               <div className="impact-card">
                 <h3>{dataRoomMetrics.importedDocuments}</h3>
                 <p>Imported legacy files</p>
@@ -823,11 +1070,10 @@ export default function DataRoomPage() {
               <h2>Legacy Data Upload & Migration Preview</h2>
 
               <div className="explain-box">
-                This is the entry point for firms that only want Investor Portal
-                or Data Room first. They can upload historical investor masters,
-                capital call notices, distribution notices, SOAs, tax documents,
-                DDQs and fund reports. VENTIQ will classify the files and suggest
-                where each document should live.
+                Upload historical investor masters, capital call notices,
+                distribution notices, SOAs, tax documents, DDQs and fund reports.
+                VENTIQ classifies the files locally first. Once approved, the
+                records are saved to Supabase in <strong>data_room_documents</strong>.
               </div>
 
               <div className="form-card">
@@ -841,27 +1087,26 @@ export default function DataRoomPage() {
                 />
 
                 <div className="logic-note">
-                  This preview classifies files locally for now. In the next
-                  phase, approved files will be stored, mapped to investors and
-                  published to Investor Portal or Data Room.
+                  Approved imports are now persisted. Reloading this page will
+                  keep imported documents visible.
                 </div>
               </div>
 
-                            {uploadedFiles.length === 0 && importedDocuments.length === 0 && (
+              {uploadedFiles.length === 0 && importedDocuments.length === 0 && (
                 <div className="explain-box">
-                  No files selected yet. Upload sample PDFs, Excels or DDQ files
-                  to preview how VENTIQ would classify legacy data.
+                  No files selected or imported yet. Upload sample PDFs, Excels
+                  or DDQ files to preview how VENTIQ classifies legacy data.
                 </div>
               )}
 
               {uploadedFiles.length === 0 && importedDocuments.length > 0 && (
                 <div className="explain-box">
-                  All selected files have been imported. Upload more files to
-                  classify and add additional records to the data room.
+                  Existing imported files are loaded from Supabase. Upload more
+                  files to classify and add additional records to the data room.
                 </div>
               )}
 
-                           {uploadedFiles.length > 0 && (
+              {uploadedFiles.length > 0 && (
                 <>
                   <div className="action-row">
                     <button type="button" onClick={handleApproveAllImports}>
@@ -935,11 +1180,12 @@ export default function DataRoomPage() {
                 <>
                   <div className="logic-note">
                     {importedDocuments.length} legacy file
-                    {importedDocuments.length === 1 ? "" : "s"} imported into
-                    the Investor Data Room workflow.
+                    {importedDocuments.length === 1 ? "" : "s"} loaded from the
+                    Investor Data Room workflow.
                   </div>
-                                    <div className="form-card">
-                    <label>Simulate investor engagement as</label>
+
+                  <div className="form-card">
+                    <label>Record investor engagement as</label>
                     <select
                       value={selectedEngagementInvestor}
                       onChange={(event) =>
@@ -949,7 +1195,11 @@ export default function DataRoomPage() {
                       <option>Prospective LP</option>
                       {investors.map((investor) => (
                         <option
-                          key={getString(investor, ["id"], getString(investor, ["name"]))}
+                          key={getString(
+                            investor,
+                            ["id"],
+                            getString(investor, ["name"])
+                          )}
                           value={getString(investor, ["name"])}
                         >
                           {getString(investor, ["name"])}
@@ -958,12 +1208,12 @@ export default function DataRoomPage() {
                     </select>
 
                     <div className="logic-note">
-                      Use this to preview how VENTIQ will track LP views,
-                      downloads and DDQ questions once the data room is shared.
+                      Record View, Download or DDQ Question. Each action is saved
+                      into Supabase.
                     </div>
                   </div>
 
-                                    <div className="queue-grid">
+                  <div className="queue-grid">
                     {importedDocuments.map((file) => (
                       <div className="queue-item" key={`imported-${file.id}`}>
                         <strong>{file.name}</strong>
@@ -975,11 +1225,14 @@ export default function DataRoomPage() {
                         <br />
                         Access: {file.accessLevel}
                         <br />
+                        Size: {formatFileSize(file.size)}
+                        <br />
                         DDQ Impact: {file.ddqImpact}
                         <br />
                         Imported: {formatDate(file.importedAt)}
-                                                <br />
                         <br />
+                        <br />
+
                         <div className="action-row">
                           <button
                             type="button"
@@ -1019,36 +1272,11 @@ export default function DataRoomPage() {
                         <span>
                           {file.name} classified as {file.detectedType}, mapped
                           to {file.suggestedDestination} with {file.accessLevel}{" "}
-access.
+                          access.
                         </span>
                       </div>
                     ))}
                   </div>
-                                    {engagementEvents.length > 0 && (
-                    <>
-                      <div className="logic-note">
-                        Investor engagement trail
-                      </div>
-
-                      <div className="audit-timeline">
-                        {engagementEvents.slice(0, 10).map((event) => (
-                          <div className="audit-item" key={event.id}>
-                            <strong>{formatDate(event.time)}</strong>{" "}
-                            {event.action === "Viewed"
-                              ? "👁️"
-                              : event.action === "Downloaded"
-                              ? "⬇️"
-                              : "❓"}{" "}
-                            {event.investorName} {event.action.toLowerCase()}
-                            <br />
-                            <span>{event.documentName}</span>
-                            <br />
-                            <span>{event.note}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
                 </>
               )}
             </div>
@@ -1056,9 +1284,7 @@ access.
             <div className="preview-card">
               <h2>Data Room Folders</h2>
 
-              <p className="eyebrow">
-                Suggested LP diligence room structure
-              </p>
+              <p className="eyebrow">Suggested LP diligence room structure</p>
 
               <div className="queue-grid">
                 {dataRoomFolders.map((folder) => (
@@ -1137,9 +1363,7 @@ access.
               </div>
 
               {investors.length === 0 && (
-                <div className="explain-box">
-                  No investor records found yet.
-                </div>
+                <div className="explain-box">No investor records found yet.</div>
               )}
 
               {investors.length > 0 && (
@@ -1158,7 +1382,13 @@ access.
 
                     <tbody>
                       {investors.slice(0, 10).map((investor) => (
-                        <tr key={getString(investor, ["id"], getString(investor, ["name"]))}>
+                        <tr
+                          key={getString(
+                            investor,
+                            ["id"],
+                            getString(investor, ["name"])
+                          )}
+                        >
                           <td>
                             <strong>{getString(investor, ["name"])}</strong>
                           </td>
@@ -1241,7 +1471,7 @@ access.
               )}
             </div>
 
-                                      <div className="preview-card">
+            <div className="preview-card">
               <h2>Investor Engagement Tracker</h2>
 
               <div className="queue-grid">
@@ -1273,8 +1503,8 @@ access.
               {engagementEvents.length === 0 && (
                 <div className="explain-box">
                   No investor engagement recorded yet. Import a document, then
-                  record a view, download or DDQ question to create the first
-                  LP engagement trail.
+                  record a view, download or DDQ question to create the first LP
+                  engagement trail.
                 </div>
               )}
 
@@ -1299,19 +1529,18 @@ access.
               )}
 
               <div className="explain-box">
-                In the next phase, this section will track investor views,
-                downloads, questions asked, document access expiry and DDQ
-                completion status.
+                Views, downloads and questions are now persisted in{" "}
+                <strong>data_room_engagement_events</strong>.
               </div>
             </div>
+
             <div className="preview-card">
               <h2>Data Room Q&A / DDQ Question Tracker</h2>
 
               <div className="explain-box">
                 Track LP questions, DDQ follow-ups and internal responses linked
-                to uploaded data room documents. This helps Investor Relations
-                and Fundraising teams manage diligence without losing questions
-                in email threads.
+                to uploaded data room documents. Questions are saved in{" "}
+                <strong>data_room_questions</strong>.
               </div>
 
               <div className="form-card">
@@ -1457,10 +1686,11 @@ access.
                 </div>
               )}
             </div>
+
             <div className="preview-card">
               <h2>AI Readiness Review</h2>
 
-                           <div className="journal-preview">
+              <div className="journal-preview">
                 <div className="journal-row">
                   <span>Data room readiness score</span>
                   <strong>{dataRoomMetrics.dynamicReadinessScore}%</strong>
@@ -1480,7 +1710,8 @@ access.
                   <span>Investor engagement events</span>
                   <strong>{dataRoomMetrics.engagementEvents}</strong>
                 </div>
-                                <div className="journal-row">
+
+                <div className="journal-row">
                   <span>Open LP / DDQ questions</span>
                   <strong>{dataRoomMetrics.openDataRoomQuestions}</strong>
                 </div>
@@ -1524,6 +1755,7 @@ access.
                 </div>
               </div>
             </div>
+
             <div className="preview-card">
               <h2>Investor Data Room FAQ</h2>
 
@@ -1544,6 +1776,7 @@ access.
                 ))}
               </div>
             </div>
+
             <div className="preview-card">
               <h2>Modular Adoption Path</h2>
 
@@ -1561,9 +1794,9 @@ access.
                 </div>
 
                 <div className="queue-item">
-                  3. Launch Investor Portal
+                  3. Save approved imports
                   <br />
-                  LPs get access without full OS adoption
+                  Data room documents remain after reload
                 </div>
 
                 <div className="queue-item">
