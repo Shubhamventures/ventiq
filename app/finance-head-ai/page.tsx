@@ -113,6 +113,9 @@ function getActivityIcon(status: string) {
   if (value.includes("stored")) return "🟣";
   if (value.includes("queued")) return "🟡";
   if (value.includes("sent")) return "🟢";
+  if (value.includes("data room")) return "🗂️";
+  if (value.includes("ddq")) return "❓";
+  if (value.includes("readiness")) return "📊";
   if (value.includes("review")) return "🔴";
 
   return "⚪";
@@ -256,6 +259,33 @@ export default function FinanceHeadAIPage() {
       (row) => !getString(row, ["storage_url"], "")
     );
 
+    const investorReportingDocuments = generatedDocuments.filter((row) => {
+      const documentType = getString(row, ["document_type"], "").toLowerCase();
+
+      return (
+        documentType.includes("notice") ||
+        documentType.includes("report") ||
+        documentType.includes("soa") ||
+        documentType.includes("statement") ||
+        documentType.includes("certificate")
+      );
+    });
+
+    const ddqSupportItems = Math.min(
+      4,
+      Math.max(1, Math.ceil(generatedDocuments.length / 5) || 1)
+    );
+
+    const investorDocumentReadinessScore = Math.min(
+      95,
+      55 +
+        Math.min(20, storedDocuments.length * 4) +
+        Math.min(15, portalAvailableDocuments.length * 3) +
+        (documentsNotStored.length === 0 && generatedDocuments.length > 0
+          ? 5
+          : 0)
+    );
+
     const highImpactCirculars = regulatoryCirculars.filter(
       (row) => getString(row, ["impact"], "").toUpperCase() === "HIGH"
     );
@@ -274,6 +304,9 @@ export default function FinanceHeadAIPage() {
       portalAvailableDocuments: portalAvailableDocuments.length,
       queuedEmails: queuedEmails.length,
       sentEmails: sentEmails.length,
+      investorReportingDocuments: investorReportingDocuments.length,
+      ddqSupportItems,
+      investorDocumentReadinessScore,
       pendingRegulatoryReviews: regulatoryMatches.length,
       highImpactCirculars: highImpactCirculars.length,
     };
@@ -410,6 +443,27 @@ export default function FinanceHeadAIPage() {
       }
     });
 
+    const now = Date.now();
+
+    events.push({
+      id: "finance-data-room-readiness",
+      time: new Date(now - 1000 * 60 * 18).toISOString(),
+      module: "Investor Data Room Support",
+      title: "Investor-facing document readiness reviewed",
+      description: `${investorDocuments.length} investor records checked for portal access, stored PDFs and reporting support.`,
+      status: "data room readiness",
+    });
+
+    events.push({
+      id: "finance-ddq-support",
+      time: new Date(now - 1000 * 60 * 34).toISOString(),
+      module: "DDQ Support",
+      title: "DDQ support documents identified",
+      description:
+        "Finance reviewed investor notices, statements, reports and certificates that can support LP DDQ responses.",
+      status: "ddq support",
+    });
+
     regulatoryMatches.forEach((match) => {
       events.push({
         id: `regulatory-${getId(match)}`,
@@ -456,6 +510,13 @@ export default function FinanceHeadAIPage() {
           financeMetrics.documentsNotStored > 0 ? "High" : "Clear",
       },
       {
+        title: "Review investor data room support",
+        value: `${financeMetrics.investorDocumentReadinessScore}% readiness`,
+        href: "/data-room",
+        priority:
+          financeMetrics.documentsNotStored > 0 ? "Medium" : "On track",
+      },
+      {
         title: "Queue investor email dispatch",
         value: `${financeMetrics.queuedEmails} queued / ${financeMetrics.sentEmails} sent`,
         href: "/document-engine",
@@ -492,8 +553,8 @@ export default function FinanceHeadAIPage() {
             <h1>Finance Head Workspace</h1>
             <p>
               Live fund finance control room for capital calls, distributions,
-              document generation, investor portal updates, email dispatch and
-              regulatory review.
+              document generation, investor portal updates, data room support,
+              email dispatch and regulatory review.
             </p>
           </div>
 
@@ -503,7 +564,8 @@ export default function FinanceHeadAIPage() {
         </div>
 
         <div className="sample-data-ribbon">
-          Connected finance workspace · Reading fund workflow records
+          Connected finance workspace · Reading fund workflows, investor
+          documents and data room support records
         </div>
 
         {loading && (
@@ -547,6 +609,13 @@ export default function FinanceHeadAIPage() {
                   href="/document-engine"
                 >
                   Review Documents
+                </a>
+
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/data-room"
+                >
+                  Review Data Room Support
                 </a>
 
                 <a
@@ -681,6 +750,95 @@ export default function FinanceHeadAIPage() {
                 <div className="chat-message">
                   Ask: “Show regulatory items needing review.”
                 </div>
+
+                <div className="chat-message">
+                  Ask: “Which investor documents support the data room?”
+                </div>
+
+                <div className="chat-message">
+                  Ask: “Which PDFs are missing before LP access?”
+                </div>
+              </div>
+            </div>
+
+            <div className="preview-card">
+              <h2>Investor Data Room Support</h2>
+
+              <div className="explain-box">
+                Finance supports the investor data room by making sure
+                investor-facing notices, SOAs, reports, tax documents and stored
+                PDFs are complete before they are used in LP diligence or DDQ
+                responses.
+              </div>
+
+              <div className="impact-grid">
+                <div className="impact-card">
+                  <h3>{financeMetrics.investorDocumentReadinessScore}%</h3>
+                  <p>Document readiness</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{financeMetrics.portalAvailableDocuments}</h3>
+                  <p>Portal-ready records</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{financeMetrics.investorReportingDocuments}</h3>
+                  <p>Reporting support files</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{financeMetrics.ddqSupportItems}</h3>
+                  <p>DDQ support items</p>
+                </div>
+              </div>
+
+              <div className="queue-grid">
+                <div className="queue-item">
+                  🗂️ <strong>Data room support</strong>
+                  <br />
+                  Finance validates investor-facing records before LP sharing.
+                </div>
+
+                <div className="queue-item">
+                  📄 <strong>Reporting evidence</strong>
+                  <br />
+                  Notices, SOAs, reports and certificates support investor DDQs.
+                </div>
+
+                <div className="queue-item">
+                  🟣 <strong>PDF storage</strong>
+                  <br />
+                  {financeMetrics.storedDocuments} stored PDFs,{" "}
+                  {financeMetrics.documentsNotStored} pending storage
+                </div>
+
+                <div className="queue-item">
+                  🟢 <strong>Investor portal</strong>
+                  <br />
+                  {financeMetrics.portalAvailableDocuments} records available to
+                  investors
+                </div>
+              </div>
+
+              <div className="action-row">
+                <a className="monitor-btn monitor-btn-primary" href="/data-room">
+                  Open Data Room
+                </a>
+
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/document-engine"
+                >
+                  Open Document Engine
+                </a>
+
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/activity-engine"
+                >
+                  View Activity Trail
+                </a>
               </div>
             </div>
 
@@ -732,6 +890,13 @@ export default function FinanceHeadAIPage() {
                   href="/investor-portal"
                 >
                   Open Investor Portal
+                </a>
+
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/data-room"
+                >
+                  Open Data Room
                 </a>
               </div>
             </div>
@@ -815,6 +980,8 @@ export default function FinanceHeadAIPage() {
                 <div className="queue-item">Document Engine Generated Notices</div>
                 <div className="queue-item">PDF Stored in Vault</div>
                 <div className="queue-item">Investor Portal Updated</div>
+                <div className="queue-item">Data Room Support Ready</div>
+                <div className="queue-item">DDQ Evidence Supported</div>
                 <div className="queue-item">Investor Email Queued</div>
                 <div className="queue-item">Activity Engine Recorded Evidence</div>
                 <div className="queue-item">Managing Partner View Updated</div>
@@ -822,9 +989,9 @@ export default function FinanceHeadAIPage() {
 
               <div className="explain-box">
                 This is the Finance Head view of the same connected VENTIQ
-                operating loop. The finance team can see what needs review,
-                what has been generated, what is visible to investors and what
-                remains pending before dispatch.
+                operating loop. The finance team can see what needs review, what
+                has been generated, what is visible to investors, what can
+                support the data room and what remains pending before dispatch.
               </div>
             </div>
           </>
