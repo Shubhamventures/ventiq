@@ -470,6 +470,18 @@ export default function DataRoomPage() {
   ]);
 
   const recentDocuments = documents.slice(0, 8);
+    const dataRoomFaqStructuredData = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: dataRoomFaqItems.map((item) => ({
+      "@type": "Question",
+      name: item.question,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: item.answer,
+      },
+    })),
+  };
 
   function handleLegacyFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -689,8 +701,15 @@ export default function DataRoomPage() {
     return "Data room is ready for active LP diligence and investor engagement tracking.";
   }
 
-  return (
+    return (
     <main className="app-page">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(dataRoomFaqStructuredData),
+        }}
+      />
+
       <section className="app-shell">
         <div className="app-header">
           <div>
