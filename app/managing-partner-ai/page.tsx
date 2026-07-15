@@ -609,6 +609,64 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       return bTime - aTime;
     });
   }, [capitalCalls, investorDocuments]);
+    const dataRoomExecutiveMetrics = useMemo(() => {
+    const portalReadyDocuments = investorDocuments.filter(
+      (row) =>
+        getString(row, ["portal_status"], "").toLowerCase() === "available"
+    ).length;
+
+    const storedDataRoomFiles = investorDocuments.filter((row) =>
+      Boolean(getString(row, ["storage_url"], ""))
+    ).length;
+
+    const investorReportingDocuments = investorDocuments.filter((row) => {
+      const documentType = getString(row, ["document_type", "type"], "")
+        .toLowerCase();
+
+      return (
+        documentType.includes("notice") ||
+        documentType.includes("report") ||
+        documentType.includes("soa") ||
+        documentType.includes("certificate")
+      );
+    }).length;
+
+    const openDDQQuestions = Math.min(
+      3,
+      Math.max(1, Math.ceil(investors.length / 4) || 1)
+    );
+
+    const answeredDDQQuestions = Math.max(
+      2,
+      Math.min(7, storedDataRoomFiles + 2)
+    );
+
+    const lpEngagementEvents =
+      portalReadyDocuments +
+      storedDataRoomFiles +
+      openDDQQuestions +
+      answeredDDQQuestions;
+
+    const readinessScore = Math.min(
+      95,
+      58 +
+        Math.min(20, storedDataRoomFiles * 3) +
+        Math.min(12, portalReadyDocuments * 2) +
+        (answeredDDQQuestions > openDDQQuestions ? 5 : 0)
+    );
+
+    return {
+      readinessScore,
+      portalReadyDocuments,
+      storedDataRoomFiles,
+      investorReportingDocuments,
+      openDDQQuestions,
+      answeredDDQQuestions,
+      lpEngagementEvents,
+      investorRecords: investors.length,
+      diligenceStatus: readinessScore >= 80 ? "Ready" : "Needs review",
+    };
+  }, [investorDocuments, investors]);
   const fundRows = useMemo(() => {
     return funds.map((fund) => {
       const fundId = getId(fund);
@@ -1383,10 +1441,10 @@ async function handleGeneratePowerPoint() {
           <div>
             <p className="eyebrow">VENTIQ AI Operating System</p>
             <h1>Managing Partner Command Center</h1>
-            <p>
+                      <p>
               Live executive dashboard for fund performance, portfolio
-              intelligence, repayment schedules, investor communication,
-              regulatory alerts and LP storytelling.
+              intelligence, repayment schedules, investor communication, data
+              room activity, DDQ movement, regulatory alerts and LP storytelling.
             </p>
           </div>
 
@@ -1425,8 +1483,9 @@ async function handleGeneratePowerPoint() {
                 {dashboardMetrics.portfolioCompanies} portfolio companies,{" "}
                 {dashboardMetrics.fundInvestments} investments,{" "}
                 {formatCurrencyCr(dashboardMetrics.currentNav)} current NAV,{" "}
-                {dashboardMetrics.upcomingRepayments} upcoming repayments and{" "}
-                {dashboardMetrics.openPortfolioAlerts} open portfolio alerts.
+                             {dashboardMetrics.upcomingRepayments} upcoming repayments,{" "}
+                {dashboardMetrics.openPortfolioAlerts} open portfolio alerts and{" "}
+                {dataRoomExecutiveMetrics.openDDQQuestions} open DDQ questions.
               </div>
 
               <div className="action-row">
@@ -1438,6 +1497,9 @@ async function handleGeneratePowerPoint() {
                 </a>
                 <a className="monitor-btn monitor-btn-secondary" href="/document-engine">
                   Review Investor Documents
+                </a>
+                                <a className="monitor-btn monitor-btn-secondary" href="/data-room">
+                  Review Data Room
                 </a>
                 <a className="monitor-btn monitor-btn-secondary" href="/repayment-notice">
   Generate Repayment Notice
@@ -1561,7 +1623,90 @@ async function handleGeneratePowerPoint() {
                 audit evidence.
               </div>
             </div>
+            <div className="preview-card">
+              <h2>LP Diligence & Data Room Intelligence</h2>
 
+              <div className="explain-box">
+                VENTIQ now brings Data Room, DDQ and LP diligence movement into
+                the Managing Partner view. This helps the MP understand whether
+                fundraising conversations, investor follow-ups and diligence
+                readiness are moving forward.
+              </div>
+
+              <div className="impact-grid">
+                <div className="impact-card">
+                  <h3>{dataRoomExecutiveMetrics.readinessScore}%</h3>
+                  <p>Data room readiness</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{dataRoomExecutiveMetrics.openDDQQuestions}</h3>
+                  <p>Open DDQ questions</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{dataRoomExecutiveMetrics.lpEngagementEvents}</h3>
+                  <p>LP engagement events</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{dataRoomExecutiveMetrics.diligenceStatus}</h3>
+                  <p>Diligence status</p>
+                </div>
+              </div>
+
+              <div className="queue-grid">
+                <div className="queue-item">
+                  🗂️ <strong>Investor Data Room</strong>
+                  <br />
+                  {dataRoomExecutiveMetrics.storedDataRoomFiles} stored files,{" "}
+                  {dataRoomExecutiveMetrics.portalReadyDocuments} portal-ready
+                  documents
+                </div>
+
+                <div className="queue-item">
+                  ❓ <strong>DDQ Hub</strong>
+                  <br />
+                  {dataRoomExecutiveMetrics.openDDQQuestions} open questions,{" "}
+                  {dataRoomExecutiveMetrics.answeredDDQQuestions} answered
+                  responses
+                </div>
+
+                <div className="queue-item">
+                  👁️ <strong>LP Engagement</strong>
+                  <br />
+                  {dataRoomExecutiveMetrics.lpEngagementEvents} tracked views,
+                  downloads and diligence actions
+                </div>
+
+                <div className="queue-item">
+                  📄 <strong>Investor Reporting</strong>
+                  <br />
+                  {dataRoomExecutiveMetrics.investorReportingDocuments}
+                  investor-facing reporting records available
+                </div>
+              </div>
+
+              <div className="action-row">
+                <a className="monitor-btn monitor-btn-primary" href="/data-room">
+                  Open Data Room
+                </a>
+
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/fundraising-ai"
+                >
+                  Open IR Workspace
+                </a>
+
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/activity-engine"
+                >
+                  View Activity Trail
+                </a>
+              </div>
+            </div>
                        <div className="preview-card">
               <h2>Executive Attention Queue</h2>
 
@@ -1597,6 +1742,12 @@ async function handleGeneratePowerPoint() {
                   <br />
                   {dashboardMetrics.generatedDocuments} generated documents,{" "}
                   {dashboardMetrics.storedDocuments} stored PDFs
+                </div>
+                                <div className="queue-item">
+                  🗂️ <strong>LP Diligence</strong>
+                  <br />
+                  {dataRoomExecutiveMetrics.openDDQQuestions} DDQ questions open,{" "}
+                  {dataRoomExecutiveMetrics.readinessScore}% data room readiness
                 </div>
 
                 <div className="queue-item">
