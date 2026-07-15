@@ -18,6 +18,7 @@ const routes = [
   "/bank-reconciliation",
   "/document-engine",
   "/activity-engine",
+  "/data-room",
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {
