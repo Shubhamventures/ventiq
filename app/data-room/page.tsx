@@ -46,6 +46,17 @@ type InvestorEngagementEvent = {
   time: string;
   note: string;
 };
+type DataRoomQuestion = {
+  id: string;
+  investorName: string;
+  documentName: string;
+  category: string;
+  question: string;
+  status: "Open" | "Answered" | "Needs Internal Review";
+  askedAt: string;
+  answer: string;
+  answeredAt?: string;
+};
 
 function getString(row: DataRow | undefined, keys: string[], fallback = "-") {
   if (!row) return fallback;
@@ -269,6 +280,12 @@ export default function DataRoomPage() {
   const [engagementEvents, setEngagementEvents] = useState<
     InvestorEngagementEvent[]
   >([]);
+    const [ddqQuestions, setDdqQuestions] = useState<DataRoomQuestion[]>([]);
+  const [manualDDQQuestion, setManualDDQQuestion] = useState("");
+  const [selectedQuestionDocumentId, setSelectedQuestionDocumentId] =
+    useState("");
+  const [selectedQuestionCategory, setSelectedQuestionCategory] =
+    useState("Fund Operations");
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -342,6 +359,13 @@ export default function DataRoomPage() {
       (item) => item.status === "Needs Review"
     );
     const missingDDQItems = ddqItems.filter((item) => item.status === "Missing");
+        const openDataRoomQuestions = ddqQuestions.filter(
+      (question) => question.status !== "Answered"
+    ).length;
+
+    const answeredDataRoomQuestions = ddqQuestions.filter(
+      (question) => question.status === "Answered"
+    ).length;
 
     const readinessScore = Math.round(
       ((readyDDQItems.length + needsReviewDDQItems.length * 0.5) /
@@ -366,7 +390,9 @@ export default function DataRoomPage() {
       Math.round(
         readinessScore +
           Math.min(importedDocuments.length * 4, 20) +
-          Math.min(engagementEvents.length * 2, 10) +
+                    Math.min(engagementEvents.length * 2, 10) +
+          Math.min(answeredDataRoomQuestions * 2, 8) -
+          Math.min(openDataRoomQuestions * 2, 6) +
           (hasFundOverview ? 5 : 0) +
           (hasLegalCompliance ? 5 : 0) +
           (hasTrackRecord ? 5 : 0) +
@@ -393,6 +419,9 @@ export default function DataRoomPage() {
       importedDocuments: importedDocuments.length,
       totalDataRoomDocuments: documents.length + importedDocuments.length,
       engagementEvents: engagementEvents.length,
+            totalDataRoomQuestions: ddqQuestions.length,
+      openDataRoomQuestions,
+      answeredDataRoomQuestions,
       hasFundOverview,
       hasLegalCompliance,
       hasTrackRecord,
@@ -405,7 +434,8 @@ export default function DataRoomPage() {
     investors.length,
     funds.length,
     importedDocuments,
-    engagementEvents.length,
+        engagementEvents.length,
+    ddqQuestions,
   ]);
 
   const recentDocuments = documents.slice(0, 8);
@@ -511,16 +541,85 @@ export default function DataRoomPage() {
         ? "Investor downloaded the document for offline review."
         : "Investor raised a DDQ follow-up question on this document.";
 
+        const eventTime = new Date().toISOString();
+
     const event: InvestorEngagementEvent = {
       id: `${file.id}-${action}-${Date.now()}`,
       investorName,
       documentName: file.name,
       action,
-      time: new Date().toISOString(),
+      time: eventTime,
       note,
     };
 
-     setEngagementEvents((current) => [event, ...current]);
+    if (action === "Asked Question") {
+      createDataRoomQuestion({
+        investorName,
+        documentName: file.name,
+        category: "Document Follow-up",
+        question: `Please clarify ${file.name} and provide supporting diligence context.`,
+      });
+    }
+
+    setEngagementEvents((current) => [event, ...current]);
+  }
+
+   function createDataRoomQuestion({
+    investorName,
+    documentName,
+    category,
+    question,
+  }: {
+    investorName: string;
+    documentName: string;
+    category: string;
+    question: string;
+  }) {
+    const newQuestion: DataRoomQuestion = {
+      id: `${investorName}-${documentName}-${Date.now()}`,
+      investorName,
+      documentName,
+      category,
+      question,
+      status: "Open",
+      askedAt: new Date().toISOString(),
+      answer: "",
+    };
+
+    setDdqQuestions((current) => [newQuestion, ...current]);
+  }
+
+  function handleAddManualDDQQuestion() {
+    if (!manualDDQQuestion.trim()) return;
+
+    const selectedDocument = importedDocuments.find(
+      (file) => file.id === selectedQuestionDocumentId
+    );
+
+    createDataRoomQuestion({
+      investorName: selectedEngagementInvestor,
+      documentName: selectedDocument?.name ?? "General Data Room Question",
+      category: selectedQuestionCategory,
+      question: manualDDQQuestion.trim(),
+    });
+
+    setManualDDQQuestion("");
+  }
+
+  function handleMarkQuestionAnswered(questionId: string) {
+    setDdqQuestions((current) =>
+      current.map((question) =>
+        question.id === questionId
+          ? {
+              ...question,
+              status: "Answered",
+              answeredAt: new Date().toISOString(),
+              answer:
+                "Draft response prepared from available data room documents and DDQ context.",
+            }
+          : question
+      )
+    );
   }
 
   function getDataRoomReadinessRecommendation() {
@@ -546,6 +645,10 @@ export default function DataRoomPage() {
 
     if (dataRoomMetrics.missingDDQItems > 0) {
       return "Complete missing DDQ sections before sharing with prospective LPs.";
+    }
+
+    if (dataRoomMetrics.openDataRoomQuestions > 0) {
+      return `Answer ${dataRoomMetrics.openDataRoomQuestions} open LP / DDQ question before marking the data room as fully ready.`;
     }
 
     if (engagementEvents.length === 0) {
@@ -1151,7 +1254,159 @@ access.
                 completion status.
               </div>
             </div>
+            <div className="preview-card">
+              <h2>Data Room Q&A / DDQ Question Tracker</h2>
 
+              <div className="explain-box">
+                Track LP questions, DDQ follow-ups and internal responses linked
+                to uploaded data room documents. This helps Investor Relations
+                and Fundraising teams manage diligence without losing questions
+                in email threads.
+              </div>
+
+              <div className="form-card">
+                <label>Investor asking question</label>
+                <select
+                  value={selectedEngagementInvestor}
+                  onChange={(event) =>
+                    setSelectedEngagementInvestor(event.target.value)
+                  }
+                >
+                  <option>Prospective LP</option>
+                  {investors.map((investor) => (
+                    <option
+                      key={getString(
+                        investor,
+                        ["id"],
+                        getString(investor, ["name"])
+                      )}
+                      value={getString(investor, ["name"])}
+                    >
+                      {getString(investor, ["name"])}
+                    </option>
+                  ))}
+                </select>
+
+                <label>Related document</label>
+                <select
+                  value={selectedQuestionDocumentId}
+                  onChange={(event) =>
+                    setSelectedQuestionDocumentId(event.target.value)
+                  }
+                >
+                  <option value="">General Data Room Question</option>
+                  {importedDocuments.map((file) => (
+                    <option key={file.id} value={file.id}>
+                      {file.name}
+                    </option>
+                  ))}
+                </select>
+
+                <label>DDQ category</label>
+                <select
+                  value={selectedQuestionCategory}
+                  onChange={(event) =>
+                    setSelectedQuestionCategory(event.target.value)
+                  }
+                >
+                  <option>Fund Operations</option>
+                  <option>Performance</option>
+                  <option>Legal & Compliance</option>
+                  <option>Portfolio</option>
+                  <option>Tax & Regulatory</option>
+                  <option>Investor Reporting</option>
+                  <option>Document Follow-up</option>
+                </select>
+
+                <label>Question</label>
+                <textarea
+                  value={manualDDQQuestion}
+                  onChange={(event) =>
+                    setManualDDQQuestion(event.target.value)
+                  }
+                  rows={4}
+                  placeholder="Example: Please share the latest track record and explain the valuation policy used for unrealized investments."
+                />
+
+                <div className="action-row">
+                  <button type="button" onClick={handleAddManualDDQQuestion}>
+                    Add DDQ Question
+                  </button>
+                </div>
+              </div>
+
+              <div className="impact-grid">
+                <div className="impact-card">
+                  <h3>{dataRoomMetrics.totalDataRoomQuestions}</h3>
+                  <p>Total LP / DDQ questions</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{dataRoomMetrics.openDataRoomQuestions}</h3>
+                  <p>Open questions</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{dataRoomMetrics.answeredDataRoomQuestions}</h3>
+                  <p>Answered questions</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>
+                    {dataRoomMetrics.openDataRoomQuestions === 0
+                      ? "Ready"
+                      : "Action"}
+                  </h3>
+                  <p>DDQ response status</p>
+                </div>
+              </div>
+
+              {ddqQuestions.length === 0 && (
+                <div className="explain-box">
+                  No LP or DDQ questions recorded yet. Add a manual question or
+                  click “Add DDQ Question” on any imported document.
+                </div>
+              )}
+
+              {ddqQuestions.length > 0 && (
+                <div className="audit-timeline">
+                  {ddqQuestions.slice(0, 10).map((question) => (
+                    <div className="audit-item" key={question.id}>
+                      <strong>{formatDate(question.askedAt)}</strong> ❓{" "}
+                      {question.investorName}
+                      <br />
+                      <span>
+                        {question.category} — {question.documentName}
+                      </span>
+                      <br />
+                      <span>{question.question}</span>
+                      <br />
+                      <span>Status: {question.status}</span>
+
+                      {question.answer && (
+                        <>
+                          <br />
+                          <span>Answer: {question.answer}</span>
+                        </>
+                      )}
+
+                      {question.status !== "Answered" && (
+                        <div className="action-row">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleMarkQuestionAnswered(question.id)
+                            }
+                          >
+                            Mark Answered
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="preview-card">
               <h2>AI Readiness Review</h2>
 
@@ -1174,6 +1429,15 @@ access.
                 <div className="journal-row">
                   <span>Investor engagement events</span>
                   <strong>{dataRoomMetrics.engagementEvents}</strong>
+                </div>
+                                <div className="journal-row">
+                  <span>Open LP / DDQ questions</span>
+                  <strong>{dataRoomMetrics.openDataRoomQuestions}</strong>
+                </div>
+
+                <div className="journal-row">
+                  <span>Answered LP / DDQ questions</span>
+                  <strong>{dataRoomMetrics.answeredDataRoomQuestions}</strong>
                 </div>
 
                 <div className="journal-row">
