@@ -143,6 +143,14 @@ function getActivityIcon(status: string) {
   if (value.includes("stored")) return "🟣";
   if (value.includes("queued")) return "🟡";
   if (value.includes("sent")) return "🟢";
+  if (value.includes("data room")) return "🗂️";
+  if (value.includes("imported")) return "📥";
+  if (value.includes("viewed")) return "👁️";
+  if (value.includes("downloaded")) return "⬇️";
+  if (value.includes("ddq")) return "❓";
+  if (value.includes("answered")) return "🟢";
+  if (value.includes("open")) return "🟡";
+  if (value.includes("readiness")) return "📊";
 
   return "⚪";
 }
@@ -190,6 +198,11 @@ export default function ManagingPartnerAIPage() {
   const [fundPerformanceMetrics, setFundPerformanceMetrics] = useState<
     DataRow[]
   >([]);
+  const [dataRoomDocuments, setDataRoomDocuments] = useState<DataRow[]>([]);
+  const [dataRoomEngagementEvents, setDataRoomEngagementEvents] = useState<
+    DataRow[]
+  >([]);
+  const [dataRoomQuestions, setDataRoomQuestions] = useState<DataRow[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -255,6 +268,9 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       portfolioCompanyMetricsResult,
       portfolioNewsAlertsResult,
       fundPerformanceMetricsResult,
+      dataRoomDocumentsResult,
+      dataRoomEngagementResult,
+      dataRoomQuestionsResult,
     ] = await Promise.all([
       supabase.from("funds").select("*"),
       supabase.from("commitments").select("*"),
@@ -283,6 +299,18 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
         .from("fund_performance_metrics")
         .select("*")
         .order("reporting_date", { ascending: false }),
+      supabase
+        .from("data_room_documents")
+        .select("*")
+        .order("imported_at", { ascending: false }),
+      supabase
+        .from("data_room_engagement_events")
+        .select("*")
+        .order("event_time", { ascending: false }),
+      supabase
+        .from("data_room_questions")
+        .select("*")
+        .order("asked_at", { ascending: false }),
     ]);
 
     const firstError =
@@ -299,7 +327,10 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       debtRepaymentsResult.error ||
       portfolioCompanyMetricsResult.error ||
       portfolioNewsAlertsResult.error ||
-      fundPerformanceMetricsResult.error;
+      fundPerformanceMetricsResult.error ||
+      dataRoomDocumentsResult.error ||
+      dataRoomEngagementResult.error ||
+      dataRoomQuestionsResult.error;
 
     if (firstError) {
       setErrorMessage(firstError.message);
@@ -326,6 +357,11 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     setFundPerformanceMetrics(
       (fundPerformanceMetricsResult.data ?? []) as DataRow[]
     );
+    setDataRoomDocuments((dataRoomDocumentsResult.data ?? []) as DataRow[]);
+    setDataRoomEngagementEvents(
+      (dataRoomEngagementResult.data ?? []) as DataRow[]
+    );
+    setDataRoomQuestions((dataRoomQuestionsResult.data ?? []) as DataRow[]);
 
     setLoading(false);
   }
@@ -602,14 +638,98 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       }
     });
 
+    dataRoomDocuments.forEach((documentRecord) => {
+      const fileName = getString(documentRecord, ["file_name"], "Data room file");
+      const detectedType = getString(
+        documentRecord,
+        ["detected_type"],
+        "Investor Document"
+      );
+      const suggestedFolder = getString(
+        documentRecord,
+        ["suggested_folder"],
+        "General Investor Documents"
+      );
+
+      events.push({
+        id: `data-room-document-${getId(documentRecord)}`,
+        time: getString(documentRecord, ["imported_at", "created_at"], ""),
+        module: "Investor Data Room",
+        title: "Data room document imported",
+        description: `${fileName} classified as ${detectedType} and mapped to ${suggestedFolder}`,
+        status: "data room imported",
+      });
+    });
+
+    dataRoomEngagementEvents.forEach((engagement) => {
+      const action = getString(engagement, ["action"], "Viewed");
+      const investorName = getString(
+        engagement,
+        ["investor_name"],
+        "Prospective LP"
+      );
+      const documentName = getString(
+        engagement,
+        ["document_name"],
+        "data room document"
+      );
+
+      events.push({
+        id: `data-room-engagement-${getId(engagement)}`,
+        time: getString(engagement, ["event_time", "created_at"], ""),
+        module: "LP Engagement",
+        title:
+          action === "Downloaded"
+            ? "LP downloaded data room document"
+            : action === "Asked Question"
+            ? "LP asked data room question"
+            : "LP viewed data room document",
+        description: `${investorName} ${action.toLowerCase()} ${documentName}`,
+        status: `data room ${action.toLowerCase()}`,
+      });
+    });
+
+    dataRoomQuestions.forEach((question) => {
+      const status = getString(question, ["status"], "Open");
+      const investorName = getString(
+        question,
+        ["investor_name"],
+        "Prospective LP"
+      );
+      const category = getString(question, ["category"], "DDQ");
+      const documentName = getString(
+        question,
+        ["document_name"],
+        "General Data Room Question"
+      );
+
+      events.push({
+        id: `data-room-question-${getId(question)}`,
+        time:
+          status === "Answered"
+            ? getString(question, ["answered_at", "asked_at", "created_at"], "")
+            : getString(question, ["asked_at", "created_at"], ""),
+        module: "DDQ Hub",
+        title: status === "Answered" ? "DDQ question answered" : "DDQ question raised",
+        description: `${category} — ${documentName} for ${investorName}`,
+        status: status === "Answered" ? "ddq answered" : "ddq question open",
+      });
+    });
+
     return events.sort((a, b) => {
       const aTime = new Date(a.time || 0).getTime();
       const bTime = new Date(b.time || 0).getTime();
 
       return bTime - aTime;
     });
-  }, [capitalCalls, investorDocuments]);
-    const dataRoomExecutiveMetrics = useMemo(() => {
+  }, [
+    capitalCalls,
+    investorDocuments,
+    dataRoomDocuments,
+    dataRoomEngagementEvents,
+    dataRoomQuestions,
+  ]);
+  const dataRoomExecutiveMetrics = useMemo(() => {
     const portalReadyDocuments = investorDocuments.filter(
       (row) =>
         getString(row, ["portal_status"], "").toLowerCase() === "available"
@@ -622,51 +742,92 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     const investorReportingDocuments = investorDocuments.filter((row) => {
       const documentType = getString(row, ["document_type", "type"], "")
         .toLowerCase();
+      const documentName = getString(row, ["document_name", "name"], "")
+        .toLowerCase();
 
       return (
         documentType.includes("notice") ||
         documentType.includes("report") ||
         documentType.includes("soa") ||
-        documentType.includes("certificate")
+        documentType.includes("certificate") ||
+        documentName.includes("notice") ||
+        documentName.includes("report") ||
+        documentName.includes("soa") ||
+        documentName.includes("certificate")
       );
     }).length;
 
-    const openDDQQuestions = Math.min(
-      3,
-      Math.max(1, Math.ceil(investors.length / 4) || 1)
-    );
+    const importedDataRoomDocuments = dataRoomDocuments.length;
+    const lpEngagementEvents = dataRoomEngagementEvents.length;
 
-    const answeredDDQQuestions = Math.max(
-      2,
-      Math.min(7, storedDataRoomFiles + 2)
-    );
+    const openDDQQuestions = dataRoomQuestions.filter(
+      (question) => getString(question, ["status"], "Open") !== "Answered"
+    ).length;
 
-    const lpEngagementEvents =
-      portalReadyDocuments +
-      storedDataRoomFiles +
-      openDDQQuestions +
-      answeredDDQQuestions;
+    const answeredDDQQuestions = dataRoomQuestions.filter(
+      (question) => getString(question, ["status"], "Open") === "Answered"
+    ).length;
+
+    const importedFolderSet = new Set(
+      dataRoomDocuments.map((documentRecord) =>
+        getString(documentRecord, ["suggested_folder"], "")
+      )
+    );
 
     const readinessScore = Math.min(
       95,
-      58 +
-        Math.min(20, storedDataRoomFiles * 3) +
-        Math.min(12, portalReadyDocuments * 2) +
-        (answeredDDQQuestions > openDDQQuestions ? 5 : 0)
+      Math.max(
+        0,
+        55 +
+          Math.min(20, importedDataRoomDocuments * 4) +
+          Math.min(10, lpEngagementEvents * 2) +
+          Math.min(12, answeredDDQQuestions * 3) -
+          Math.min(10, openDDQQuestions * 2) +
+          (importedFolderSet.has("Fund Overview") ? 5 : 0) +
+          (importedFolderSet.has("Legal & Compliance") ? 5 : 0) +
+          (importedFolderSet.has("Track Record & Performance") ? 5 : 0) +
+          (importedFolderSet.has("Investor Reporting Samples") ? 5 : 0)
+      )
     );
+
+    const diligenceStatus =
+      openDDQQuestions > 0
+        ? "Action needed"
+        : readinessScore >= 80
+        ? "Ready"
+        : "Needs review";
+
+    const recommendedAction =
+      openDDQQuestions > 0
+        ? `Answer ${openDDQQuestions} open DDQ question${
+            openDDQQuestions === 1 ? "" : "s"
+          }`
+        : importedDataRoomDocuments === 0
+        ? "Import data room documents"
+        : lpEngagementEvents === 0
+        ? "Track LP engagement"
+        : "Continue monitoring LP diligence";
 
     return {
       readinessScore,
       portalReadyDocuments,
       storedDataRoomFiles,
       investorReportingDocuments,
+      importedDataRoomDocuments,
       openDDQQuestions,
       answeredDDQQuestions,
       lpEngagementEvents,
       investorRecords: investors.length,
-      diligenceStatus: readinessScore >= 80 ? "Ready" : "Needs review",
+      diligenceStatus,
+      recommendedAction,
     };
-  }, [investorDocuments, investors]);
+  }, [
+    investorDocuments,
+    investors,
+    dataRoomDocuments,
+    dataRoomEngagementEvents,
+    dataRoomQuestions,
+  ]);
   const fundRows = useMemo(() => {
     return funds.map((fund) => {
       const fundId = getId(fund);
@@ -1473,7 +1634,7 @@ async function handleGeneratePowerPoint() {
         {!loading && !errorMessage && (
           <>
                       <div className="sample-data-ribbon">
-              Sample workspace preview · Illustrative data
+              Live workspace preview · Reading fund, portfolio, investor and data room records
             </div>
             <div className="preview-card">
               <h2>Managing Partner Workspace Preview</h2>
@@ -1556,7 +1717,8 @@ async function handleGeneratePowerPoint() {
                   <h2>Today&apos;s Connected Fund Activity</h2>
                   <p>
                     Live activity from Capital Call, Document Engine, Investor
-                    Portal, Document Vault and Email Dispatch.
+                    Portal, Document Vault, Email Dispatch, Data Room, LP
+                    Engagement and DDQ Hub.
                   </p>
                 </div>
 
@@ -1585,11 +1747,8 @@ async function handleGeneratePowerPoint() {
                 </div>
 
                 <div className="impact-card">
-                  <h3>
-                    {dashboardMetrics.queuedEmails +
-                      dashboardMetrics.sentEmails}
-                  </h3>
-                  <p>Email actions</p>
+                  <h3>{dataRoomExecutiveMetrics.lpEngagementEvents}</h3>
+                  <p>Data room engagement</p>
                 </div>
               </div>
 
@@ -1619,8 +1778,8 @@ async function handleGeneratePowerPoint() {
               <div className="explain-box">
                 This gives the Managing Partner a live operating view of the
                 connected VENTIQ loop: Finance approval, document generation,
-                investor portal visibility, storage status, email dispatch and
-                audit evidence.
+                investor portal visibility, storage status, email dispatch,
+                data room activity, DDQ movement and audit evidence.
               </div>
             </div>
             <div className="preview-card">
@@ -1659,9 +1818,9 @@ async function handleGeneratePowerPoint() {
                 <div className="queue-item">
                   🗂️ <strong>Investor Data Room</strong>
                   <br />
-                  {dataRoomExecutiveMetrics.storedDataRoomFiles} stored files,{" "}
+                  {dataRoomExecutiveMetrics.importedDataRoomDocuments} imported files,{" "}
                   {dataRoomExecutiveMetrics.portalReadyDocuments} portal-ready
-                  documents
+                  investor documents
                 </div>
 
                 <div className="queue-item">
@@ -1685,6 +1844,11 @@ async function handleGeneratePowerPoint() {
                   {dataRoomExecutiveMetrics.investorReportingDocuments}
                   investor-facing reporting records available
                 </div>
+              </div>
+
+              <div className="explain-box">
+                <strong>Executive action:</strong>{" "}
+                {dataRoomExecutiveMetrics.recommendedAction}
               </div>
 
               <div className="action-row">
@@ -1996,6 +2160,9 @@ async function handleGeneratePowerPoint() {
                   </div>
                   <div className="queue-item">
                     ✓ Use portfolio intelligence data for Fund IV narrative
+                  </div>
+                  <div className="queue-item">
+                    ✓ Review real data room readiness and open DDQ questions
                   </div>
                   <div className="queue-item">
                     ✓ Track exit readiness for high-MOIC investments
