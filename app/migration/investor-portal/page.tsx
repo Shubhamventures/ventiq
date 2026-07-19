@@ -28,8 +28,10 @@ type MigrationDocument = {
   id: string;
   fileName: string;
   category: string;
+  matchedInvestorId: string;
   matchedInvestorCode: string;
   matchedInvestorName: string;
+  matchedInvestorEmail: string;
   confidence: number;
   status: "Ready" | "Review";
   reason: string;
@@ -172,9 +174,11 @@ function buildDocumentsFromFileNames(fileNames: string[], investors: Investor[])
       id: `${fileName}-${index}`,
       fileName,
       category,
-      matchedInvestorCode: match.investor?.investor_code || "",
-      matchedInvestorName: match.investor?.investor_name || "",
-      confidence: match.confidence,
+     matchedInvestorId: match.investor?.id || "",
+matchedInvestorCode: match.investor?.investor_code || "",
+matchedInvestorName: match.investor?.investor_name || "",
+matchedInvestorEmail: match.investor?.email || "",
+confidence: match.confidence,
       status,
       reason:
         status === "Ready"
@@ -211,6 +215,15 @@ function getCategoryCounts(documents: MigrationDocument[]) {
     count: documents.filter((document) => document.category === category)
       .length,
   }));
+}
+function chunkRows<T>(rows: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < rows.length; index += size) {
+    chunks.push(rows.slice(index, index + size));
+  }
+
+  return chunks;
 }
 
 export default function InvestorPortalMigrationPage() {
@@ -303,28 +316,96 @@ export default function InvestorPortalMigrationPage() {
     setMessage(`${mappedDocuments.length} uploaded PDF filenames classified.`);
   }
 
-  function handlePublishPreview() {
-    if (documents.length === 0) {
-      setMessage("Classify documents before publishing.");
-      return;
-    }
+  async function handlePublishPreview() {
+  const supabaseClient = supabase;
 
-    const reviewCount = documents.filter(
-      (document) => document.status === "Review"
-    ).length;
-
-    if (reviewCount > 0) {
-      setMessage(
-        `${reviewCount} documents still need review. Commercial version will require confirmation before publishing.`
-      );
-      return;
-    }
-
-    setPublished(true);
-    setMessage(
-      "Investor document migration preview is ready for Investor Portal publishing."
-    );
+  if (!supabaseClient) {
+    setMessage("Supabase is not configured. Please check .env.local.");
+    return;
   }
+
+  if (!latestBatch) {
+    setMessage("Load latest investor batch before publishing.");
+    return;
+  }
+
+  if (documents.length === 0) {
+    setMessage("Classify documents before publishing.");
+    return;
+  }
+
+  const readyDocuments = documents.filter(
+    (document) => document.status === "Ready"
+  );
+
+  const reviewDocuments = documents.filter(
+    (document) => document.status === "Review"
+  );
+
+  if (readyDocuments.length === 0) {
+    setMessage("No ready documents available to publish.");
+    return;
+  }
+
+  setMessage("Publishing matched documents to Investor Portal...");
+
+  const { data: migrationBatch, error: batchError } = await supabaseClient
+    .from("investor_document_migration_batches")
+    .insert({
+      import_batch_id: latestBatch.id,
+      fund_name: latestBatch.fund_name,
+      total_documents: documents.length,
+      published_documents: readyDocuments.length,
+      review_documents: reviewDocuments.length,
+      status: reviewDocuments.length > 0 ? "published_with_exceptions" : "published",
+    })
+    .select("id")
+    .single();
+
+  if (batchError || !migrationBatch) {
+    setMessage(batchError?.message || "Unable to create migration batch.");
+    return;
+  }
+
+  const migrationBatchId = String(migrationBatch.id);
+
+  const rowsToInsert = readyDocuments.map((document) => ({
+    investor_id: document.matchedInvestorId,
+    investor_code: document.matchedInvestorCode,
+    investor_name: document.matchedInvestorName,
+    email: document.matchedInvestorEmail,
+    fund_name: latestBatch.fund_name,
+    document_name: document.fileName,
+    document_type: document.category,
+    document_category: document.category,
+    file_name: document.fileName,
+    file_url: "",
+    source: "migration_portal",
+    migration_batch_id: migrationBatchId,
+    migration_status: "published",
+    status: "Published",
+    uploaded_at: new Date().toISOString(),
+    published_at: new Date().toISOString(),
+  }));
+
+  const chunks = chunkRows(rowsToInsert, 250);
+
+  for (const chunk of chunks) {
+    const { error: insertError } = await supabaseClient
+      .from("investor_documents")
+      .insert(chunk);
+
+    if (insertError) {
+      setMessage(insertError.message);
+      return;
+    }
+  }
+
+  setPublished(true);
+  setMessage(
+    `${readyDocuments.length} documents published to Investor Portal. ${reviewDocuments.length} documents remain in review queue.`
+  );
+}
 
   const stats = useMemo(() => {
     const totalDocuments = documents.length;
