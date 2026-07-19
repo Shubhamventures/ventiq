@@ -6,6 +6,7 @@ const routes = [
   "",
   "/managing-partner-ai",
   "/finance-head-ai",
+  "/migration",
   "/compliance-ai",
   "/investment-team-ai",
   "/fundraising-ai",

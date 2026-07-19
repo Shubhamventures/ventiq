@@ -373,7 +373,8 @@ Source: useventiq.com`
             <a href="#why-ventiq">Why VENTIQ</a>
             <a href="#modules">Stakeholders</a>
             <a href="#all-workspaces">Engines</a>
-            <a href="#about">About</a>
+<a href="/migration">Migration</a>
+<a href="#about">About</a>
 
             <button
               className="ventiq-header-cta"
@@ -416,8 +417,12 @@ Source: useventiq.com`
             </button>
 
             <a className="btn-secondary" href="#modules">
-              See Six Dashboards
-            </a>
+  See Six Dashboards
+</a>
+
+<a className="btn-secondary" href="/migration">
+  Migration Path
+</a>
           </div>
         </section>
 
@@ -1367,7 +1372,8 @@ Source: useventiq.com`
 
           <div className="footer-links">
             <a href="/product-overview">Product Overview</a>
-            <a href="/security">Security</a>
+<a href="/migration">Migration</a>
+<a href="/security">Security</a>
             <a href="/privacy">Privacy</a>
             <a href="/terms">Terms</a>
             <a href="/faq">FAQ</a>

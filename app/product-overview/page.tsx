@@ -64,11 +64,16 @@ export default function ProductOverviewPage() {
             Request Walkthrough
           </Link>
 
-          <Link href="/capital-call" className="public-secondary-cta">
+                    <Link href="/capital-call" className="public-secondary-cta">
             See Capital Call Workflow
           </Link>
-                    <Link href="/data-room" className="public-secondary-cta">
+
+          <Link href="/data-room" className="public-secondary-cta">
             Explore Data Room
+          </Link>
+
+          <Link href="/migration" className="public-secondary-cta">
+            View Migration Path
           </Link>
         </div>
       </section>
@@ -90,6 +95,27 @@ export default function ProductOverviewPage() {
             <span key={workflow}>{workflow}</span>
           ))}
         </div>
+      </section>
+            <section className="legal-content-card">
+        <h2>Migration & Modular Adoption</h2>
+
+        <p>
+          VENTIQ allows private capital firms to start with one high-impact
+          dashboard instead of replacing every process on day one. A firm can
+          begin with Investor Portal, Investor Data Room, Finance Head
+          Workspace, Compliance Dashboard or Managing Partner Dashboard.
+        </p>
+
+        <p>
+          The adoption path starts by migrating existing fund, investor,
+          document and workflow data into VENTIQ. Once the first workflow is
+          live, additional stakeholder dashboards can be connected into the
+          same operating layer.
+        </p>
+
+        <Link href="/migration" className="public-secondary-cta">
+          View Migration & Adoption Path
+        </Link>
       </section>
       <section className="legal-content-card">
         <h2>Investor Data Room & DDQ Hub</h2>
