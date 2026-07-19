@@ -449,8 +449,8 @@ export default function DataIntakeCommandCenterPage() {
               />
               <br />
               <br />
-              <a className="secondary-action" href="/migration/investor-portal">
-                Open PDF Sorting Workspace
+              <a className="secondary-action" href="/migration/pdf-intelligence">
+                Open PDF Intelligence Engine
               </a>
             </div>
 
@@ -558,14 +558,202 @@ export default function DataIntakeCommandCenterPage() {
 
           {message && <div className="logic-note">{message}</div>}
         </div>
+<div className="preview-card">
+  <h2>PDF Intelligence Rules</h2>
 
+  <div className="explain-box">
+    VENTIQ should not rely only on the PDF file name. The PDF Intelligence
+    Engine will read the file name, extract text inside the PDF, search for
+    investor identity, detect document type, detect period, assign confidence
+    and then sort the file into the correct folder.
+  </div>
+  <div className="migration-actions">
+  <a className="primary-action" href="/migration/pdf-intelligence">
+    Launch PDF Intelligence Engine
+  </a>
+</div>
+
+  <div className="impact-grid">
+    <div className="impact-card">
+      <h3>1</h3>
+      <p>Read filename</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>2</h3>
+      <p>Search PDF text</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>3</h3>
+      <p>Match investor</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>4</h3>
+      <p>Detect period</p>
+    </div>
+  </div>
+
+  <div className="queue-grid">
+    <div className="queue-item">
+      <strong>Document type detection</strong>
+      <br />
+      VENTIQ searches for SOA, Statement of Account, IRR Statement, Capital Call
+      Notice, Drawdown Notice, Distribution Notice, Tax Certificate, Form 64C,
+      Form 64D and similar keywords.
+    </div>
+
+    <div className="queue-item">
+      <strong>Investor matching</strong>
+      <br />
+      VENTIQ searches investor code, investor name, email, PAN / tax ID, folio
+      number, class name and commitment reference inside the PDF.
+    </div>
+
+    <div className="queue-item">
+      <strong>Period detection</strong>
+      <br />
+      VENTIQ detects Q1, Q2, Q3, Q4, FY, quarter ended dates, March / June /
+      September / December periods and document dates.
+    </div>
+
+    <div className="queue-item">
+      <strong>Confidence scoring</strong>
+      <br />
+      High-confidence files are auto-sorted. Medium-confidence files move to
+      review. Low-confidence files remain unmatched until approved manually.
+    </div>
+  </div>
+</div>
+
+<div className="preview-card">
+  <h2>Investor-wise Folder Sorting</h2>
+
+  <div className="explain-box">
+    After classification, VENTIQ should create investor-wise folders and place
+    each document into the correct category and period. This is what makes the
+    Investor Portal clean and audit-ready.
+  </div>
+
+  <div className="queue-grid">
+    <div className="queue-item">
+      <strong>INV-0001 — Aarav Shah</strong>
+      <br />
+      SOA / Q1 FY26
+      <br />
+      SOA / Q2 FY26
+      <br />
+      Capital Call Notice / March 2026
+      <br />
+      Distribution Notice / June 2026
+    </div>
+
+    <div className="queue-item">
+      <strong>INV-0002 — Vivaan Jain</strong>
+      <br />
+      SOA / Q1 FY26
+      <br />
+      IRR Statement / FY26
+      <br />
+      Distribution Notice / June 2026
+      <br />
+      Tax Document / FY26
+    </div>
+
+    <div className="queue-item">
+      <strong>Unmatched / Review Queue</strong>
+      <br />
+      PDF has document type but no investor match
+      <br />
+      Investor name found but period missing
+      <br />
+      Duplicate document detected
+      <br />
+      Low confidence match
+    </div>
+
+    <div className="queue-item">
+      <strong>Deficiency Output</strong>
+      <br />
+      Missing Q4 SOA
+      <br />
+      Missing IRR Statement
+      <br />
+      Missing tax certificate
+      <br />
+      Missing distribution notice
+    </div>
+  </div>
+</div>
+
+<div className="preview-card">
+  <h2>PDF Confidence Score Model</h2>
+
+  <div className="explain-box">
+    Every PDF should receive a confidence score before publishing. This protects
+    the fund from wrongly showing documents to the wrong investor.
+  </div>
+
+  <div className="queue-grid">
+    <div className="queue-item">
+      <strong>Filename match</strong>
+      <br />
+      +20 points if filename includes SOA, IRR, capital call, distribution,
+      investor code or period.
+    </div>
+
+    <div className="queue-item">
+      <strong>PDF text match</strong>
+      <br />
+      +30 points if PDF text contains document keywords such as Statement of
+      Account, Capital Call Notice or Distribution Notice.
+    </div>
+
+    <div className="queue-item">
+      <strong>Investor match</strong>
+      <br />
+      +30 points if investor code, investor name, email or tax ID is found
+      inside the PDF.
+    </div>
+
+    <div className="queue-item">
+      <strong>Period match</strong>
+      <br />
+      +20 points if quarter, FY, month, year or document date is detected.
+    </div>
+  </div>
+
+  <div className="impact-grid">
+    <div className="impact-card">
+      <h3>85%+</h3>
+      <p>Auto-sort</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>60–84%</h3>
+      <p>Review queue</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>&lt;60%</h3>
+      <p>Unmatched</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>100%</h3>
+      <p>Publish-ready</p>
+    </div>
+  </div>
+</div>
         <div className="preview-card">
           <h2>PDF Sorting Preview</h2>
 
           <div className="explain-box">
-            VENTIQ will classify the PDF dump into document folders, then match
-            each file to an investor, fund, portfolio company or compliance
-            record. Files with low confidence will move to review.
+        VENTIQ will classify the PDF dump using filename signals first. In the full
+commercial version, it will also extract PDF text, search investor names,
+investor codes, fund names, periods and document keywords, then create
+investor-wise folders with confidence scoring and deficiency tracking.
           </div>
 
           {pdfTypeCounts.length === 0 && (
