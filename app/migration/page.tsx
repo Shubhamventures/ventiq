@@ -12,6 +12,8 @@ type AdoptionModule = {
   firstWorkflow: string;
   launchTime: string;
   workspaceHref?: string;
+  financialHref?: string;
+financialLabel?: string;
   expansionPath: string[];
 };
 
@@ -36,6 +38,8 @@ const adoptionModules: AdoptionModule[] = [
       "Upload historical investor documents and launch a self-service LP portal.",
     launchTime: "2 to 3 weeks",
     workspaceHref: "/migration/investor-portal",
+    financialHref: "/migration/investor-financials",
+financialLabel: "Open Financial Migration",
     expansionPath: [
       "Investor document library",
       "Capital call publishing",
@@ -754,11 +758,19 @@ export default function MigrationPage() {
                 <strong>{readinessScore}%</strong>
               </div>
             </div>
-            {selectedModule.workspaceHref && (
+           {(selectedModule.workspaceHref || selectedModule.financialHref) && (
   <div className="migration-actions">
-    <a className="primary-action" href={selectedModule.workspaceHref}>
-      Open Migration Workspace
-    </a>
+    {selectedModule.workspaceHref && (
+      <a className="primary-action" href={selectedModule.workspaceHref}>
+        Open Document Migration
+      </a>
+    )}
+
+    {selectedModule.financialHref && (
+      <a className="primary-action secondary-action" href={selectedModule.financialHref}>
+        {selectedModule.financialLabel ?? "Open Financial Migration"}
+      </a>
+    )}
   </div>
 )}
           </div>
@@ -834,6 +846,9 @@ export default function MigrationPage() {
             <a className="secondary-action" href="/finance-head-ai">
               View Finance Workspace
             </a>
+            <a className="secondary-action" href="/migration/investor-financials">
+  View Financial Migration
+</a>
           </div>
         </section>
       </div>
