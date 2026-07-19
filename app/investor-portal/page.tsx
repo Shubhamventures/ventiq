@@ -6,45 +6,48 @@ import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 type Investor = {
   id: string;
   name: string;
+  investor_code: string | null;
   investor_type: string | null;
   email: string | null;
   country: string | null;
   kyc_status: string | null;
-};
-
-type FundInfo = {
-  name: string;
-  fund_type: string | null;
-  category: string | null;
-  jurisdiction: string | null;
-  currency: string | null;
+  bank_status: string | null;
+  source: "migration" | "legacy";
 };
 
 type Commitment = {
   id: string;
-  fund_id: string;
   investor_id: string;
+  fund_name: string;
+  class_name: string | null;
   commitment_amount: number | null;
   called_amount: number | null;
   unfunded_amount: number | null;
   status: string | null;
-  funds: FundInfo | FundInfo[] | null;
 };
 
 type InvestorDocument = {
   id: string;
-  document_type: string;
-  document_name: string;
+  document_type: string | null;
+  document_name: string | null;
+  document_category: string | null;
   investor_name: string | null;
-  investor_email: string | null;
+  investor_email?: string | null;
+  email?: string | null;
   fund_name: string | null;
   amount: number | null;
   status: string | null;
-  email_status: string | null;
-  portal_status: string | null;
-  storage_path: string | null;
-  storage_url: string | null;
-  generated_at: string | null;
+  email_status?: string | null;
+  portal_status?: string | null;
+  storage_path?: string | null;
+  storage_url?: string | null;
+  file_url?: string | null;
+  file_name?: string | null;
+  source?: string | null;
+  migration_status?: string | null;
+  uploaded_at?: string | null;
+  published_at?: string | null;
+  generated_at?: string | null;
 };
 
 function toCr(value: number | null | undefined) {
@@ -65,16 +68,50 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
-function getFund(value: Commitment["funds"]) {
-  if (Array.isArray(value)) return value[0] ?? null;
-  return value ?? null;
+function getCommitmentFundName(commitment: Commitment) {
+  return commitment.fund_name || "Unknown Fund";
 }
 
-function getDocumentIcon(type: string) {
-  if (type === "Capital Call Notice") return "💰";
-  if (type === "Distribution Notice") return "📤";
-  if (type.toLowerCase().includes("soa")) return "📄";
+function getDocumentIcon(type: string | null | undefined) {
+  const normalizedType = (type || "").toLowerCase();
+
+  if (normalizedType.includes("capital")) return "💰";
+  if (normalizedType.includes("distribution")) return "📤";
+  if (normalizedType.includes("irr")) return "📊";
+  if (normalizedType.includes("tax")) return "🧾";
+  if (normalizedType.includes("soa") || normalizedType.includes("statement")) {
+    return "📄";
+  }
+
   return "📑";
+}
+function getDocumentTitle(documentRecord: InvestorDocument) {
+  return (
+    documentRecord.document_name ||
+    documentRecord.file_name ||
+    "Investor document"
+  );
+}
+
+function getDocumentType(documentRecord: InvestorDocument) {
+  return (
+    documentRecord.document_type ||
+    documentRecord.document_category ||
+    "Investor Document"
+  );
+}
+
+function getDocumentDate(documentRecord: InvestorDocument) {
+  return (
+    documentRecord.published_at ||
+    documentRecord.generated_at ||
+    documentRecord.uploaded_at ||
+    null
+  );
+}
+
+function getDocumentUrl(documentRecord: InvestorDocument) {
+  return documentRecord.storage_url || documentRecord.file_url || "";
 }
 
 export default function InvestorPortalPage() {
@@ -89,69 +126,80 @@ export default function InvestorPortalPage() {
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    async function loadInvestors() {
-      if (!isSupabaseConfigured || !supabase) {
-        setErrorMessage(
-  "The sample Investor Portal is temporarily unavailable. Please request a walkthrough."
-);
-        setLoading(false);
-        return;
-      }
+   async function loadInvestors() {
+  if (!isSupabaseConfigured || !supabase) {
+    setErrorMessage(
+      "The sample Investor Portal is temporarily unavailable. Please request a walkthrough."
+    );
+    setLoading(false);
+    return;
+  }
 
-      setLoading(true);
-      setErrorMessage("");
+  setLoading(true);
+  setErrorMessage("");
 
-      const { data, error } = await supabase
-        .from("investors")
-        .select("id, name, investor_type, email, country, kyc_status")
-        .order("name", { ascending: true });
+  const { data, error } = await supabase
+    .from("investor_master")
+    .select(
+      "id, investor_code, investor_name, investor_type, email, kyc_status, bank_status"
+    )
+    .order("investor_code", { ascending: true });
 
-      if (error) {
-        setErrorMessage(error.message);
-        setLoading(false);
-        return;
-      }
+  if (error) {
+    setErrorMessage(error.message);
+    setLoading(false);
+    return;
+  }
 
-      const investorData = (data as Investor[]) ?? [];
-      setInvestors(investorData);
+  const investorData =
+    data?.map((investor) => ({
+      id: investor.id,
+      investor_code: investor.investor_code ?? null,
+      name: investor.investor_name ?? "Unknown Investor",
+      investor_type: investor.investor_type ?? null,
+      email: investor.email ?? null,
+      country: "India",
+      kyc_status: investor.kyc_status ?? null,
+      bank_status: investor.bank_status ?? null,
+      source: "migration" as const,
+    })) ?? [];
 
-      const investorIdFromUrl =
-  typeof window !== "undefined"
-    ? new URLSearchParams(window.location.search).get("investorId")
-    : "";
+  setInvestors(investorData);
 
-const investorFromUrl = investorIdFromUrl
-  ? investorData.find((investor) => investor.id === investorIdFromUrl)
-  : null;
+  const investorIdFromUrl =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("investorId")
+      : "";
 
-const recommendedInvestor =
-  investorFromUrl ??
-  investorData.find((investor) =>
-    investor.name.toLowerCase().includes("sidbi")
-  ) ??
-  investorData[0];
+  const investorFromUrl = investorIdFromUrl
+    ? investorData.find((investor) => investor.id === investorIdFromUrl)
+    : null;
 
-if (recommendedInvestor) {
-  setSelectedInvestorId(recommendedInvestor.id);
+  const recommendedInvestor = investorFromUrl ?? investorData[0];
+
+  if (recommendedInvestor) {
+    setSelectedInvestorId(recommendedInvestor.id);
+  } else {
+    setSelectedInvestorId("");
+  }
+
+  setLoading(false);
 }
-
-      setLoading(false);
-    }
 
     loadInvestors();
   }, []);
 
   useEffect(() => {
-    async function loadInvestorPortalData() {
+       async function loadInvestorPortalData() {
       if (!selectedInvestorId || !supabase) return;
 
       setLoadingInvestorData(true);
       setErrorMessage("");
 
       const { data: commitmentData, error: commitmentError } = await supabase
-        .from("commitments")
+        .from("fund_commitments")
         .select(
-          "id, fund_id, investor_id, commitment_amount, called_amount, unfunded_amount, status, funds(name, fund_type, category, jurisdiction, currency)"
+          "id, investor_id, fund_name, class_name, commitment_amount, unfunded_commitment, commitment_status"
         )
         .eq("investor_id", selectedInvestorId)
         .order("commitment_amount", { ascending: false });
@@ -164,13 +212,28 @@ if (recommendedInvestor) {
         return;
       }
 
+      const normalizedCommitments =
+        commitmentData?.map((commitment) => {
+          const commitmentAmount = Number(commitment.commitment_amount || 0);
+          const unfundedAmount = Number(commitment.unfunded_commitment || 0);
+
+          return {
+            id: commitment.id,
+            investor_id: commitment.investor_id,
+            fund_name: commitment.fund_name,
+            class_name: commitment.class_name,
+            commitment_amount: commitmentAmount,
+            called_amount: Math.max(commitmentAmount - unfundedAmount, 0),
+            unfunded_amount: unfundedAmount,
+            status: commitment.commitment_status,
+          };
+        }) ?? [];
+
       const { data: documentData, error: documentError } = await supabase
         .from("investor_documents")
-        .select(
-          "id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, storage_path, storage_url, generated_at"
-        )
+        .select("*")
         .eq("investor_id", selectedInvestorId)
-        .order("generated_at", { ascending: false });
+        .order("published_at", { ascending: false });
 
       if (documentError) {
         setErrorMessage(documentError.message);
@@ -179,10 +242,9 @@ if (recommendedInvestor) {
         setDocuments((documentData as InvestorDocument[]) ?? []);
       }
 
-      setCommitments((commitmentData as unknown as Commitment[]) ?? []);
+      setCommitments(normalizedCommitments);
       setLoadingInvestorData(false);
     }
-
     loadInvestorPortalData();
   }, [selectedInvestorId]);
 
@@ -225,21 +287,21 @@ if (recommendedInvestor) {
   );
 
   const filteredDocuments = useMemo(() => {
-    if (documentTypeFilter === "All documents") return documents;
+  if (documentTypeFilter === "All documents") return documents;
 
-    return documents.filter(
-      (documentRecord) => documentRecord.document_type === documentTypeFilter
-    );
-  }, [documentTypeFilter, documents]);
+  return documents.filter(
+    (documentRecord) => getDocumentType(documentRecord) === documentTypeFilter
+  );
+}, [documentTypeFilter, documents]);
 
-  const documentTypeOptions = useMemo(() => {
-    return [
-      "All documents",
-      ...Array.from(
-        new Set(documents.map((documentRecord) => documentRecord.document_type))
-      ),
-    ];
-  }, [documents]);
+const documentTypeOptions = useMemo(() => {
+  return [
+    "All documents",
+    ...Array.from(
+      new Set(documents.map((documentRecord) => getDocumentType(documentRecord)))
+    ),
+  ];
+}, [documents]);
 
   return (
     <main className="app-page">
@@ -299,16 +361,17 @@ if (recommendedInvestor) {
                 >
                   {investors.map((investor) => (
                     <option key={investor.id} value={investor.id}>
-                      {investor.name}
-                    </option>
+  {investor.investor_code ? `${investor.investor_code} - ` : ""}
+  {investor.name}
+</option>
                   ))}
                 </select>
 
                 <div className="logic-note">
-                  This portal is powered by connected investor, fund and document data,
-                  commitments and investor_documents. Stored PDFs become
-                  available here after the Document Engine uploads them to
-                  the document vault.
+                 This portal now reads migrated investor master, commitment and
+investor document records created through the Migration Portal.
+Historical SOAs, capital call notices, distribution notices and IRR
+statements appear here investor-wise after publishing.
                 </div>
               </div>
             </div>
@@ -431,6 +494,10 @@ if (recommendedInvestor) {
                       <span>Investor Name</span>
                       <strong>{selectedInvestor?.name ?? "-"}</strong>
                     </div>
+                    <div className="journal-row">
+  <span>Investor Code</span>
+  <strong>{selectedInvestor?.investor_code ?? "-"}</strong>
+</div>
 
                     <div className="journal-row">
                       <span>Email</span>
@@ -451,6 +518,10 @@ if (recommendedInvestor) {
                       <span>KYC Status</span>
                       <strong>{selectedInvestor?.kyc_status ?? "-"}</strong>
                     </div>
+                    <div className="journal-row">
+  <span>Bank Status</span>
+  <strong>{selectedInvestor?.bank_status ?? "-"}</strong>
+</div>
                   </div>
                 </div>
 
@@ -466,11 +537,11 @@ if (recommendedInvestor) {
                   {commitments.length > 0 && (
                     <div className="queue-grid">
                       {commitments.map((commitment) => {
-                        const fund = getFund(commitment.funds);
+                      
 
                         return (
                           <div key={commitment.id} className="queue-item">
-                            <strong>{fund?.name ?? "Unknown Fund"}</strong>
+                            <strong>{getCommitmentFundName(commitment)}</strong>
                             <br />
                             Commitment:{" "}
                             {formatCr(toCr(commitment.commitment_amount))}
@@ -481,6 +552,8 @@ if (recommendedInvestor) {
                             {formatCr(toCr(commitment.unfunded_amount))}
                             <br />
                             Status: {commitment.status ?? "active"}
+                            <br />
+Class: {commitment.class_name ?? "-"}
                             <br />
                             🟢 Portal active
                           </div>
@@ -565,45 +638,48 @@ if (recommendedInvestor) {
                             <tr key={documentRecord.id}>
                               <td style={{ maxWidth: "260px" }}>
                                 <strong>
-                                  {getDocumentIcon(
-                                    documentRecord.document_type
-                                  )}{" "}
-                                  {documentRecord.document_name}
+                                  {getDocumentIcon(getDocumentType(documentRecord))}{" "}
+{getDocumentTitle(documentRecord)}
                                 </strong>
                               </td>
 
-                              <td>{documentRecord.document_type}</td>
+                              <td>{getDocumentType(documentRecord)}</td>
 
                               <td>{documentRecord.fund_name ?? "-"}</td>
 
-                              <td>{formatCr(toCr(documentRecord.amount))}</td>
+                              <td>
+  {documentRecord.amount
+    ? formatCr(toCr(documentRecord.amount))
+    : "-"}
+</td>
 
                               <td>
                                 <span className="small-pill">
-                                  {documentRecord.portal_status ?? "available"}
+                                  {documentRecord.portal_status ??
+  documentRecord.migration_status ??
+  documentRecord.status ??
+  "Published"}
                                 </span>
                               </td>
 
                               <td>
                                 <span className="small-pill">
-                                  {documentRecord.email_status ?? "not_sent"}
+                                  {documentRecord.email_status ?? "not sent"}
                                 </span>
                               </td>
 
                               <td>
                                 <span className="small-pill">
-                                  {documentRecord.storage_url
-                                    ? "Stored"
-                                    : "Not stored"}
+                                  {getDocumentUrl(documentRecord) ? "Stored" : "Metadata only"}
                                 </span>
                               </td>
 
-                              <td>{formatDate(documentRecord.generated_at)}</td>
+                              <td>{formatDate(getDocumentDate(documentRecord))}</td>
 
                               <td>
-                                {documentRecord.storage_url ? (
+                                {getDocumentUrl(documentRecord) ? (
                                   <a
-                                    href={documentRecord.storage_url}
+                                    href={getDocumentUrl(documentRecord)}
                                     target="_blank"
                                     rel="noreferrer"
                                     style={{
@@ -626,7 +702,7 @@ if (recommendedInvestor) {
                                   </a>
                                 ) : (
                                   <span className="small-pill">
-                                    Awaiting PDF
+                                    Record only
                                   </span>
                                 )}
                               </td>
@@ -676,9 +752,9 @@ if (recommendedInvestor) {
                       {documents.slice(0, 5).map((documentRecord) => (
                         <div key={documentRecord.id} className="audit-item">
                           <strong>
-                            {formatDate(documentRecord.generated_at)}
-                          </strong>{" "}
-                          {documentRecord.document_type} generated
+  {formatDate(getDocumentDate(documentRecord))}
+</strong>{" "}
+{getDocumentType(documentRecord)} published
                         </div>
                       ))}
 
@@ -723,8 +799,8 @@ if (recommendedInvestor) {
                     <br />
                     <strong>VENTIQ AI:</strong>{" "}
                     {documents[0]
-                      ? `Your latest document is ${documents[0].document_name}. ${
-                          documents[0].storage_url
+                      ? `Your latest document is ${getDocumentTitle(documents[0])}. ${
+                          getDocumentUrl(documents[0])
                             ? "The PDF is available for download in your document library."
                             : "The document record is available, but the PDF has not yet been stored."
                         }`
