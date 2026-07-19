@@ -11,6 +11,7 @@ type AdoptionModule = {
   dataNeeded: string[];
   firstWorkflow: string;
   launchTime: string;
+  workspaceHref?: string;
   expansionPath: string[];
 };
 
@@ -34,6 +35,7 @@ const adoptionModules: AdoptionModule[] = [
     firstWorkflow:
       "Upload historical investor documents and launch a self-service LP portal.",
     launchTime: "2 to 3 weeks",
+    workspaceHref: "/migration/investor-portal",
     expansionPath: [
       "Investor document library",
       "Capital call publishing",
@@ -704,17 +706,24 @@ export default function MigrationPage() {
           </div>
 
           <div className="module-grid">
-            {adoptionModules.map((module) => (
-              <button
-                className={
-                  selectedModule.key === module.key
-                    ? "module-card active"
-                    : "module-card"
-                }
-                key={module.key}
-                onClick={() => setSelectedKey(module.key)}
-                type="button"
-              >
+          {adoptionModules.map((module) => (
+  <button
+    className={
+      selectedModule.key === module.key
+        ? "module-card active"
+        : "module-card"
+    }
+    key={module.key}
+    onClick={() => {
+      if (module.workspaceHref) {
+        window.location.href = module.workspaceHref;
+        return;
+      }
+
+      setSelectedKey(module.key);
+    }}
+    type="button"
+  >
                 <span className="module-pill">Start here</span>
                 <h3>{module.title}</h3>
                 <p>{module.subtitle}</p>
@@ -745,6 +754,13 @@ export default function MigrationPage() {
                 <strong>{readinessScore}%</strong>
               </div>
             </div>
+            {selectedModule.workspaceHref && (
+  <div className="migration-actions">
+    <a className="primary-action" href={selectedModule.workspaceHref}>
+      Open Migration Workspace
+    </a>
+  </div>
+)}
           </div>
 
           <div className="detail-card">
