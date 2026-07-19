@@ -14,9 +14,11 @@ type InvestorRecord = {
 
 type PdfResult = {
   id: string;
+  batchId: string;
   fileName: string;
   fileSize: number;
   documentType: string;
+  investorId: string;
   investorCode: string;
   investorName: string;
   email: string;
@@ -26,6 +28,7 @@ type PdfResult = {
   storagePath: string;
   signals: string[];
   textPreview: string;
+  published: boolean;
 };
 
 type PdfTextItem = {
@@ -299,6 +302,38 @@ function getStatus(confidenceScore: number, documentType: string) {
   return "Unmatched" as const;
 }
 
+function getDocumentCategory(documentType: string) {
+  if (documentType.includes("SOA") || documentType.includes("Account")) {
+    return "SOA";
+  }
+
+  if (documentType.includes("Capital Call")) {
+    return "Capital Call Notice";
+  }
+
+  if (documentType.includes("Distribution")) {
+    return "Distribution Notice";
+  }
+
+  if (documentType.includes("IRR")) {
+    return "IRR Statement";
+  }
+
+  if (documentType.includes("Tax")) {
+    return "Tax Document";
+  }
+
+  if (documentType.includes("Portfolio")) {
+    return "Portfolio Report";
+  }
+
+  if (documentType.includes("Fund")) {
+    return "Fund Report";
+  }
+
+  return "Other";
+}
+
 async function extractPdfText(file: File) {
   const pdfjsLib = await import("pdfjs-dist");
 
@@ -333,6 +368,8 @@ export default function PdfIntelligencePage() {
   const [loadingInvestors, setLoadingInvestors] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [message, setMessage] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const [publishMessage, setPublishMessage] = useState("");
 
   useEffect(() => {
     async function loadInvestors() {
@@ -381,10 +418,19 @@ export default function PdfIntelligencePage() {
 
     setProcessing(true);
     setMessage("Processing PDF dump...");
+    setPublishMessage("");
 
     const selectedFiles = Array.from(fileList).filter(
-      (file) => file.type === "application/pdf" || file.name.endsWith(".pdf")
+      (file) =>
+        file.type === "application/pdf" ||
+        file.name.toLowerCase().endsWith(".pdf")
     );
+
+    if (selectedFiles.length === 0) {
+      setMessage("No PDF files selected.");
+      setProcessing(false);
+      return;
+    }
 
     const batchName = `PDF Intelligence Batch - ${new Date().toLocaleString()}`;
 
@@ -469,9 +515,11 @@ export default function PdfIntelligencePage() {
 
         processedResults.push({
           id: `${file.name}-${file.lastModified}`,
+          batchId,
           fileName: file.name,
           fileSize: file.size,
           documentType: typeResult.documentType,
+          investorId: matchedInvestor?.id ?? "",
           investorCode: matchedInvestor?.investor_code ?? "-",
           investorName: matchedInvestor?.investor_name ?? "Not matched",
           email: matchedInvestor?.email ?? "-",
@@ -481,6 +529,7 @@ export default function PdfIntelligencePage() {
           storagePath,
           signals,
           textPreview,
+          published: false,
         });
       } catch (error) {
         const errorMessage =
@@ -488,9 +537,11 @@ export default function PdfIntelligencePage() {
 
         processedResults.push({
           id: `${file.name}-${file.lastModified}`,
+          batchId,
           fileName: file.name,
           fileSize: file.size,
           documentType: "Failed",
+          investorId: "",
           investorCode: "-",
           investorName: "Not processed",
           email: "-",
@@ -500,6 +551,7 @@ export default function PdfIntelligencePage() {
           storagePath: "-",
           signals: [errorMessage],
           textPreview: "",
+          published: false,
         });
       }
     }
@@ -530,6 +582,89 @@ export default function PdfIntelligencePage() {
     setResults((current) => [...processedResults, ...current]);
     setMessage(`${processedResults.length} PDF file(s) processed.`);
     setProcessing(false);
+  }
+
+  async function publishReadyDocumentsToPortal() {
+    if (!isSupabaseConfigured || !supabase) {
+      setPublishMessage("Supabase is not configured.");
+      return;
+    }
+
+    const publishableResults = results.filter(
+      (result) =>
+        result.status === "Ready" &&
+        result.investorId &&
+        result.storagePath &&
+        result.storagePath !== "-" &&
+        !result.published
+    );
+
+    if (publishableResults.length === 0) {
+      setPublishMessage(
+        "No unpublished Ready PDFs available for portal publishing."
+      );
+      return;
+    }
+
+    setPublishing(true);
+    setPublishMessage("Publishing Ready PDFs to Investor Portal...");
+
+    const rows = [];
+
+    for (const result of publishableResults) {
+      const { data: signedUrlData } = await supabase.storage
+        .from("investor-pdf-dump")
+        .createSignedUrl(result.storagePath, 60 * 60 * 24 * 7);
+
+      rows.push({
+        investor_id: result.investorId,
+        investor_code: result.investorCode === "-" ? null : result.investorCode,
+        investor_name:
+          result.investorName === "Not matched" ? null : result.investorName,
+        email: result.email === "-" ? null : result.email,
+        fund_name: "VENTIQ Growth Fund II",
+        document_name: result.fileName,
+        document_type: result.documentType,
+        document_category: getDocumentCategory(result.documentType),
+        file_name: result.fileName,
+        file_url: signedUrlData?.signedUrl ?? result.storagePath,
+        storage_bucket: "investor-pdf-dump",
+        storage_path: result.storagePath,
+        source: "pdf_intelligence_engine",
+        publish_source: "pdf_intelligence_engine",
+        migration_batch_id: result.batchId,
+        pdf_intelligence_batch_id: result.batchId,
+        migration_status: "Published",
+        status: "Published",
+        confidence_score: result.confidenceScore,
+        period_label: result.periodLabel,
+        match_signals: result.signals,
+        uploaded_at: new Date().toISOString(),
+        published_at: new Date().toISOString(),
+      });
+    }
+
+    const { error } = await supabase.from("investor_documents").insert(rows);
+
+    if (error) {
+      setPublishMessage(error.message);
+      setPublishing(false);
+      return;
+    }
+
+    const publishedIds = new Set(publishableResults.map((result) => result.id));
+
+    setResults((current) =>
+      current.map((result) =>
+        publishedIds.has(result.id) ? { ...result, published: true } : result
+      )
+    );
+
+    setPublishMessage(
+      `${publishableResults.length} Ready PDF(s) published to Investor Portal.`
+    );
+
+    setPublishing(false);
   }
 
   return (
@@ -578,37 +713,102 @@ export default function PdfIntelligencePage() {
           </div>
         </div>
 
-        <div className="preview-card">
-          <h2>Upload Investor PDF Dump</h2>
+       <div className="preview-card">
+  <div className="section-heading-row">
+    <div>
+      <p className="eyebrow">PDF Upload Workspace</p>
+      <h2>Upload Investor PDF Dump</h2>
+    </div>
 
-          <div className="explain-box">
-            No fixed format is required for PDFs. Upload SOAs, IRR statements,
-            distribution notices, capital call notices, tax documents and fund
-            reports. VENTIQ will inspect both the filename and the internal PDF
-            text.
-          </div>
+    <span className="status-pill">No template required</span>
+  </div>
 
-          <input
-            accept=".pdf"
-            disabled={processing || loadingInvestors}
-            multiple
-            onChange={(event) => handlePdfUpload(event.target.files)}
-            type="file"
-          />
+  <div className="explain-box">
+    Upload SOAs, IRR statements, distribution notices, capital call notices,
+    tax documents and fund reports. VENTIQ will inspect both the filename and
+    the internal PDF text before sorting.
+  </div>
 
-          {message && <div className="logic-note">{message}</div>}
+  <label className="upload-dropzone">
+    <input
+      accept=".pdf"
+      disabled={processing || loadingInvestors}
+      multiple
+      onChange={(event) => handlePdfUpload(event.target.files)}
+      type="file"
+    />
 
-          {loadingInvestors && (
-            <div className="logic-note">Loading investor master...</div>
-          )}
+    <span className="upload-icon">↑</span>
+    <strong>Choose PDF dump</strong>
+    <small>
+      Upload one or many investor PDFs. VENTIQ will extract text, classify
+      documents, match investors and calculate confidence.
+    </small>
+  </label>
 
-          {processing && (
-            <div className="logic-note">
-              Processing files. For large PDF dumps, this may take time.
-            </div>
-          )}
-        </div>
+  {message && <div className="logic-note">{message}</div>}
 
+  {loadingInvestors && (
+    <div className="logic-note">Loading investor master...</div>
+  )}
+
+  {processing && (
+    <div className="logic-note">
+      Processing files. For large PDF dumps, this may take time.
+    </div>
+  )}
+</div>
+
+      <div className="preview-card">
+  <div className="section-heading-row">
+    <div>
+      <p className="eyebrow">Portal Publishing</p>
+      <h2>Publish to Investor Portal</h2>
+    </div>
+
+    <span className="status-pill">
+      {metrics.ready} ready PDF{metrics.ready === 1 ? "" : "s"}
+    </span>
+  </div>
+
+  <div className="explain-box">
+    Only high-confidence Ready PDFs with investor matches should be published.
+    Review and unmatched files should stay in the exception queue until
+    corrected by the fund team.
+  </div>
+
+  <div className="publish-panel">
+    <div className="publish-copy">
+      <span className="publish-kicker">Publishing queue</span>
+      <strong>Investor Portal document library</strong>
+      <p>
+        Upload and process PDFs first. Once VENTIQ marks documents as Ready,
+        they can be published investor-wise into the Investor Portal.
+      </p>
+    </div>
+
+    <div className="publish-controls">
+      <button
+        className="publish-primary-button"
+        disabled={publishing || metrics.ready === 0}
+        onClick={publishReadyDocumentsToPortal}
+        type="button"
+      >
+        {publishing ? "Publishing..." : "Publish Ready PDFs"}
+      </button>
+
+      <a className="publish-secondary-button" href="/investor-portal">
+        Open Investor Portal
+      </a>
+
+      {metrics.ready === 0 && (
+        <small>No Ready PDFs yet. Upload and process PDFs first.</small>
+      )}
+    </div>
+  </div>
+
+  {publishMessage && <div className="logic-note">{publishMessage}</div>}
+</div>
         <div className="preview-card">
           <h2>Sorting Results</h2>
 
@@ -630,6 +830,7 @@ export default function PdfIntelligencePage() {
                     <th>Period</th>
                     <th>Confidence</th>
                     <th>Status</th>
+                    <th>Portal</th>
                   </tr>
                 </thead>
 
@@ -650,6 +851,7 @@ export default function PdfIntelligencePage() {
                       <td>{result.periodLabel}</td>
                       <td>{result.confidenceScore}%</td>
                       <td>{result.status}</td>
+                      <td>{result.published ? "Published" : "Not published"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -671,6 +873,8 @@ export default function PdfIntelligencePage() {
                   <br />
                   Storage: {result.storagePath}
                   <br />
+                  Portal: {result.published ? "Published" : "Not published"}
+                  <br />
                   <br />
                   {result.signals.map((signal) => (
                     <span key={signal}>
@@ -691,8 +895,8 @@ export default function PdfIntelligencePage() {
             <div className="queue-item">
               <strong>Investor-wise folders</strong>
               <br />
-              Automatically create investor folders and document-type
-              subfolders from these classified records.
+              Automatically create investor folders and document-type subfolders
+              from these classified records.
             </div>
 
             <div className="queue-item">
