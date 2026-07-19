@@ -819,7 +819,186 @@ export default function MigrationPage() {
             ))}
           </div>
         </section>
+<div className="preview-card">
+  <p className="eyebrow">Migration Progress Summary</p>
 
+  <h2>What the migration layer has activated</h2>
+
+  <div className="explain-box">
+    VENTIQ now has a structured migration journey. A fund can start by uploading
+    existing investor data, historical documents and financial records, then
+    activate the Investor Portal before moving into the full operating system.
+  </div>
+
+  <div className="impact-grid">
+    <div className="impact-card">
+      <h3>✅</h3>
+      <p>Investor master migration</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>✅</h3>
+      <p>Commitment records migration</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>✅</h3>
+      <p>Document classification workspace</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>✅</h3>
+      <p>Financial positions migration</p>
+    </div>
+  </div>
+
+  <div className="impact-grid">
+    <div className="impact-card">
+      <h3>✅</h3>
+      <p>Investor cashflow records</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>✅</h3>
+      <p>Investor Portal metrics</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>Next</h3>
+      <p>Actual PDF file storage</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>Next</h3>
+      <p>Portfolio data migration</p>
+    </div>
+  </div>
+</div>
+
+<div className="preview-card">
+  <p className="eyebrow">Client Data Intake</p>
+
+  <h2>Where the fund should upload its historical data</h2>
+  <div className="migration-actions">
+  <a className="primary-action" href="/migration/data-intake">
+    Open Data Intake Command Center
+  </a>
+</div>
+
+  <div className="explain-box">
+    For a real onboarding, the fund should upload data in stages. First investor
+    master and commitments, then historical PDFs, then investor financials, and
+    later portfolio company / investment-level records.
+  </div>
+
+  <div className="queue-grid">
+    <div className="queue-item">
+      <strong>Step 1 — Investor Master Excel</strong>
+      <br />
+      Investor name, investor code, email, type, KYC, bank status and contact
+      details.
+      <br />
+      <br />
+      <a className="secondary-action" href="/investor-import">
+        Open Investor Import
+      </a>
+    </div>
+
+    <div className="queue-item">
+      <strong>Step 2 — Commitments Excel</strong>
+      <br />
+      Fund name, class, commitment amount, uncalled capital and investor-wise
+      allocation records.
+      <br />
+      <br />
+      <a className="secondary-action" href="/investor-import">
+        Open Commitment Import
+      </a>
+    </div>
+
+    <div className="queue-item">
+      <strong>Step 3 — Historical Investor PDFs</strong>
+      <br />
+      SOAs, capital call notices, distribution notices, IRR statements, tax
+      documents and reports.
+      <br />
+      <br />
+      <a className="secondary-action" href="/migration/investor-portal">
+        Open PDF Sorting
+      </a>
+    </div>
+
+    <div className="queue-item">
+      <strong>Step 4 — Investor Financial Excel</strong>
+      <br />
+      Capital called, distributions, setup fees, management fees, NAV, DPI,
+      TVPI, MOIC and IRR.
+      <br />
+      <br />
+      <a className="secondary-action" href="/migration/investor-financials">
+        Open Financial Migration
+      </a>
+    </div>
+  </div>
+</div>
+
+<div className="preview-card">
+  <p className="eyebrow">PDF Sorting Layer</p>
+
+  <h2>How VENTIQ will sort uploaded PDFs</h2>
+
+  <div className="explain-box">
+    The firm can upload a large dump of historical PDFs. VENTIQ classifies each
+    file, maps it to an investor, creates document folders, sends uncertain
+    files to review, and publishes approved records to the Investor Portal.
+  </div>
+
+  <div className="impact-grid">
+    <div className="impact-card">
+      <h3>1</h3>
+      <p>Upload PDF dump</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>2</h3>
+      <p>Auto-classify documents</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>3</h3>
+      <p>Match files to investors</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>4</h3>
+      <p>Review exceptions</p>
+    </div>
+  </div>
+
+  <div className="queue-grid">
+    <div className="queue-item">SOA and account statements</div>
+    <div className="queue-item">Capital call notices</div>
+    <div className="queue-item">Distribution notices</div>
+    <div className="queue-item">IRR statements</div>
+    <div className="queue-item">Tax documents</div>
+    <div className="queue-item">Portfolio updates</div>
+    <div className="queue-item">Fund reports</div>
+    <div className="queue-item">Other documents / review queue</div>
+  </div>
+
+  <div className="migration-actions">
+    <a className="primary-action" href="/migration/investor-portal">
+      Start PDF Sorting
+    </a>
+
+    <a className="secondary-action" href="/migration/investor-financials">
+      Open Financial Migration
+    </a>
+    <a className="secondary-action" href="/migration/data-intake">
+  View Data Intake Center
+</a>
+  </div>
+</div>
         <section className="migration-section">
           <p className="migration-eyebrow">Commercial pilot message</p>
           <h2>How VENTIQ should be sold initially</h2>
