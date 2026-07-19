@@ -49,6 +49,42 @@ type InvestorDocument = {
   published_at?: string | null;
   generated_at?: string | null;
 };
+type InvestorFinancialPosition = {
+  id: string;
+  investor_id: string | null;
+  investor_code: string | null;
+  investor_name: string | null;
+  email: string | null;
+  fund_name: string | null;
+  class_name: string | null;
+  commitment_amount: number | null;
+  capital_called_till_date: number | null;
+  uncalled_capital: number | null;
+  distributions_till_date: number | null;
+  setup_fee: number | null;
+  management_fee: number | null;
+  net_contributed: number | null;
+  current_nav: number | null;
+  investor_irr: number | null;
+  investor_moic: number | null;
+  investor_dpi: number | null;
+  investor_tvpi: number | null;
+  status: string | null;
+  created_at: string | null;
+};
+
+type InvestorCashflow = {
+  id: string;
+  investor_id: string | null;
+  investor_code: string | null;
+  investor_name: string | null;
+  fund_name: string | null;
+  cashflow_date: string | null;
+  cashflow_type: string | null;
+  amount: number | null;
+  direction: string | null;
+  description: string | null;
+};
 
 function toCr(value: number | null | undefined) {
   return Number(value || 0) / 10000000;
@@ -56,6 +92,13 @@ function toCr(value: number | null | undefined) {
 
 function formatCr(value: number) {
   return `₹${value.toFixed(2)} Cr`;
+}
+function formatPercent(value: number | null | undefined) {
+  return `${Number(value || 0).toFixed(2)}%`;
+}
+
+function formatMultiple(value: number | null | undefined) {
+  return `${Number(value || 0).toFixed(2)}x`;
 }
 
 function formatDate(value: string | null | undefined) {
@@ -117,8 +160,11 @@ function getDocumentUrl(documentRecord: InvestorDocument) {
 export default function InvestorPortalPage() {
   const [investors, setInvestors] = useState<Investor[]>([]);
   const [selectedInvestorId, setSelectedInvestorId] = useState("");
-  const [commitments, setCommitments] = useState<Commitment[]>([]);
-  const [documents, setDocuments] = useState<InvestorDocument[]>([]);
+const [commitments, setCommitments] = useState<Commitment[]>([]);
+const [documents, setDocuments] = useState<InvestorDocument[]>([]);
+const [financialPosition, setFinancialPosition] =
+  useState<InvestorFinancialPosition | null>(null);
+const [cashflows, setCashflows] = useState<InvestorCashflow[]>([]);
   const [documentTypeFilter, setDocumentTypeFilter] =
     useState("All documents");
   const [loading, setLoading] = useState(true);
@@ -204,13 +250,15 @@ export default function InvestorPortalPage() {
         .eq("investor_id", selectedInvestorId)
         .order("commitment_amount", { ascending: false });
 
-      if (commitmentError) {
-        setErrorMessage(commitmentError.message);
-        setCommitments([]);
-        setDocuments([]);
-        setLoadingInvestorData(false);
-        return;
-      }
+     if (commitmentError) {
+  setErrorMessage(commitmentError.message);
+  setCommitments([]);
+  setDocuments([]);
+  setFinancialPosition(null);
+  setCashflows([]);
+  setLoadingInvestorData(false);
+  return;
+}
 
       const normalizedCommitments =
         commitmentData?.map((commitment) => {
@@ -236,14 +284,43 @@ export default function InvestorPortalPage() {
         .order("published_at", { ascending: false });
 
       if (documentError) {
-        setErrorMessage(documentError.message);
-        setDocuments([]);
-      } else {
-        setDocuments((documentData as InvestorDocument[]) ?? []);
-      }
+  setErrorMessage(documentError.message);
+  setDocuments([]);
+} else {
+  setDocuments((documentData as InvestorDocument[]) ?? []);
+}
 
-      setCommitments(normalizedCommitments);
-      setLoadingInvestorData(false);
+const { data: positionData, error: positionError } = await supabase
+  .from("investor_financial_positions")
+  .select("*")
+  .eq("investor_id", selectedInvestorId)
+  .order("created_at", { ascending: false })
+  .limit(1);
+
+if (positionError) {
+  setFinancialPosition(null);
+} else {
+  const latestPosition =
+    ((positionData as InvestorFinancialPosition[] | null) ?? [])[0] ?? null;
+
+  setFinancialPosition(latestPosition);
+}
+
+const { data: cashflowData, error: cashflowError } = await supabase
+  .from("investor_cashflows")
+  .select("*")
+  .eq("investor_id", selectedInvestorId)
+  .order("cashflow_date", { ascending: false })
+  .limit(20);
+
+if (cashflowError) {
+  setCashflows([]);
+} else {
+  setCashflows((cashflowData as InvestorCashflow[]) ?? []);
+}
+
+setCommitments(normalizedCommitments);
+setLoadingInvestorData(false);
     }
     loadInvestorPortalData();
   }, [selectedInvestorId]);
@@ -273,18 +350,45 @@ export default function InvestorPortalPage() {
         documentRecord.document_type === "Distribution Notice"
     )
     .reduce((sum, documentRecord) => sum + toCr(documentRecord.amount), 0);
+    const displayedCalled = financialPosition
+  ? toCr(financialPosition.capital_called_till_date)
+  : totalCalled;
 
-  const capitalCallDocuments = documents.filter(
-    (documentRecord) => documentRecord.document_type === "Capital Call Notice"
-  );
+const displayedRemaining = financialPosition
+  ? toCr(financialPosition.uncalled_capital)
+  : totalRemaining;
 
-  const distributionDocuments = documents.filter(
-    (documentRecord) => documentRecord.document_type === "Distribution Notice"
-  );
+const displayedDistributed = financialPosition
+  ? toCr(financialPosition.distributions_till_date)
+  : totalDistributed;
 
-  const storedDocuments = documents.filter(
-    (documentRecord) => documentRecord.storage_url
-  );
+const displayedCommitment = financialPosition
+  ? toCr(financialPosition.commitment_amount)
+  : totalCommitment;
+
+const displayedCurrentNav = financialPosition
+  ? toCr(financialPosition.current_nav)
+  : 0;
+
+const displayedSetupFee = financialPosition
+  ? toCr(financialPosition.setup_fee)
+  : 0;
+
+const displayedManagementFee = financialPosition
+  ? toCr(financialPosition.management_fee)
+  : 0;
+
+ const capitalCallDocuments = documents.filter(
+  (documentRecord) => getDocumentType(documentRecord) === "Capital Call Notice"
+);
+
+const distributionDocuments = documents.filter(
+  (documentRecord) => getDocumentType(documentRecord) === "Distribution Notice"
+);
+
+const storedDocuments = documents.filter((documentRecord) =>
+  getDocumentUrl(documentRecord)
+);
 
   const filteredDocuments = useMemo(() => {
   if (documentTypeFilter === "All documents") return documents;
@@ -435,23 +539,23 @@ statements appear here investor-wise after publishing.
 
             <div className="impact-grid">
               <div className="impact-card">
-                <h3>{formatCr(totalCommitment)}</h3>
-                <p>Total commitment</p>
+                <h3>{formatCr(displayedCommitment)}</h3>
+<p>Total commitment</p>
               </div>
 
               <div className="impact-card">
-                <h3>{formatCr(totalCalled)}</h3>
-                <p>Capital called</p>
+                <h3>{formatCr(displayedCalled)}</h3>
+<p>Capital called</p>
               </div>
 
               <div className="impact-card">
-                <h3>{formatCr(totalDistributed)}</h3>
-                <p>Distributed</p>
+                <h3>{formatCr(displayedDistributed)}</h3>
+<p>Distributed</p>
               </div>
 
               <div className="impact-card">
-                <h3>{formatCr(totalRemaining)}</h3>
-                <p>Remaining commitment</p>
+              <h3>{formatCr(displayedRemaining)}</h3>
+<p>Remaining commitment</p>
               </div>
             </div>
 
@@ -476,6 +580,64 @@ statements appear here investor-wise after publishing.
                 <p>Distribution notices</p>
               </div>
             </div>
+            <div className="preview-card">
+  <h2>Investor Performance Snapshot</h2>
+
+  {!financialPosition && (
+    <div className="explain-box">
+      No migrated financial position found yet. Publish investor financial
+      data from the Investor Financial Migration workspace first.
+    </div>
+  )}
+
+  {financialPosition && (
+    <>
+      <div className="impact-grid">
+        <div className="impact-card">
+          <h3>{formatPercent(financialPosition.investor_irr)}</h3>
+          <p>Investor IRR</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{formatMultiple(financialPosition.investor_moic)}</h3>
+          <p>Investor MOIC</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{formatMultiple(financialPosition.investor_dpi)}</h3>
+          <p>DPI</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{formatMultiple(financialPosition.investor_tvpi)}</h3>
+          <p>TVPI</p>
+        </div>
+      </div>
+
+      <div className="impact-grid">
+        <div className="impact-card">
+          <h3>{formatCr(displayedCurrentNav)}</h3>
+          <p>Current NAV</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{formatCr(displayedSetupFee)}</h3>
+          <p>Setup fee</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{formatCr(displayedManagementFee)}</h3>
+          <p>Management fee</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{financialPosition.status ?? "Ready"}</h3>
+          <p>Financial status</p>
+        </div>
+      </div>
+    </>
+  )}
+</div>
 
             {loadingInvestorData && (
               <div className="preview-card">
@@ -713,7 +875,60 @@ Class: {commitment.class_name ?? "-"}
                     </div>
                   )}
                 </div>
+<div className="preview-card">
+  <h2>Investor Cashflow Timeline</h2>
 
+  {cashflows.length === 0 && (
+    <div className="explain-box">
+      No investor cashflows found yet. Publish financial migration data first.
+    </div>
+  )}
+
+  {cashflows.length > 0 && (
+    <div
+      style={{
+        overflowX: "auto",
+        border: "1px solid rgba(148, 163, 184, 0.22)",
+        borderRadius: "18px",
+        marginTop: "18px",
+      }}
+    >
+      <table
+        className="investor-table"
+        style={{
+          minWidth: "900px",
+          width: "100%",
+        }}
+      >
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Direction</th>
+            <th>Amount</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {cashflows.map((cashflow) => (
+            <tr key={cashflow.id}>
+              <td>{formatDate(cashflow.cashflow_date)}</td>
+              <td>{cashflow.cashflow_type ?? "-"}</td>
+              <td>
+                <span className="small-pill">
+                  {cashflow.direction ?? "-"}
+                </span>
+              </td>
+              <td>{formatCr(toCr(cashflow.amount))}</td>
+              <td>{cashflow.description ?? "-"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</div>
                 <div className="preview-card">
                   <h2>Pending Actions</h2>
 
@@ -794,17 +1009,29 @@ Class: {commitment.class_name ?? "-"}
                   <h2>AI Investor Answer Preview</h2>
 
                   <div className="explain-box">
-                    <strong>Question:</strong> Show my latest document.
+                    <strong>Question:</strong> What is my current fund position?
                     <br />
                     <br />
                     <strong>VENTIQ AI:</strong>{" "}
-                    {documents[0]
-                      ? `Your latest document is ${getDocumentTitle(documents[0])}. ${
-                          getDocumentUrl(documents[0])
-                            ? "The PDF is available for download in your document library."
-                            : "The document record is available, but the PDF has not yet been stored."
-                        }`
-                      : "No investor documents are available yet."}
+                    {financialPosition
+  ? `Your current commitment is ${formatCr(
+      displayedCommitment
+    )}. Capital called till date is ${formatCr(
+      displayedCalled
+    )}, uncalled capital is ${formatCr(
+      displayedRemaining
+    )}, distributions till date are ${formatCr(
+      displayedDistributed
+    )}, and your current IRR is ${formatPercent(
+      financialPosition.investor_irr
+    )}.`
+  : documents[0]
+  ? `Your latest document is ${getDocumentTitle(documents[0])}. ${
+      getDocumentUrl(documents[0])
+        ? "The PDF is available for download in your document library."
+        : "The document record is available, but the PDF has not yet been stored."
+    }`
+  : "No investor financial position or documents are available yet."}
                   </div>
                 </div>
 
