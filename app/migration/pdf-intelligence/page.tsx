@@ -42,6 +42,17 @@ type ReviewDraft = {
   periodLabel: string;
   status: "Ready" | "Review" | "Unmatched";
 };
+type DeficiencyStatus = "Available" | "Missing" | "Duplicate" | "Review";
+
+type DeficiencyRow = {
+  investorId: string;
+  investorCode: string;
+  investorName: string;
+  documentType: string;
+  periodLabel: string;
+  status: DeficiencyStatus;
+  matchedCount: number;
+};
 
 const DOCUMENT_TYPE_OPTIONS = [
   "SOA / Account Statement",
@@ -358,6 +369,26 @@ function getDocumentCategory(documentType: string) {
 
   return "Other";
 }
+function documentTypeMatches(actualDocumentType: string, expectedDocumentType: string) {
+  return (
+    actualDocumentType === expectedDocumentType ||
+    getDocumentCategory(actualDocumentType) ===
+      getDocumentCategory(expectedDocumentType)
+  );
+}
+
+function periodMatches(actualPeriod: string, expectedPeriod: string) {
+  if (!expectedPeriod.trim()) return true;
+
+  if (!actualPeriod || actualPeriod === "Period not detected") {
+    return false;
+  }
+
+  const actual = normalize(actualPeriod);
+  const expected = normalize(expectedPeriod);
+
+  return actual.includes(expected) || expected.includes(actual);
+}
 
 async function extractPdfText(file: File) {
   const pdfjsLib = await import("pdfjs-dist");
@@ -398,6 +429,10 @@ export default function PdfIntelligencePage() {
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>(
     {}
   );
+  const [deficiencyPeriod, setDeficiencyPeriod] = useState("Q4 FY26");
+const [deficiencyDocumentTypes, setDeficiencyDocumentTypes] = useState<
+  string[]
+>(["SOA / Account Statement"]);
 
   useEffect(() => {
     async function loadInvestors() {
@@ -447,6 +482,115 @@ export default function PdfIntelligencePage() {
           result.periodLabel === "Period not detected")
     );
   }, [results]);
+  const deficiencyRows = useMemo<DeficiencyRow[]>(() => {
+  if (investors.length === 0 || deficiencyDocumentTypes.length === 0) {
+    return [];
+  }
+
+  return investors.flatMap((investor) =>
+    deficiencyDocumentTypes.map((documentType) => {
+      const matchingDocuments = results.filter(
+        (result) =>
+          result.investorId === investor.id &&
+          result.status !== "Failed" &&
+          documentTypeMatches(result.documentType, documentType) &&
+          periodMatches(result.periodLabel, deficiencyPeriod)
+      );
+
+      let status: DeficiencyStatus = "Missing";
+
+      if (matchingDocuments.length > 1) {
+        status = "Duplicate";
+      } else if (
+        matchingDocuments.length === 1 &&
+        matchingDocuments[0].status === "Ready"
+      ) {
+        status = "Available";
+      } else if (matchingDocuments.length === 1) {
+        status = "Review";
+      }
+
+      return {
+        investorId: investor.id,
+        investorCode: investor.investor_code ?? "-",
+        investorName: investor.investor_name ?? "Unknown Investor",
+        documentType,
+        periodLabel: deficiencyPeriod,
+        status,
+        matchedCount: matchingDocuments.length,
+      };
+    })
+  );
+}, [deficiencyDocumentTypes, deficiencyPeriod, investors, results]);
+
+const deficiencyMetrics = useMemo(() => {
+  const totalExpected = deficiencyRows.length;
+  const available = deficiencyRows.filter(
+    (row) => row.status === "Available"
+  ).length;
+  const missing = deficiencyRows.filter((row) => row.status === "Missing").length;
+  const duplicate = deficiencyRows.filter(
+    (row) => row.status === "Duplicate"
+  ).length;
+  const review = deficiencyRows.filter((row) => row.status === "Review").length;
+
+  const coverage = totalExpected
+    ? Math.round((available / totalExpected) * 100)
+    : 0;
+
+  return {
+    totalExpected,
+    available,
+    missing,
+    duplicate,
+    review,
+    coverage,
+  };
+}, [deficiencyRows]);
+
+const deficiencyExceptionRows = useMemo(() => {
+  return deficiencyRows.filter((row) => row.status !== "Available");
+}, [deficiencyRows]);
+const investorDeficiencyGroups = useMemo(() => {
+  const groups = new Map<
+    string,
+    {
+      investorId: string;
+      investorCode: string;
+      investorName: string;
+      rows: DeficiencyRow[];
+      missing: number;
+      review: number;
+      duplicate: number;
+    }
+  >();
+
+  deficiencyExceptionRows.forEach((row) => {
+    const key = row.investorCode || row.investorId;
+
+    const existingGroup =
+      groups.get(key) ??
+      {
+        investorId: row.investorId,
+        investorCode: row.investorCode,
+        investorName: row.investorName,
+        rows: [],
+        missing: 0,
+        review: 0,
+        duplicate: 0,
+      };
+
+    existingGroup.rows.push(row);
+
+    if (row.status === "Missing") existingGroup.missing += 1;
+    if (row.status === "Review") existingGroup.review += 1;
+    if (row.status === "Duplicate") existingGroup.duplicate += 1;
+
+    groups.set(key, existingGroup);
+  });
+
+  return Array.from(groups.values());
+}, [deficiencyExceptionRows]);
 
   async function handlePdfUpload(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
@@ -717,7 +861,16 @@ export default function PdfIntelligencePage() {
 
     setPublishing(false);
   }
+function toggleDeficiencyDocumentType(documentType: string) {
+  setDeficiencyDocumentTypes((current) => {
+    if (current.includes(documentType)) {
+      const updated = current.filter((type) => type !== documentType);
+      return updated.length > 0 ? updated : current;
+    }
 
+    return [...current, documentType];
+  });
+}
   function getReviewDraft(result: PdfResult): ReviewDraft {
     return (
       reviewDrafts[result.id] ?? {
@@ -933,7 +1086,168 @@ export default function PdfIntelligencePage() {
             </div>
           )}
         </div>
+<div className="preview-card">
+  <div className="section-heading-row">
+    <div>
+      <p className="eyebrow">Deficiency & Coverage Tracker</p>
+      <h2>Find missing investor documents</h2>
+    </div>
 
+    <span className="status-pill">{deficiencyMetrics.coverage}% covered</span>
+  </div>
+
+  <div className="explain-box">
+    VENTIQ compares expected investor documents against uploaded and sorted PDFs.
+    This helps the fund team identify missing SOAs, IRR statements, capital call
+    notices, distribution notices and tax documents before publishing the portal.
+  </div>
+
+  <div className="deficiency-controls">
+    <label>
+      Period to check
+      <input
+        placeholder="Example: Q4 FY26"
+        value={deficiencyPeriod}
+        onChange={(event) => setDeficiencyPeriod(event.target.value)}
+      />
+    </label>
+
+    <div>
+      <span>Documents expected</span>
+
+      <div className="deficiency-toggle-grid">
+        {DOCUMENT_TYPE_OPTIONS.filter(
+          (documentType) => documentType !== "Other / Review"
+        ).map((documentType) => (
+          <button
+            className={
+              deficiencyDocumentTypes.includes(documentType)
+                ? "deficiency-toggle active"
+                : "deficiency-toggle"
+            }
+            key={documentType}
+            onClick={() => toggleDeficiencyDocumentType(documentType)}
+            type="button"
+          >
+            {documentType}
+          </button>
+        ))}
+      </div>
+    </div>
+  </div>
+
+  <div className="impact-grid">
+    <div className="impact-card">
+      <h3>{deficiencyMetrics.totalExpected}</h3>
+      <p>Expected records</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>{deficiencyMetrics.available}</h3>
+      <p>Available</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>{deficiencyMetrics.missing}</h3>
+      <p>Missing</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>{deficiencyMetrics.review + deficiencyMetrics.duplicate}</h3>
+      <p>Review / duplicate</p>
+    </div>
+  </div>
+
+  {deficiencyRows.length === 0 && (
+    <div className="logic-note">
+      Upload PDFs and select document expectations to generate deficiency
+      results.
+    </div>
+  )}
+
+  {deficiencyRows.length > 0 && deficiencyExceptionRows.length === 0 && (
+    <div className="logic-note">
+      No deficiencies found for the selected period and document types.
+    </div>
+  )}
+
+  {investorDeficiencyGroups.length > 0 && (
+  <div className="investor-deficiency-grid">
+    {investorDeficiencyGroups.slice(0, 30).map((group) => (
+      <details
+        className="investor-deficiency-card"
+        key={`${group.investorCode}-${group.investorId}`}
+      >
+        <summary>
+          <div>
+            <strong>{group.investorName}</strong>
+            <span>{group.investorCode}</span>
+          </div>
+
+          <div className="deficiency-summary-pills">
+            {group.missing > 0 && (
+              <span className="deficiency-pill danger">
+                {group.missing} missing
+              </span>
+            )}
+
+            {group.review > 0 && (
+              <span className="deficiency-pill warning">
+                {group.review} review
+              </span>
+            )}
+
+            {group.duplicate > 0 && (
+              <span className="deficiency-pill neutral">
+                {group.duplicate} duplicate
+              </span>
+            )}
+          </div>
+
+          <small>Open details</small>
+        </summary>
+
+        <div className="deficiency-detail-list">
+          {group.rows.map((row) => (
+            <div
+              className="deficiency-detail-row"
+              key={`${row.investorId}-${row.documentType}-${row.periodLabel}-${row.status}`}
+            >
+              <div>
+                <strong>{row.documentType}</strong>
+                <span>{row.periodLabel}</span>
+              </div>
+
+              <div className="deficiency-row-meta">
+                <span
+                  className={
+                    row.status === "Missing"
+                      ? "deficiency-status missing"
+                      : row.status === "Review"
+                        ? "deficiency-status review"
+                        : "deficiency-status duplicate"
+                  }
+                >
+                  {row.status}
+                </span>
+
+                <small>{row.matchedCount} matched file(s)</small>
+              </div>
+            </div>
+          ))}
+        </div>
+      </details>
+    ))}
+  </div>
+)}
+
+ {investorDeficiencyGroups.length > 30 && (
+  <div className="logic-note">
+    Showing first 30 investor deficiency groups. Full export will be added in
+    the next version.
+  </div>
+)}
+</div>
         <div className="preview-card">
           <div className="section-heading-row">
             <div>

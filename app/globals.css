@@ -9417,4 +9417,231 @@ button.secondary-action:disabled {
   .review-editor-footer .publish-secondary-button {
     max-width: none;
   }
+}.deficiency-controls {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 1rem;
+  margin: 1.25rem 0;
+}
+
+.deficiency-controls label,
+.deficiency-controls > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  color: #93c5fd;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.deficiency-controls input {
+  width: 100%;
+  border: 1px solid rgba(92, 156, 255, 0.34);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #ffffff;
+  padding: 0.9rem 1rem;
+  font: inherit;
+  outline: none;
+}
+
+.deficiency-controls input:focus {
+  border-color: rgba(147, 197, 253, 0.9);
+}
+
+.deficiency-toggle-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.deficiency-toggle {
+  border: 1px solid rgba(92, 156, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.8);
+  color: #c7d2fe;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 800;
+  padding: 0.7rem 0.95rem;
+}
+
+.deficiency-toggle.active {
+  border-color: rgba(147, 197, 253, 0.9);
+  background: rgba(37, 99, 235, 0.34);
+  color: #ffffff;
+}
+
+@media (max-width: 900px) {
+  .deficiency-controls {
+    grid-template-columns: 1fr;
+  }
+}.investor-deficiency-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.investor-deficiency-card {
+  border: 1px solid rgba(92, 156, 255, 0.32);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 35%),
+    rgba(3, 7, 18, 0.72);
+  overflow: hidden;
+}
+
+.investor-deficiency-card summary {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  align-items: center;
+  gap: 1rem;
+  cursor: pointer;
+  list-style: none;
+  padding: 1.1rem 1.25rem;
+}
+
+.investor-deficiency-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.investor-deficiency-card summary:hover {
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.investor-deficiency-card summary strong {
+  display: block;
+  color: #ffffff;
+  font-size: 1.05rem;
+}
+
+.investor-deficiency-card summary span {
+  color: #93c5fd;
+  font-size: 0.92rem;
+}
+
+.investor-deficiency-card summary small {
+  border: 1px solid rgba(147, 197, 253, 0.35);
+  border-radius: 999px;
+  color: #dbeafe;
+  font-weight: 800;
+  padding: 0.5rem 0.75rem;
+  white-space: nowrap;
+}
+
+.deficiency-summary-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.deficiency-pill {
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  padding: 0.45rem 0.7rem;
+  white-space: nowrap;
+}
+
+.deficiency-pill.danger {
+  border: 1px solid rgba(248, 113, 113, 0.38);
+  background: rgba(127, 29, 29, 0.22);
+  color: #fecaca;
+}
+
+.deficiency-pill.warning {
+  border: 1px solid rgba(250, 204, 21, 0.38);
+  background: rgba(113, 63, 18, 0.22);
+  color: #fde68a;
+}
+
+.deficiency-pill.neutral {
+  border: 1px solid rgba(147, 197, 253, 0.35);
+  background: rgba(37, 99, 235, 0.18);
+  color: #dbeafe;
+}
+
+.deficiency-detail-list {
+  display: grid;
+  gap: 0.65rem;
+  border-top: 1px solid rgba(92, 156, 255, 0.22);
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.deficiency-detail-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  border: 1px solid rgba(92, 156, 255, 0.22);
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.72);
+  padding: 0.85rem 1rem;
+}
+
+.deficiency-detail-row strong {
+  display: block;
+  color: #ffffff;
+  font-size: 0.98rem;
+}
+
+.deficiency-detail-row span {
+  color: #bfdbfe;
+  font-size: 0.88rem;
+}
+
+.deficiency-row-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+}
+
+.deficiency-row-meta small {
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.deficiency-status {
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 900;
+  padding: 0.4rem 0.65rem;
+}
+
+.deficiency-status.missing {
+  background: rgba(127, 29, 29, 0.3);
+  color: #fecaca;
+}
+
+.deficiency-status.review {
+  background: rgba(113, 63, 18, 0.3);
+  color: #fde68a;
+}
+
+.deficiency-status.duplicate {
+  background: rgba(37, 99, 235, 0.25);
+  color: #dbeafe;
+}
+
+@media (max-width: 900px) {
+  .investor-deficiency-card summary {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .deficiency-summary-pills {
+    justify-content: flex-start;
+  }
+
+  .deficiency-detail-row {
+    grid-template-columns: 1fr;
+  }
+
+  .deficiency-row-meta {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
 }
