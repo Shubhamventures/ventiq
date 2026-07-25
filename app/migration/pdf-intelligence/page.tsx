@@ -42,6 +42,23 @@ type ReviewDraft = {
   periodLabel: string;
   status: "Ready" | "Review" | "Unmatched";
 };
+type PdfIntelligenceDocumentRow = {
+  id: string;
+  batch_id: string | null;
+  original_file_name: string | null;
+  file_size: number | string | null;
+  document_type: string | null;
+  matched_investor_id: string | null;
+  investor_code: string | null;
+  investor_name: string | null;
+  email: string | null;
+  period_label: string | null;
+  confidence_score: number | string | null;
+  status: string | null;
+  storage_path: string | null;
+  match_signals: unknown;
+  extracted_text_preview: string | null;
+};
 type DeficiencyStatus = "Available" | "Missing" | "Duplicate" | "Review";
 
 type DeficiencyRow = {
@@ -74,7 +91,32 @@ const REVIEW_STATUS_OPTIONS: ReviewDraft["status"][] = [
 function normalize(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
+function parseMatchSignals(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item));
+  }
 
+  if (typeof value === "string" && value.trim()) {
+    return [value];
+  }
+
+  return [];
+}
+
+function normalizePdfStatus(
+  status: string | null
+): PdfResult["status"] {
+  if (
+    status === "Ready" ||
+    status === "Review" ||
+    status === "Unmatched" ||
+    status === "Failed"
+  ) {
+    return status;
+  }
+
+  return "Review";
+}
 function formatFileSize(size: number) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
@@ -429,6 +471,8 @@ export default function PdfIntelligencePage() {
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>(
     {}
   );
+  const [loadingLatestBatch, setLoadingLatestBatch] = useState(false);
+const [activeBatchName, setActiveBatchName] = useState("");
   const [deficiencyPeriod, setDeficiencyPeriod] = useState("Q4 FY26");
 const [deficiencyDocumentTypes, setDeficiencyDocumentTypes] = useState<
   string[]
@@ -459,6 +503,9 @@ const [deficiencyDocumentTypes, setDeficiencyDocumentTypes] = useState<
 
     loadInvestors();
   }, []);
+  useEffect(() => {
+  loadLatestPdfIntelligenceBatch();
+}, []);
 
   const metrics = useMemo(() => {
     return {
@@ -591,7 +638,107 @@ const investorDeficiencyGroups = useMemo(() => {
 
   return Array.from(groups.values());
 }, [deficiencyExceptionRows]);
+async function loadLatestPdfIntelligenceBatch() {
+  if (!isSupabaseConfigured || !supabase) {
+    setMessage("Supabase is not configured.");
+    return;
+  }
 
+  setLoadingLatestBatch(true);
+  setPublishMessage("");
+
+  const { data: batchData, error: batchError } = await supabase
+    .from("pdf_intelligence_batches")
+    .select("id, batch_name")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (batchError) {
+    setMessage(batchError.message);
+    setLoadingLatestBatch(false);
+    return;
+  }
+
+  if (!batchData) {
+    setMessage("No PDF intelligence batch found yet.");
+    setLoadingLatestBatch(false);
+    return;
+  }
+
+  const batchId = batchData.id as string;
+  const batchName = (batchData.batch_name as string) ?? "Latest PDF batch";
+
+  const { data: documentData, error: documentError } = await supabase
+    .from("pdf_intelligence_documents")
+    .select(
+      "id, batch_id, original_file_name, file_size, document_type, matched_investor_id, investor_code, investor_name, email, period_label, confidence_score, status, storage_path, match_signals, extracted_text_preview"
+    )
+    .eq("batch_id", batchId)
+    .order("created_at", { ascending: false });
+
+  if (documentError) {
+    setMessage(documentError.message);
+    setLoadingLatestBatch(false);
+    return;
+  }
+
+  const documentRows =
+    (documentData as PdfIntelligenceDocumentRow[] | null) ?? [];
+
+  const storagePaths = documentRows
+    .map((row) => row.storage_path)
+    .filter((path): path is string => Boolean(path));
+
+  let publishedStoragePaths = new Set<string>();
+
+  if (storagePaths.length > 0) {
+    const { data: publishedData } = await supabase
+      .from("investor_documents")
+      .select("storage_path")
+      .in("storage_path", storagePaths);
+
+    publishedStoragePaths = new Set(
+      ((publishedData as Array<{ storage_path: string | null }> | null) ?? [])
+        .map((row) => row.storage_path)
+        .filter((path): path is string => Boolean(path))
+    );
+  }
+
+  const loadedResults: PdfResult[] = documentRows.map((row) => {
+    const fileName = row.original_file_name ?? "Unknown PDF";
+    const storagePath = row.storage_path ?? "-";
+    const signals = parseMatchSignals(row.match_signals);
+
+    return {
+      id: `${row.id}-${fileName}`,
+      batchId,
+      pdfDocumentId: row.id,
+      fileName,
+      fileSize: Number(row.file_size ?? 0),
+      documentType: row.document_type ?? "Other / Review",
+      investorId: row.matched_investor_id ?? "",
+      investorCode: row.investor_code ?? "-",
+      investorName: row.investor_name ?? "Not matched",
+      email: row.email ?? "-",
+      periodLabel: row.period_label ?? "Period not detected",
+      confidenceScore: Number(row.confidence_score ?? 0),
+      status: normalizePdfStatus(row.status),
+      storagePath,
+      signals: signals.length ? signals : ["Loaded from saved PDF intelligence batch"],
+      textPreview: row.extracted_text_preview ?? "",
+      published: publishedStoragePaths.has(storagePath),
+    };
+  });
+
+  setResults(loadedResults);
+  setReviewDrafts({});
+  setActiveBatchName(batchName);
+  setMessage(
+    `${loadedResults.length} PDF intelligence record(s) loaded from latest batch.`
+  );
+  setLoadingLatestBatch(false);
+}
   async function handlePdfUpload(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
 
@@ -775,8 +922,9 @@ const investorDeficiencyGroups = useMemo(() => {
       .eq("id", batchId);
 
     setResults((current) => [...processedResults, ...current]);
-    setMessage(`${processedResults.length} PDF file(s) processed.`);
-    setProcessing(false);
+setActiveBatchName(batchName);
+setMessage(`${processedResults.length} PDF file(s) processed.`);
+setProcessing(false);
   }
 
   async function publishReadyDocumentsToPortal() {
@@ -1018,6 +1166,26 @@ function toggleDeficiencyDocumentType(documentType: string) {
           Actual PDF upload · Text extraction · Investor matching · Confidence
           scoring
         </div>
+        <div className="persistence-panel">
+  <div>
+    <span>Saved batch workspace</span>
+    <strong>{activeBatchName || "No saved batch loaded"}</strong>
+    <p>
+      Reload the latest saved PDF Intelligence batch from Supabase and continue
+      review, correction, deficiency tracking and portal publishing after
+      refresh.
+    </p>
+  </div>
+
+  <button
+    className="publish-secondary-button"
+    disabled={loadingLatestBatch}
+    onClick={loadLatestPdfIntelligenceBatch}
+    type="button"
+  >
+    {loadingLatestBatch ? "Loading latest batch..." : "Load Latest Batch"}
+  </button>
+</div>
 
         <div className="impact-grid">
           <div className="impact-card">
