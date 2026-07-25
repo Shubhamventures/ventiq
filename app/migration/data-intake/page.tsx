@@ -393,6 +393,11 @@ export default function DataIntakeCommandCenterPage() {
         <div className="sample-data-ribbon">
           Upload once · Sort documents · Detect gaps · Activate dashboards
         </div>
+        <div className="migration-actions">
+  <a className="primary-action" href="/migration/activation">
+    Open Data Activation Dashboard
+  </a>
+</div>
 
         <div className="preview-card">
           <h2>How VENTIQ accepts fund data</h2>
