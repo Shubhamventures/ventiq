@@ -203,6 +203,19 @@ export default function ManagingPartnerAIPage() {
     DataRow[]
   >([]);
   const [dataRoomQuestions, setDataRoomQuestions] = useState<DataRow[]>([]);
+    const [latestInvestorBatch, setLatestInvestorBatch] =
+    useState<DataRow | null>(null);
+  const [latestPdfBatch, setLatestPdfBatch] = useState<DataRow | null>(null);
+  const [latestPortfolioBatch, setLatestPortfolioBatch] =
+    useState<DataRow | null>(null);
+  const [latestFundBatch, setLatestFundBatch] = useState<DataRow | null>(null);
+  const [latestComplianceBatch, setLatestComplianceBatch] =
+    useState<DataRow | null>(null);
+  const [migratedPortfolioInvestments, setMigratedPortfolioInvestments] =
+    useState<DataRow[]>([]);
+  const [migratedComplianceItems, setMigratedComplianceItems] = useState<
+    DataRow[]
+  >([]);
 
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -268,9 +281,14 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       portfolioCompanyMetricsResult,
       portfolioNewsAlertsResult,
       fundPerformanceMetricsResult,
-      dataRoomDocumentsResult,
+            dataRoomDocumentsResult,
       dataRoomEngagementResult,
       dataRoomQuestionsResult,
+      investorMigrationBatchResult,
+      pdfMigrationBatchResult,
+      portfolioMigrationBatchResult,
+      fundMigrationBatchResult,
+      complianceMigrationBatchResult,
     ] = await Promise.all([
       supabase.from("funds").select("*"),
       supabase.from("commitments").select("*"),
@@ -307,12 +325,46 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
         .from("data_room_engagement_events")
         .select("*")
         .order("event_time", { ascending: false }),
-      supabase
+            supabase
         .from("data_room_questions")
         .select("*")
         .order("asked_at", { ascending: false }),
-    ]);
 
+      supabase
+        .from("investor_import_batches")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+
+      supabase
+        .from("pdf_intelligence_batches")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+
+      supabase
+        .from("portfolio_data_migration_batches")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+
+      supabase
+        .from("fund_data_migration_batches")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+
+      supabase
+        .from("compliance_data_migration_batches")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
     const firstError =
       fundsResult.error ||
       commitmentsResult.error ||
@@ -362,6 +414,54 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       (dataRoomEngagementResult.data ?? []) as DataRow[]
     );
     setDataRoomQuestions((dataRoomQuestionsResult.data ?? []) as DataRow[]);
+        const investorMigrationBatch =
+      (investorMigrationBatchResult.data as DataRow | null) ?? null;
+    const pdfMigrationBatch =
+      (pdfMigrationBatchResult.data as DataRow | null) ?? null;
+    const portfolioMigrationBatch =
+      (portfolioMigrationBatchResult.data as DataRow | null) ?? null;
+    const fundMigrationBatch =
+      (fundMigrationBatchResult.data as DataRow | null) ?? null;
+    const complianceMigrationBatch =
+      (complianceMigrationBatchResult.data as DataRow | null) ?? null;
+
+    setLatestInvestorBatch(investorMigrationBatch);
+    setLatestPdfBatch(pdfMigrationBatch);
+    setLatestPortfolioBatch(portfolioMigrationBatch);
+    setLatestFundBatch(fundMigrationBatch);
+    setLatestComplianceBatch(complianceMigrationBatch);
+
+    if (portfolioMigrationBatch) {
+      const portfolioBatchId = getString(portfolioMigrationBatch, ["id"], "");
+
+      if (portfolioBatchId) {
+        const { data: migratedPortfolioData } = await supabase
+          .from("portfolio_investments")
+          .select("*")
+          .eq("batch_id", portfolioBatchId)
+          .order("created_at", { ascending: true });
+
+        setMigratedPortfolioInvestments(
+          (migratedPortfolioData ?? []) as DataRow[]
+        );
+      }
+    }
+
+    if (complianceMigrationBatch) {
+      const complianceBatchId = getString(complianceMigrationBatch, ["id"], "");
+
+      if (complianceBatchId) {
+        const { data: migratedComplianceData } = await supabase
+          .from("compliance_items")
+          .select("*")
+          .eq("batch_id", complianceBatchId)
+          .order("created_at", { ascending: true });
+
+        setMigratedComplianceItems(
+          (migratedComplianceData ?? []) as DataRow[]
+        );
+      }
+    }
 
     setLoading(false);
   }
@@ -374,8 +474,122 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     return new Map(portfolioCompanies.map((company) => [getId(company), company]));
   }, [portfolioCompanies]);
 
-  const dashboardMetrics = useMemo(() => {
-    const totalCommitted = commitments.reduce(
+    const dashboardMetrics = useMemo(() => {
+    const migrationInvestorCount = getNumber(latestInvestorBatch ?? undefined, [
+      "total_records",
+    ]);
+    const migrationInvestorCommitment = getNumber(
+      latestInvestorBatch ?? undefined,
+      ["total_commitment"]
+    );
+
+    const migrationPdfCount = getNumber(latestPdfBatch ?? undefined, [
+      "total_files",
+    ]);
+    const migrationPdfReviewCount =
+      getNumber(latestPdfBatch ?? undefined, ["review_files"]) +
+      getNumber(latestPdfBatch ?? undefined, ["unmatched_files"]);
+
+    const migrationPortfolioCount = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["total_records"]
+    );
+    const migrationPortfolioCost = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["total_investment_cost"]
+    );
+    const migrationPortfolioValue = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["current_portfolio_value"]
+    );
+    const migrationRealizedValue = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["realised_value", "realized_value"]
+    );
+    const migrationExpectedExitValue = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["expected_exit_value"]
+    );
+    const migrationPortfolioMoic = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["portfolio_moic"]
+    );
+    const migrationAtRiskCount = getNumber(latestPortfolioBatch ?? undefined, [
+      "at_risk_count",
+    ]);
+    const migrationRepaymentCount = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["repayment_count"]
+    );
+
+    const migrationFundCount = getNumber(latestFundBatch ?? undefined, [
+      "total_funds",
+    ]);
+    const migrationFundCommitted = getNumber(latestFundBatch ?? undefined, [
+      "total_committed_capital",
+    ]);
+    const migrationAverageCarry = getNumber(latestFundBatch ?? undefined, [
+      "average_carry",
+    ]);
+
+    const migrationComplianceItems = getNumber(
+      latestComplianceBatch ?? undefined,
+      ["total_items"]
+    );
+    const migrationComplianceReview = getNumber(
+      latestComplianceBatch ?? undefined,
+      ["pending_review_count"]
+    );
+    const migrationComplianceHighRisk = getNumber(
+      latestComplianceBatch ?? undefined,
+      ["high_risk_count"]
+    );
+
+    const migratedPortfolioCompanyNames = new Set(
+      migratedPortfolioInvestments
+        .map((row) => getString(row, ["portfolio_company"], ""))
+        .filter(Boolean)
+    );
+
+    const migratedInvestmentCost = migratedPortfolioInvestments.reduce(
+      (sum, row) => sum + getNumber(row, ["investment_cost"]),
+      0
+    );
+
+    const migratedCurrentValue = migratedPortfolioInvestments.reduce(
+      (sum, row) => sum + getNumber(row, ["current_value"]),
+      0
+    );
+
+    const migratedRealizedValue = migratedPortfolioInvestments.reduce(
+      (sum, row) => sum + getNumber(row, ["realised_value", "realized_value"]),
+      0
+    );
+
+    const migratedExpectedExitValue = migratedPortfolioInvestments.reduce(
+      (sum, row) => sum + getNumber(row, ["expected_exit_value"]),
+      0
+    );
+
+    const migratedAtRiskRows = migratedPortfolioInvestments.filter(
+      (row) => getString(row, ["risk_status"], "") === "At Risk"
+    ).length;
+
+    const migratedRepaymentRows = migratedPortfolioInvestments.filter((row) =>
+      Boolean(getString(row, ["repayment_due_date"], ""))
+    ).length;
+
+    const migratedComplianceReviewRows = migratedComplianceItems.filter((row) => {
+      const status = getString(row, ["filing_status"], "").toLowerCase();
+
+      return status === "pending" || status === "review" || status === "overdue";
+    }).length;
+
+    const migratedComplianceHighRiskRows = migratedComplianceItems.filter(
+      (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
+    ).length;
+
+    const legacyTotalCommitted = commitments.reduce(
       (sum, row) =>
         sum +
         getNumber(row, [
@@ -386,6 +600,11 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
         ]),
       0
     );
+
+    const totalCommitted =
+      migrationInvestorCommitment ||
+      migrationFundCommitted ||
+      legacyTotalCommitted;
 
     const approvedCapitalCalls = capitalCalls.filter(isApproved);
     const draftCapitalCalls = capitalCalls.filter(isDraft);
@@ -421,9 +640,14 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     const deploymentRate =
       totalCommitted > 0 ? (totalCalled / totalCommitted) * 100 : 0;
 
-    const storedDocuments = investorDocuments.filter((row) =>
-      Boolean(getString(row, ["storage_url"], ""))
+    const legacyStoredDocuments = investorDocuments.filter((row) =>
+      Boolean(getString(row, ["storage_url", "storage_path"], ""))
     ).length;
+
+    const storedDocuments = Math.max(
+      legacyStoredDocuments,
+      migrationPdfCount
+    );
 
     const queuedEmails = investorDocuments.filter(
       (row) => getString(row, ["email_status"], "") === "queued"
@@ -433,29 +657,47 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       (row) => getString(row, ["email_status"], "") === "sent"
     ).length;
 
-    const highImpactCirculars = regulatoryCirculars.filter(
-      (row) => getString(row, ["impact"], "").toUpperCase() === "HIGH"
-    ).length;
+    const highImpactCirculars = Math.max(
+      regulatoryCirculars.filter(
+        (row) => getString(row, ["impact"], "").toUpperCase() === "HIGH"
+      ).length,
+      migrationComplianceHighRisk,
+      migratedComplianceHighRiskRows
+    );
 
-    const totalInvestmentCost = fundInvestments.reduce(
+    const legacyInvestmentCost = fundInvestments.reduce(
       (sum, row) => sum + getNumber(row, ["original_investment_amount"]),
       0
     );
 
-    const currentFairValue = fundInvestments.reduce(
+    const totalInvestmentCost =
+      migrationPortfolioCost || migratedInvestmentCost || legacyInvestmentCost;
+
+    const legacyCurrentFairValue = fundInvestments.reduce(
       (sum, row) => sum + getNumber(row, ["current_fair_value"]),
       0
     );
 
-    const realizedValue = fundInvestments.reduce(
+    const currentFairValue =
+      migrationPortfolioValue || migratedCurrentValue || legacyCurrentFairValue;
+
+    const legacyRealizedValue = fundInvestments.reduce(
       (sum, row) => sum + getNumber(row, ["realized_value"]),
       0
     );
 
-    const unrealizedValue = fundInvestments.reduce(
+    const realizedValue =
+      migrationRealizedValue || migratedRealizedValue || legacyRealizedValue;
+
+    const legacyUnrealizedValue = fundInvestments.reduce(
       (sum, row) => sum + getNumber(row, ["unrealized_value"]),
       0
     );
+
+    const unrealizedValue =
+      currentFairValue > 0 && totalInvestmentCost > 0
+        ? currentFairValue - totalInvestmentCost
+        : legacyUnrealizedValue;
 
     const latestFundMetric = fundPerformanceMetrics[0];
 
@@ -463,12 +705,19 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     const netIrr = getNumber(latestFundMetric, ["net_irr"]);
     const dpi = getNumber(latestFundMetric, ["dpi"]);
     const tvpi = getNumber(latestFundMetric, ["tvpi"]);
-    const moic = getNumber(latestFundMetric, ["moic"]);
-    const currentNav = getNumber(latestFundMetric, ["current_nav"]);
+    const moic =
+      migrationPortfolioMoic || getNumber(latestFundMetric, ["moic"]);
+    const currentNav =
+      getNumber(latestFundMetric, ["current_nav"]) ||
+      currentFairValue ||
+      migrationFundCommitted;
 
-    const upcomingRepayments = debtRepayments.filter(
+    const legacyUpcomingRepayments = debtRepayments.filter(
       (row) => getString(row, ["payment_status"], "") === "upcoming"
     ).length;
+
+    const upcomingRepayments =
+      migrationRepaymentCount || migratedRepaymentRows || legacyUpcomingRepayments;
 
     const overdueRepayments = debtRepayments.filter(
       (row) => getString(row, ["payment_status"], "") === "overdue"
@@ -478,12 +727,19 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       (row) => getString(row, ["status"], "") === "open"
     ).length;
 
-    const highRiskMetrics = portfolioCompanyMetrics.filter((row) => {
+    const legacyHighRiskMetrics = portfolioCompanyMetrics.filter((row) => {
       const risk = getString(row, ["risk_rating"], "").toLowerCase();
-      const performance = getString(row, ["performance_status"], "").toLowerCase();
+      const performance = getString(
+        row,
+        ["performance_status"],
+        ""
+      ).toLowerCase();
 
       return risk === "high" || performance === "below_plan";
     }).length;
+
+    const highRiskMetrics =
+      migrationAtRiskCount || migratedAtRiskRows || legacyHighRiskMetrics;
 
     return {
       totalCommitted,
@@ -491,12 +747,16 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       totalDistributed,
       uncalledCapital,
       deploymentRate,
-      activeFunds: funds.length,
-      investors: investors.length,
+      activeFunds: migrationFundCount || funds.length,
+      investors: migrationInvestorCount || investors.length,
       pendingCapitalCalls: draftCapitalCalls.length,
       pendingDistributions: draftDistributions.length,
-      pendingRegulatoryReviews: regulatoryMatches.length,
-      generatedDocuments: investorDocuments.length,
+      pendingRegulatoryReviews: Math.max(
+        regulatoryMatches.length,
+        migrationComplianceReview,
+        migratedComplianceReviewRows
+      ),
+      generatedDocuments: Math.max(investorDocuments.length, migrationPdfCount),
       storedDocuments,
       queuedEmails,
       sentEmails,
@@ -512,12 +772,20 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       tvpi,
       moic,
       currentNav,
-      portfolioCompanies: portfolioCompanies.length,
-      fundInvestments: fundInvestments.length,
+      portfolioCompanies:
+        migratedPortfolioCompanyNames.size ||
+        migrationPortfolioCount ||
+        portfolioCompanies.length,
+      fundInvestments: migrationPortfolioCount || fundInvestments.length,
       upcomingRepayments,
       overdueRepayments,
       openPortfolioAlerts,
       highRiskMetrics,
+      expectedExitValue:
+        migrationExpectedExitValue || migratedExpectedExitValue,
+      migrationPdfReviewCount,
+      migrationAverageCarry,
+      migrationComplianceItems,
     };
   }, [
     commitments,
@@ -534,6 +802,13 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     portfolioNewsAlerts,
     portfolioCompanyMetrics,
     portfolioCompanies,
+    latestInvestorBatch,
+    latestPdfBatch,
+    latestPortfolioBatch,
+    latestFundBatch,
+    latestComplianceBatch,
+    migratedPortfolioInvestments,
+    migratedComplianceItems,
   ]);
   const connectedActivityEvents = useMemo(() => {
     const events: ConnectedActivityEvent[] = [];
@@ -1634,7 +1909,7 @@ async function handleGeneratePowerPoint() {
         {!loading && !errorMessage && (
           <>
                       <div className="sample-data-ribbon">
-              Live workspace preview · Reading fund, portfolio, investor and data room records
+              Live workspace preview · Reading migrated investor, PDF, portfolio, fund and compliance records
             </div>
             <div className="preview-card">
               <h2>Managing Partner Workspace Preview</h2>
@@ -1665,6 +1940,19 @@ async function handleGeneratePowerPoint() {
                 <a className="monitor-btn monitor-btn-secondary" href="/repayment-notice">
   Generate Repayment Notice
 </a>
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/migration/activation"
+                >
+                  View Migration Readiness
+                </a>
+
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/migration/stakeholder-launch"
+                >
+                  Launch Stakeholder Dashboards
+                </a>
               </div>
             </div>
 
