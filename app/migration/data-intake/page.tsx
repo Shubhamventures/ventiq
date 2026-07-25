@@ -479,55 +479,63 @@ export default function DataIntakeCommandCenterPage() {
               />
             </div>
 
-            <div className="queue-item">
-              <strong>Upload Portfolio Data</strong>
-              <br />
-              Use template for investment cost, instrument type, exits,
-              repayments, valuation, covenants and portfolio updates.
-              <br />
-              <br />
-              <button
-                className="secondary-action"
-                onClick={() => downloadTemplate("portfolio")}
-                type="button"
-              >
-                Download Portfolio Template
-              </button>
-              <br />
-              <br />
-              <input
-                accept=".csv,.xlsx,.xls"
-                onChange={(event) =>
-                  handleFilesSelected("portfolio", event.target.files)
-                }
-                type="file"
-              />
-            </div>
+           <div className="queue-item">
+  <strong>Upload Portfolio Data</strong>
+  <br />
+  Use template for investment cost, instrument type, exits,
+  repayments, valuation, covenants and portfolio updates.
+  <br />
+  <br />
+  <button
+    className="secondary-action"
+    onClick={() => downloadTemplate("portfolio")}
+    type="button"
+  >
+    Download Portfolio Template
+  </button>
+  <br />
+  <br />
+  <input
+    accept=".csv,.xlsx,.xls"
+    onChange={(event) =>
+      handleFilesSelected("portfolio", event.target.files)
+    }
+    type="file"
+  />
+  <br />
+  <br />
+  <a className="secondary-action" href="/migration/portfolio-data">
+    Open Portfolio Migration Workspace
+  </a>
+</div>
 
-            <div className="queue-item">
-              <strong>Upload Fund Data</strong>
-              <br />
-              Use template for fund type, closes, corpus, fee structure, carry,
-              hurdle, waterfall, sponsor and trustee details.
-              <br />
-              <br />
-              <button
-                className="secondary-action"
-                onClick={() => downloadTemplate("fund")}
-                type="button"
-              >
-                Download Fund Template
-              </button>
-              <br />
-              <br />
-              <input
-                accept=".csv,.xlsx,.xls"
-                onChange={(event) =>
-                  handleFilesSelected("fund", event.target.files)
-                }
-                type="file"
-              />
-            </div>
+           <div className="queue-item">
+  <strong>Upload Fund Data</strong>
+  <br />
+  Use template for fund type, closes, corpus, fee structure, carry,
+  hurdle, waterfall, sponsor and trustee details.
+  <br />
+  <br />
+  <button
+    className="secondary-action"
+    onClick={() => downloadTemplate("fund")}
+    type="button"
+  >
+    Download Fund Template
+  </button>
+  <br />
+  <br />
+  <input
+    accept=".csv,.xlsx,.xls"
+    onChange={(event) => handleFilesSelected("fund", event.target.files)}
+    type="file"
+  />
+  <br />
+  <br />
+  <a className="secondary-action" href="/migration/fund-data">
+    Open Fund Migration Workspace
+  </a>
+</div>
 
             <div className="queue-item">
               <strong>Upload Compliance & Other Data</strong>
