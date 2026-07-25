@@ -359,6 +359,12 @@ export default function DataActivationDashboardPage() {
               <a className="activation-secondary-button" href="/migration/data-intake">
                 Back to Data Intake
               </a>
+              <a
+  className="activation-secondary-button"
+  href="/migration/stakeholder-launch"
+>
+  Open Stakeholder Launch Center
+</a>
             </div>
           </div>
 
