@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 
 type ComplianceStatus = "Ready" | "Pending" | "Review" | "Overdue";
 type ComplianceRisk = "Low" | "Medium" | "High";
@@ -19,6 +20,23 @@ type ComplianceItem = {
   category: string;
   riskLevel: ComplianceRisk;
   remarks: string;
+};
+
+type ComplianceDbRow = {
+  id: string;
+  compliance_code: string | null;
+  item_type: string | null;
+  document_name: string | null;
+  fund_name: string | null;
+  period: string | null;
+  authority: string | null;
+  due_date: string | null;
+  filing_status: string | null;
+  evidence_available: boolean | null;
+  owner: string | null;
+  category: string | null;
+  risk_level: string | null;
+  remarks: string | null;
 };
 
 const sampleComplianceItems: ComplianceItem[] = [
@@ -126,6 +144,31 @@ function getStatusClass(status: ComplianceStatus) {
   return "at-risk";
 }
 
+function normalizeComplianceStatus(value: string | null): ComplianceStatus {
+  if (
+    value === "Ready" ||
+    value === "Pending" ||
+    value === "Review" ||
+    value === "Overdue"
+  ) {
+    return value;
+  }
+
+  return "Review";
+}
+
+function normalizeComplianceRisk(value: string | null): ComplianceRisk {
+  if (value === "Low" || value === "Medium" || value === "High") {
+    return value;
+  }
+
+  return "Medium";
+}
+
+function toNullableDate(value: string) {
+  return value.trim() ? value : null;
+}
+
 function downloadComplianceTemplate() {
   const headers = [
     "item_type",
@@ -175,24 +218,32 @@ function downloadComplianceTemplate() {
 }
 
 export default function ComplianceDataMigrationPage() {
-  const [items] = useState<ComplianceItem[]>(sampleComplianceItems);
+  const [items, setItems] = useState<ComplianceItem[]>(sampleComplianceItems);
   const [message, setMessage] = useState("");
+  const [activeBatchName, setActiveBatchName] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const [loadingLatestBatch, setLoadingLatestBatch] = useState(false);
 
   function handleFileSelected(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
 
     setMessage(
-      `${fileList.length} compliance/evidence file(s) staged. Supabase publishing will be connected in the next step.`
+      `${fileList.length} compliance/evidence file(s) staged. CSV/XLSX parsing and evidence storage will be connected in the next step. You can publish current staged records to Supabase now.`
     );
   }
 
   const metrics = useMemo(() => {
     const evidenceReady = items.filter((item) => item.evidenceAvailable).length;
+
     const pendingOrReview = items.filter(
       (item) => item.filingStatus === "Pending" || item.filingStatus === "Review"
     ).length;
+
     const highRisk = items.filter((item) => item.riskLevel === "High").length;
-    const readyItems = items.filter((item) => item.filingStatus === "Ready").length;
+
+    const readyItems = items.filter(
+      (item) => item.filingStatus === "Ready"
+    ).length;
 
     return {
       totalItems: items.length,
@@ -202,6 +253,150 @@ export default function ComplianceDataMigrationPage() {
       readyItems,
     };
   }, [items]);
+
+  async function publishComplianceData() {
+    if (!isSupabaseConfigured || !supabase) {
+      setMessage("Supabase is not configured.");
+      return;
+    }
+
+    if (items.length === 0) {
+      setMessage("No compliance records available to publish.");
+      return;
+    }
+
+    setPublishing(true);
+    setMessage("Publishing compliance records to Supabase...");
+
+    const batchName = `Compliance Data Migration Batch - ${new Date().toLocaleString()}`;
+
+    const { data: batchData, error: batchError } = await supabase
+      .from("compliance_data_migration_batches")
+      .insert({
+        batch_name: batchName,
+        fund_name: "VENTIQ Growth Fund II",
+        total_items: metrics.totalItems,
+        evidence_available_count: metrics.evidenceReady,
+        pending_review_count: metrics.pendingOrReview,
+        high_risk_count: metrics.highRisk,
+        ready_count: metrics.readyItems,
+        status: "published",
+      })
+      .select("id")
+      .single();
+
+    if (batchError || !batchData) {
+      setMessage(batchError?.message ?? "Unable to create compliance batch.");
+      setPublishing(false);
+      return;
+    }
+
+    const batchId = batchData.id as string;
+
+    const payload = items.map((item) => ({
+      batch_id: batchId,
+      compliance_code: item.id,
+      item_type: item.itemType,
+      document_name: item.documentName,
+      fund_name: item.fundName,
+      period: item.period,
+      authority: item.authority,
+      due_date: toNullableDate(item.dueDate),
+      filing_status: item.filingStatus,
+      evidence_available: item.evidenceAvailable,
+      owner: item.owner,
+      category: item.category,
+      risk_level: item.riskLevel,
+      remarks: item.remarks,
+      migration_status: "Ready",
+    }));
+
+    const { error: itemError } = await supabase
+      .from("compliance_items")
+      .insert(payload);
+
+    if (itemError) {
+      setMessage(itemError.message);
+      setPublishing(false);
+      return;
+    }
+
+    setActiveBatchName(batchName);
+    setMessage(`${items.length} compliance record(s) published to Supabase.`);
+    setPublishing(false);
+  }
+
+  async function loadLatestComplianceBatch() {
+    if (!isSupabaseConfigured || !supabase) {
+      setMessage("Supabase is not configured.");
+      return;
+    }
+
+    setLoadingLatestBatch(true);
+    setMessage("Loading latest compliance migration batch...");
+
+    const { data: batchData, error: batchError } = await supabase
+      .from("compliance_data_migration_batches")
+      .select("id, batch_name")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (batchError) {
+      setMessage(batchError.message);
+      setLoadingLatestBatch(false);
+      return;
+    }
+
+    if (!batchData) {
+      setMessage("No compliance migration batch found yet.");
+      setLoadingLatestBatch(false);
+      return;
+    }
+
+    const batchId = batchData.id as string;
+    const batchName =
+      (batchData.batch_name as string) ?? "Latest compliance batch";
+
+    const { data: complianceData, error: complianceError } = await supabase
+      .from("compliance_items")
+      .select(
+        "id, compliance_code, item_type, document_name, fund_name, period, authority, due_date, filing_status, evidence_available, owner, category, risk_level, remarks"
+      )
+      .eq("batch_id", batchId)
+      .order("created_at", { ascending: true });
+
+    if (complianceError) {
+      setMessage(complianceError.message);
+      setLoadingLatestBatch(false);
+      return;
+    }
+
+    const dbRows = (complianceData as ComplianceDbRow[] | null) ?? [];
+
+    const loadedItems: ComplianceItem[] = dbRows.map((item) => ({
+      id: item.compliance_code ?? item.id,
+      itemType: item.item_type ?? "Not provided",
+      documentName: item.document_name ?? "Unknown Compliance Document",
+      fundName: item.fund_name ?? "VENTIQ Growth Fund II",
+      period: item.period ?? "Not provided",
+      authority: item.authority ?? "Not provided",
+      dueDate: item.due_date ?? "",
+      filingStatus: normalizeComplianceStatus(item.filing_status),
+      evidenceAvailable: Boolean(item.evidence_available),
+      owner: item.owner ?? "Not provided",
+      category: item.category ?? "Not provided",
+      riskLevel: normalizeComplianceRisk(item.risk_level),
+      remarks: item.remarks ?? "No remarks provided.",
+    }));
+
+    setItems(loadedItems);
+    setActiveBatchName(batchName);
+    setMessage(
+      `${loadedItems.length} compliance record(s) loaded from latest batch.`
+    );
+    setLoadingLatestBatch(false);
+  }
 
   return (
     <main className="portfolio-migration-page">
@@ -250,6 +445,39 @@ export default function ComplianceDataMigrationPage() {
           <a className="portfolio-back-link" href="/migration/data-intake">
             ← Back to Data Intake
           </a>
+        </div>
+
+        <div className="portfolio-persistence-panel">
+          <div>
+            <span>Saved compliance workspace</span>
+            <strong>
+              {activeBatchName || "No compliance batch loaded"}
+            </strong>
+            <p>
+              Publish compliance records to Supabase or reload the latest saved
+              batch to continue after refresh.
+            </p>
+          </div>
+
+          <div className="portfolio-persistence-actions">
+            <button
+              className="portfolio-secondary-button"
+              disabled={loadingLatestBatch}
+              onClick={loadLatestComplianceBatch}
+              type="button"
+            >
+              {loadingLatestBatch ? "Loading..." : "Load Latest Batch"}
+            </button>
+
+            <button
+              className="portfolio-primary-button"
+              disabled={publishing}
+              onClick={publishComplianceData}
+              type="button"
+            >
+              {publishing ? "Publishing..." : "Publish Compliance Data"}
+            </button>
+          </div>
         </div>
 
         <div className="portfolio-upload-card">
@@ -384,7 +612,7 @@ export default function ComplianceDataMigrationPage() {
 
                   <div className="portfolio-record-field">
                     <small>Due date</small>
-                    <span>{item.dueDate}</span>
+                    <span>{item.dueDate || "Not provided"}</span>
                   </div>
 
                   <div className="portfolio-record-field">
@@ -397,7 +625,11 @@ export default function ComplianceDataMigrationPage() {
                     <span>{item.evidenceAvailable ? "Available" : "Missing"}</span>
                   </div>
 
-                  <span className={`risk-badge ${getStatusClass(item.filingStatus)}`}>
+                  <span
+                    className={`risk-badge ${getStatusClass(
+                      item.filingStatus
+                    )}`}
+                  >
                     {item.filingStatus}
                   </span>
 
