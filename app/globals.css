@@ -10315,4 +10315,72 @@ button.secondary-action:disabled {
   .portfolio-hero-visual {
     display: none;
   }
+}.portfolio-persistence-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1.25rem;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.14), transparent 38%),
+    rgba(15, 23, 42, 0.82);
+  padding: 1.25rem;
+  margin-bottom: 1.2rem;
+}
+
+.portfolio-persistence-panel span {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #60a5fa;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.portfolio-persistence-panel strong {
+  color: #ffffff;
+  font-size: 1.18rem;
+}
+
+.portfolio-persistence-panel p {
+  max-width: 780px;
+  margin: 0.5rem 0 0;
+  color: #c7d2fe;
+  line-height: 1.55;
+}
+
+.portfolio-persistence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.portfolio-secondary-button {
+  border: 1px solid rgba(147, 197, 253, 0.32);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #dbeafe;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+  padding: 0.85rem 1rem;
+}
+
+.portfolio-primary-button:disabled,
+.portfolio-secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+@media (max-width: 900px) {
+  .portfolio-persistence-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .portfolio-persistence-actions {
+    justify-content: flex-start;
+  }
 }

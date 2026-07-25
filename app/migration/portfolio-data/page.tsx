@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 
 type PortfolioRow = {
   id: string;
@@ -20,6 +21,28 @@ type PortfolioRow = {
   covenants: string;
   riskStatus: "Healthy" | "Watch" | "At Risk";
   latestUpdate: string;
+};
+
+type PortfolioInvestmentDbRow = {
+  id: string;
+  batch_id: string | null;
+  portfolio_code: string | null;
+  portfolio_company: string | null;
+  fund_name: string | null;
+  investment_date: string | null;
+  instrument_type: string | null;
+  sector: string | null;
+  investment_cost: number | string | null;
+  current_value: number | string | null;
+  realised_value: number | string | null;
+  expected_exit_value: number | string | null;
+  expected_exit_date: string | null;
+  repayment_due_date: string | null;
+  interest_rate: number | string | null;
+  security_or_charge: string | null;
+  covenants: string | null;
+  risk_status: string | null;
+  latest_update: string | null;
 };
 
 const sampleRows: PortfolioRow[] = [
@@ -102,6 +125,18 @@ function getRiskClass(riskStatus: PortfolioRow["riskStatus"]) {
   return "at-risk";
 }
 
+function normalizeRiskStatus(value: string | null): PortfolioRow["riskStatus"] {
+  if (value === "Healthy" || value === "Watch" || value === "At Risk") {
+    return value;
+  }
+
+  return "Watch";
+}
+
+function toNullableDate(value: string) {
+  return value.trim() ? value : null;
+}
+
 function downloadPortfolioTemplate() {
   const headers = [
     "portfolio_company",
@@ -159,14 +194,17 @@ function downloadPortfolioTemplate() {
 }
 
 export default function PortfolioDataMigrationPage() {
-  const [rows] = useState<PortfolioRow[]>(sampleRows);
+  const [rows, setRows] = useState<PortfolioRow[]>(sampleRows);
   const [message, setMessage] = useState("");
+  const [activeBatchName, setActiveBatchName] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const [loadingLatestBatch, setLoadingLatestBatch] = useState(false);
 
   function handleFileSelected(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
 
     setMessage(
-      `${fileList.length} portfolio file staged. CSV/XLSX parsing and Supabase publishing will be connected in the next step.`
+      `${fileList.length} portfolio file staged. CSV/XLSX parsing will be connected in the next step. You can publish current staged records to Supabase now.`
     );
   }
 
@@ -196,6 +234,158 @@ export default function PortfolioDataMigrationPage() {
       upcomingRepayments: upcomingRepayments.length,
     };
   }, [rows]);
+
+  async function publishPortfolioData() {
+    if (!isSupabaseConfigured || !supabase) {
+      setMessage("Supabase is not configured.");
+      return;
+    }
+
+    if (rows.length === 0) {
+      setMessage("No portfolio records available to publish.");
+      return;
+    }
+
+    setPublishing(true);
+    setMessage("Publishing portfolio records to Supabase...");
+
+    const batchName = `Portfolio Migration Batch - ${new Date().toLocaleString()}`;
+
+    const { data: batchData, error: batchError } = await supabase
+      .from("portfolio_data_migration_batches")
+      .insert({
+        batch_name: batchName,
+        fund_name: "VENTIQ Growth Fund II",
+        total_records: rows.length,
+        total_investment_cost: metrics.totalCost,
+        current_portfolio_value: metrics.currentValue,
+        realised_value: metrics.realisedValue,
+        expected_exit_value: metrics.expectedExitValue,
+        portfolio_moic: metrics.portfolioMoic,
+        at_risk_count: metrics.atRiskDeals,
+        repayment_count: metrics.upcomingRepayments,
+        status: "published",
+      })
+      .select("id")
+      .single();
+
+    if (batchError || !batchData) {
+      setMessage(batchError?.message ?? "Unable to create portfolio batch.");
+      setPublishing(false);
+      return;
+    }
+
+    const batchId = batchData.id as string;
+
+    const payload = rows.map((row) => ({
+      batch_id: batchId,
+      portfolio_code: row.id,
+      portfolio_company: row.companyName,
+      fund_name: row.fundName,
+      investment_date: toNullableDate(row.investmentDate),
+      instrument_type: row.instrumentType,
+      sector: row.sector,
+      investment_cost: row.investmentCost,
+      current_value: row.currentValue,
+      realised_value: row.realisedValue,
+      expected_exit_value: row.expectedExitValue,
+      expected_exit_date: toNullableDate(row.expectedExitDate),
+      repayment_due_date: toNullableDate(row.repaymentDueDate),
+      interest_rate: row.interestRate,
+      security_or_charge: row.securityOrCharge || null,
+      covenants: row.covenants || null,
+      risk_status: row.riskStatus,
+      latest_update: row.latestUpdate,
+      migration_status: "Ready",
+    }));
+
+    const { error: rowError } = await supabase
+      .from("portfolio_investments")
+      .insert(payload);
+
+    if (rowError) {
+      setMessage(rowError.message);
+      setPublishing(false);
+      return;
+    }
+
+    setActiveBatchName(batchName);
+    setMessage(`${rows.length} portfolio record(s) published to Supabase.`);
+    setPublishing(false);
+  }
+
+  async function loadLatestPortfolioBatch() {
+    if (!isSupabaseConfigured || !supabase) {
+      setMessage("Supabase is not configured.");
+      return;
+    }
+
+    setLoadingLatestBatch(true);
+    setMessage("Loading latest portfolio migration batch...");
+
+    const { data: batchData, error: batchError } = await supabase
+      .from("portfolio_data_migration_batches")
+      .select("id, batch_name")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (batchError) {
+      setMessage(batchError.message);
+      setLoadingLatestBatch(false);
+      return;
+    }
+
+    if (!batchData) {
+      setMessage("No portfolio migration batch found yet.");
+      setLoadingLatestBatch(false);
+      return;
+    }
+
+    const batchId = batchData.id as string;
+    const batchName = (batchData.batch_name as string) ?? "Latest portfolio batch";
+
+    const { data: investmentData, error: investmentError } = await supabase
+      .from("portfolio_investments")
+      .select(
+        "id, batch_id, portfolio_code, portfolio_company, fund_name, investment_date, instrument_type, sector, investment_cost, current_value, realised_value, expected_exit_value, expected_exit_date, repayment_due_date, interest_rate, security_or_charge, covenants, risk_status, latest_update"
+      )
+      .eq("batch_id", batchId)
+      .order("created_at", { ascending: true });
+
+    if (investmentError) {
+      setMessage(investmentError.message);
+      setLoadingLatestBatch(false);
+      return;
+    }
+
+    const dbRows = (investmentData as PortfolioInvestmentDbRow[] | null) ?? [];
+
+    const loadedRows: PortfolioRow[] = dbRows.map((row) => ({
+      id: row.portfolio_code ?? row.id,
+      companyName: row.portfolio_company ?? "Unknown Portfolio Company",
+      fundName: row.fund_name ?? "VENTIQ Growth Fund II",
+      investmentDate: row.investment_date ?? "",
+      instrumentType: row.instrument_type ?? "Not provided",
+      sector: row.sector ?? "Not provided",
+      investmentCost: Number(row.investment_cost ?? 0),
+      currentValue: Number(row.current_value ?? 0),
+      realisedValue: Number(row.realised_value ?? 0),
+      expectedExitValue: Number(row.expected_exit_value ?? 0),
+      expectedExitDate: row.expected_exit_date ?? "",
+      repaymentDueDate: row.repayment_due_date ?? "",
+      interestRate: Number(row.interest_rate ?? 0),
+      securityOrCharge: row.security_or_charge ?? "",
+      covenants: row.covenants ?? "",
+      riskStatus: normalizeRiskStatus(row.risk_status),
+      latestUpdate: row.latest_update ?? "No update provided.",
+    }));
+
+    setRows(loadedRows);
+    setActiveBatchName(batchName);
+    setMessage(`${loadedRows.length} portfolio record(s) loaded from latest batch.`);
+    setLoadingLatestBatch(false);
+  }
 
   return (
     <main className="portfolio-migration-page">
@@ -241,6 +431,37 @@ export default function PortfolioDataMigrationPage() {
           <a className="portfolio-back-link" href="/migration/data-intake">
             ← Back to Data Intake
           </a>
+        </div>
+
+        <div className="portfolio-persistence-panel">
+          <div>
+            <span>Saved portfolio workspace</span>
+            <strong>{activeBatchName || "No portfolio batch loaded"}</strong>
+            <p>
+              Publish staged portfolio records to Supabase or reload the latest
+              saved batch to continue after refresh.
+            </p>
+          </div>
+
+          <div className="portfolio-persistence-actions">
+            <button
+              className="portfolio-secondary-button"
+              disabled={loadingLatestBatch}
+              onClick={loadLatestPortfolioBatch}
+              type="button"
+            >
+              {loadingLatestBatch ? "Loading..." : "Load Latest Batch"}
+            </button>
+
+            <button
+              className="portfolio-primary-button"
+              disabled={publishing}
+              onClick={publishPortfolioData}
+              type="button"
+            >
+              {publishing ? "Publishing..." : "Publish Portfolio Data"}
+            </button>
+          </div>
         </div>
 
         <div className="portfolio-upload-card">
@@ -385,7 +606,7 @@ export default function PortfolioDataMigrationPage() {
                 <div className="portfolio-record-details">
                   <div>
                     <small>Investment date</small>
-                    <strong>{row.investmentDate}</strong>
+                    <strong>{row.investmentDate || "Not provided"}</strong>
                   </div>
                   <div>
                     <small>Expected exit date</small>
@@ -458,6 +679,12 @@ export default function PortfolioDataMigrationPage() {
                   <span className="risk-badge healthy">On Track</span>
                 </div>
               ))}
+
+            {rows.filter((row) => row.repaymentDueDate).length === 0 && (
+              <div className="portfolio-note">
+                No repayment schedules found in staged portfolio data.
+              </div>
+            )}
           </div>
         </div>
 
