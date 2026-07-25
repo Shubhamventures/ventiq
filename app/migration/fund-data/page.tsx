@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
+import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 
 type FundRow = {
   id: string;
@@ -23,6 +24,30 @@ type FundRow = {
   trusteeName: string;
   investmentManager: string;
   status: "Ready" | "Review";
+};
+
+type FundDbRow = {
+  id: string;
+  fund_code: string | null;
+  fund_name: string | null;
+  fund_type: string | null;
+  category: string | null;
+  jurisdiction: string | null;
+  first_close_date: string | null;
+  second_close_date: string | null;
+  final_close_date: string | null;
+  target_corpus: number | string | null;
+  committed_capital: number | string | null;
+  green_shoe: number | string | null;
+  management_fee_rate: number | string | null;
+  setup_cost_rate: number | string | null;
+  carry_rate: number | string | null;
+  hurdle_rate: number | string | null;
+  waterfall_type: string | null;
+  sponsor_commitment: number | string | null;
+  trustee_name: string | null;
+  investment_manager: string | null;
+  migration_status: string | null;
 };
 
 const sampleFunds: FundRow[] = [
@@ -52,6 +77,18 @@ const sampleFunds: FundRow[] = [
 
 function formatCr(value: number) {
   return `₹${(value / 10000000).toFixed(2)} Cr`;
+}
+
+function toNullableDate(value: string) {
+  return value.trim() ? value : null;
+}
+
+function normalizeFundStatus(value: string | null): FundRow["status"] {
+  if (value === "Ready" || value === "Review") {
+    return value;
+  }
+
+  return "Ready";
 }
 
 function downloadFundTemplate() {
@@ -115,14 +152,17 @@ function downloadFundTemplate() {
 }
 
 export default function FundDataMigrationPage() {
-  const [funds] = useState<FundRow[]>(sampleFunds);
+  const [funds, setFunds] = useState<FundRow[]>(sampleFunds);
   const [message, setMessage] = useState("");
+  const [activeBatchName, setActiveBatchName] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const [loadingLatestBatch, setLoadingLatestBatch] = useState(false);
 
   function handleFileSelected(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
 
     setMessage(
-      `${fileList.length} fund data file staged. Supabase publishing will be connected in the next step.`
+      `${fileList.length} fund data file staged. CSV/XLSX parsing will be connected in the next step. You can publish current staged records to Supabase now.`
     );
   }
 
@@ -148,19 +188,180 @@ export default function FundDataMigrationPage() {
       ? Math.round((committedCapital / totalTargetCorpus) * 100)
       : 0;
 
+    const averageManagementFee =
+      funds.length > 0
+        ? funds.reduce((sum, fund) => sum + fund.managementFeeRate, 0) /
+          funds.length
+        : 0;
+
+    const averageCarry =
+      funds.length > 0
+        ? funds.reduce((sum, fund) => sum + fund.carryRate, 0) / funds.length
+        : 0;
+
     return {
       totalTargetCorpus,
       committedCapital,
       greenShoe,
       sponsorCommitment,
       commitmentCoverage,
-      averageManagementFee:
-        funds.reduce((sum, fund) => sum + fund.managementFeeRate, 0) /
-        funds.length,
-      averageCarry:
-        funds.reduce((sum, fund) => sum + fund.carryRate, 0) / funds.length,
+      averageManagementFee,
+      averageCarry,
     };
   }, [funds]);
+
+  async function publishFundData() {
+    if (!isSupabaseConfigured || !supabase) {
+      setMessage("Supabase is not configured.");
+      return;
+    }
+
+    if (funds.length === 0) {
+      setMessage("No fund records available to publish.");
+      return;
+    }
+
+    setPublishing(true);
+    setMessage("Publishing fund records to Supabase...");
+
+    const batchName = `Fund Data Migration Batch - ${new Date().toLocaleString()}`;
+
+    const { data: batchData, error: batchError } = await supabase
+      .from("fund_data_migration_batches")
+      .insert({
+        batch_name: batchName,
+        total_funds: funds.length,
+        total_target_corpus: metrics.totalTargetCorpus,
+        total_committed_capital: metrics.committedCapital,
+        total_green_shoe: metrics.greenShoe,
+        total_sponsor_commitment: metrics.sponsorCommitment,
+        average_management_fee: metrics.averageManagementFee,
+        average_carry: metrics.averageCarry,
+        status: "published",
+      })
+      .select("id")
+      .single();
+
+    if (batchError || !batchData) {
+      setMessage(batchError?.message ?? "Unable to create fund batch.");
+      setPublishing(false);
+      return;
+    }
+
+    const batchId = batchData.id as string;
+
+    const payload = funds.map((fund) => ({
+      batch_id: batchId,
+      fund_code: fund.id,
+      fund_name: fund.fundName,
+      fund_type: fund.fundType,
+      category: fund.category,
+      jurisdiction: fund.jurisdiction,
+      first_close_date: toNullableDate(fund.firstCloseDate),
+      second_close_date: toNullableDate(fund.secondCloseDate),
+      final_close_date: toNullableDate(fund.finalCloseDate),
+      target_corpus: fund.targetCorpus,
+      committed_capital: fund.committedCapital,
+      green_shoe: fund.greenShoe,
+      management_fee_rate: fund.managementFeeRate,
+      setup_cost_rate: fund.setupCostRate,
+      carry_rate: fund.carryRate,
+      hurdle_rate: fund.hurdleRate,
+      waterfall_type: fund.waterfallType,
+      sponsor_commitment: fund.sponsorCommitment,
+      trustee_name: fund.trusteeName,
+      investment_manager: fund.investmentManager,
+      migration_status: fund.status,
+    }));
+
+    const { error: fundError } = await supabase.from("fund_master").insert(payload);
+
+    if (fundError) {
+      setMessage(fundError.message);
+      setPublishing(false);
+      return;
+    }
+
+    setActiveBatchName(batchName);
+    setMessage(`${funds.length} fund record(s) published to Supabase.`);
+    setPublishing(false);
+  }
+
+  async function loadLatestFundBatch() {
+    if (!isSupabaseConfigured || !supabase) {
+      setMessage("Supabase is not configured.");
+      return;
+    }
+
+    setLoadingLatestBatch(true);
+    setMessage("Loading latest fund data migration batch...");
+
+    const { data: batchData, error: batchError } = await supabase
+      .from("fund_data_migration_batches")
+      .select("id, batch_name")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (batchError) {
+      setMessage(batchError.message);
+      setLoadingLatestBatch(false);
+      return;
+    }
+
+    if (!batchData) {
+      setMessage("No fund data migration batch found yet.");
+      setLoadingLatestBatch(false);
+      return;
+    }
+
+    const batchId = batchData.id as string;
+    const batchName = (batchData.batch_name as string) ?? "Latest fund batch";
+
+    const { data: fundData, error: fundError } = await supabase
+      .from("fund_master")
+      .select(
+        "id, fund_code, fund_name, fund_type, category, jurisdiction, first_close_date, second_close_date, final_close_date, target_corpus, committed_capital, green_shoe, management_fee_rate, setup_cost_rate, carry_rate, hurdle_rate, waterfall_type, sponsor_commitment, trustee_name, investment_manager, migration_status"
+      )
+      .eq("batch_id", batchId)
+      .order("created_at", { ascending: true });
+
+    if (fundError) {
+      setMessage(fundError.message);
+      setLoadingLatestBatch(false);
+      return;
+    }
+
+    const dbRows = (fundData as FundDbRow[] | null) ?? [];
+
+    const loadedFunds: FundRow[] = dbRows.map((fund) => ({
+      id: fund.fund_code ?? fund.id,
+      fundName: fund.fund_name ?? "Unknown Fund",
+      fundType: fund.fund_type ?? "Not provided",
+      category: fund.category ?? "Not provided",
+      jurisdiction: fund.jurisdiction ?? "Not provided",
+      firstCloseDate: fund.first_close_date ?? "",
+      secondCloseDate: fund.second_close_date ?? "",
+      finalCloseDate: fund.final_close_date ?? "",
+      targetCorpus: Number(fund.target_corpus ?? 0),
+      committedCapital: Number(fund.committed_capital ?? 0),
+      greenShoe: Number(fund.green_shoe ?? 0),
+      managementFeeRate: Number(fund.management_fee_rate ?? 0),
+      setupCostRate: Number(fund.setup_cost_rate ?? 0),
+      carryRate: Number(fund.carry_rate ?? 0),
+      hurdleRate: Number(fund.hurdle_rate ?? 0),
+      waterfallType: fund.waterfall_type ?? "Not provided",
+      sponsorCommitment: Number(fund.sponsor_commitment ?? 0),
+      trusteeName: fund.trustee_name ?? "Not provided",
+      investmentManager: fund.investment_manager ?? "Not provided",
+      status: normalizeFundStatus(fund.migration_status),
+    }));
+
+    setFunds(loadedFunds);
+    setActiveBatchName(batchName);
+    setMessage(`${loadedFunds.length} fund record(s) loaded from latest batch.`);
+    setLoadingLatestBatch(false);
+  }
 
   return (
     <main className="portfolio-migration-page">
@@ -209,6 +410,37 @@ export default function FundDataMigrationPage() {
           <a className="portfolio-back-link" href="/migration/data-intake">
             ← Back to Data Intake
           </a>
+        </div>
+
+        <div className="portfolio-persistence-panel">
+          <div>
+            <span>Saved fund workspace</span>
+            <strong>{activeBatchName || "No fund batch loaded"}</strong>
+            <p>
+              Publish fund structure and economic terms to Supabase or reload
+              the latest saved batch to continue after refresh.
+            </p>
+          </div>
+
+          <div className="portfolio-persistence-actions">
+            <button
+              className="portfolio-secondary-button"
+              disabled={loadingLatestBatch}
+              onClick={loadLatestFundBatch}
+              type="button"
+            >
+              {loadingLatestBatch ? "Loading..." : "Load Latest Batch"}
+            </button>
+
+            <button
+              className="portfolio-primary-button"
+              disabled={publishing}
+              onClick={publishFundData}
+              type="button"
+            >
+              {publishing ? "Publishing..." : "Publish Fund Data"}
+            </button>
+          </div>
         </div>
 
         <div className="portfolio-upload-card">
@@ -356,17 +588,17 @@ export default function FundDataMigrationPage() {
                 <div className="portfolio-record-details">
                   <div>
                     <small>First close</small>
-                    <strong>{fund.firstCloseDate}</strong>
+                    <strong>{fund.firstCloseDate || "Not provided"}</strong>
                   </div>
 
                   <div>
                     <small>Second close</small>
-                    <strong>{fund.secondCloseDate}</strong>
+                    <strong>{fund.secondCloseDate || "Not provided"}</strong>
                   </div>
 
                   <div>
                     <small>Final close</small>
-                    <strong>{fund.finalCloseDate}</strong>
+                    <strong>{fund.finalCloseDate || "Not provided"}</strong>
                   </div>
 
                   <div>
