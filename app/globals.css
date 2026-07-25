@@ -9299,4 +9299,122 @@ button.secondary-action:disabled {
   .publish-panel {
     grid-template-columns: 1fr;
   }
+}.review-editor-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+.review-editor-card {
+  border: 1px solid rgba(92, 156, 255, 0.3);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 35%),
+    rgba(3, 7, 18, 0.72);
+  padding: 1.25rem;
+}
+
+.review-editor-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.review-editor-header strong {
+  display: block;
+  color: #ffffff;
+  font-size: 1.05rem;
+}
+
+.review-editor-header span {
+  display: block;
+  margin-top: 0.35rem;
+  color: #bfdbfe;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.review-editor-header small {
+  border: 1px solid rgba(250, 204, 21, 0.32);
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.09);
+  color: #fde68a;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.review-editor-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.review-editor-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  color: #93c5fd;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.review-editor-fields select,
+.review-editor-fields input {
+  width: 100%;
+  border: 1px solid rgba(92, 156, 255, 0.34);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #ffffff;
+  padding: 0.85rem 0.9rem;
+  font: inherit;
+  outline: none;
+}
+
+.review-editor-fields select:focus,
+.review-editor-fields input:focus {
+  border-color: rgba(147, 197, 253, 0.9);
+}
+
+.review-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.review-editor-footer .publish-secondary-button {
+  max-width: 220px;
+}
+
+.review-editor-footer span {
+  color: #94a3b8;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 1100px) {
+  .review-editor-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .review-editor-header,
+  .review-editor-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .review-editor-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .review-editor-footer .publish-secondary-button {
+    max-width: none;
+  }
 }

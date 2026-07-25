@@ -15,6 +15,7 @@ type InvestorRecord = {
 type PdfResult = {
   id: string;
   batchId: string;
+  pdfDocumentId: string;
   fileName: string;
   fileSize: number;
   documentType: string;
@@ -34,6 +35,30 @@ type PdfResult = {
 type PdfTextItem = {
   str?: string;
 };
+
+type ReviewDraft = {
+  investorId: string;
+  documentType: string;
+  periodLabel: string;
+  status: "Ready" | "Review" | "Unmatched";
+};
+
+const DOCUMENT_TYPE_OPTIONS = [
+  "SOA / Account Statement",
+  "Capital Call Notice",
+  "Distribution Notice",
+  "IRR Statement",
+  "Tax Document",
+  "Portfolio Report",
+  "Fund Report",
+  "Other / Review",
+];
+
+const REVIEW_STATUS_OPTIONS: ReviewDraft["status"][] = [
+  "Ready",
+  "Review",
+  "Unmatched",
+];
 
 function normalize(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
@@ -370,6 +395,9 @@ export default function PdfIntelligencePage() {
   const [message, setMessage] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [publishMessage, setPublishMessage] = useState("");
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>(
+    {}
+  );
 
   useEffect(() => {
     async function loadInvestors() {
@@ -406,6 +434,18 @@ export default function PdfIntelligencePage() {
         .length,
       failed: results.filter((result) => result.status === "Failed").length,
     };
+  }, [results]);
+
+  const reviewQueue = useMemo(() => {
+    return results.filter(
+      (result) =>
+        !result.published &&
+        result.status !== "Failed" &&
+        (result.status !== "Ready" ||
+          !result.investorId ||
+          result.documentType === "Other / Review" ||
+          result.periodLabel === "Period not detected")
+    );
   }, [results]);
 
   async function handlePdfUpload(fileList: FileList | null) {
@@ -494,28 +534,38 @@ export default function PdfIntelligencePage() {
           `Confidence score: ${confidenceScore}`,
         ];
 
-        await supabase.from("pdf_intelligence_documents").insert({
-          batch_id: batchId,
-          original_file_name: file.name,
-          storage_bucket: "investor-pdf-dump",
-          storage_path: storagePath,
-          file_size: file.size,
-          document_type: typeResult.documentType,
-          matched_investor_id: matchedInvestor?.id ?? null,
-          investor_code: matchedInvestor?.investor_code ?? null,
-          investor_name: matchedInvestor?.investor_name ?? null,
-          email: matchedInvestor?.email ?? null,
-          fund_name: "VENTIQ Growth Fund II",
-          period_label: periodResult.periodLabel,
-          confidence_score: confidenceScore,
-          status,
-          match_signals: signals,
-          extracted_text_preview: textPreview,
-        });
+        const { data: insertedDocumentData, error: insertError } =
+          await supabase
+            .from("pdf_intelligence_documents")
+            .insert({
+              batch_id: batchId,
+              original_file_name: file.name,
+              storage_bucket: "investor-pdf-dump",
+              storage_path: storagePath,
+              file_size: file.size,
+              document_type: typeResult.documentType,
+              matched_investor_id: matchedInvestor?.id ?? null,
+              investor_code: matchedInvestor?.investor_code ?? null,
+              investor_name: matchedInvestor?.investor_name ?? null,
+              email: matchedInvestor?.email ?? null,
+              fund_name: "VENTIQ Growth Fund II",
+              period_label: periodResult.periodLabel,
+              confidence_score: confidenceScore,
+              status,
+              match_signals: signals,
+              extracted_text_preview: textPreview,
+            })
+            .select("id")
+            .single();
+
+        if (insertError) {
+          throw new Error(insertError.message);
+        }
 
         processedResults.push({
           id: `${file.name}-${file.lastModified}`,
           batchId,
+          pdfDocumentId: (insertedDocumentData?.id as string) ?? "",
           fileName: file.name,
           fileSize: file.size,
           documentType: typeResult.documentType,
@@ -538,6 +588,7 @@ export default function PdfIntelligencePage() {
         processedResults.push({
           id: `${file.name}-${file.lastModified}`,
           batchId,
+          pdfDocumentId: "",
           fileName: file.name,
           fileSize: file.size,
           documentType: "Failed",
@@ -609,7 +660,7 @@ export default function PdfIntelligencePage() {
     setPublishing(true);
     setPublishMessage("Publishing Ready PDFs to Investor Portal...");
 
-    const rows = [];
+    const rows: Array<Record<string, unknown>> = [];
 
     for (const result of publishableResults) {
       const { data: signedUrlData } = await supabase.storage
@@ -667,6 +718,130 @@ export default function PdfIntelligencePage() {
     setPublishing(false);
   }
 
+  function getReviewDraft(result: PdfResult): ReviewDraft {
+    return (
+      reviewDrafts[result.id] ?? {
+        investorId: result.investorId,
+        documentType: result.documentType,
+        periodLabel:
+          result.periodLabel === "Period not detected" ? "" : result.periodLabel,
+        status:
+          result.status === "Ready" || result.status === "Review"
+            ? result.status
+            : "Review",
+      }
+    );
+  }
+
+  function updateReviewDraft(
+    resultId: string,
+    partialDraft: Partial<ReviewDraft>
+  ) {
+    setReviewDrafts((current) => {
+      const existingDraft = current[resultId] ?? {
+        investorId: "",
+        documentType: "Other / Review",
+        periodLabel: "",
+        status: "Review" as const,
+      };
+
+      return {
+        ...current,
+        [resultId]: {
+          ...existingDraft,
+          ...partialDraft,
+        },
+      };
+    });
+  }
+
+  async function saveReviewCorrection(result: PdfResult) {
+    if (!isSupabaseConfigured || !supabase) {
+      setPublishMessage("Supabase is not configured.");
+      return;
+    }
+
+    const draft = getReviewDraft(result);
+    const selectedInvestor = investors.find(
+      (investor) => investor.id === draft.investorId
+    );
+
+    if (!selectedInvestor) {
+      setPublishMessage("Please select an investor before saving correction.");
+      return;
+    }
+
+    if (!draft.documentType) {
+      setPublishMessage("Please select a document type before saving correction.");
+      return;
+    }
+
+    if (!draft.periodLabel.trim()) {
+      setPublishMessage("Please enter period before saving correction.");
+      return;
+    }
+
+    const correctedConfidence =
+      draft.status === "Ready"
+        ? Math.max(result.confidenceScore, 85)
+        : result.confidenceScore;
+
+    const correctedSignals = [
+      ...result.signals,
+      "Manual review correction applied",
+      `Corrected investor: ${selectedInvestor.investor_name}`,
+      `Corrected document type: ${draft.documentType}`,
+      `Corrected period: ${draft.periodLabel}`,
+      `Corrected status: ${draft.status}`,
+    ];
+
+    if (result.pdfDocumentId) {
+      const { error } = await supabase
+        .from("pdf_intelligence_documents")
+        .update({
+          document_type: draft.documentType,
+          matched_investor_id: selectedInvestor.id,
+          investor_code: selectedInvestor.investor_code,
+          investor_name: selectedInvestor.investor_name,
+          email: selectedInvestor.email,
+          period_label: draft.periodLabel,
+          confidence_score: correctedConfidence,
+          status: draft.status,
+          match_signals: correctedSignals,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", result.pdfDocumentId);
+
+      if (error) {
+        setPublishMessage(error.message);
+        return;
+      }
+    }
+
+    setResults((current) =>
+      current.map((currentResult) =>
+        currentResult.id === result.id
+          ? {
+              ...currentResult,
+              documentType: draft.documentType,
+              investorId: selectedInvestor.id,
+              investorCode: selectedInvestor.investor_code ?? "-",
+              investorName: selectedInvestor.investor_name ?? "Not matched",
+              email: selectedInvestor.email ?? "-",
+              periodLabel: draft.periodLabel,
+              confidenceScore: correctedConfidence,
+              status: draft.status,
+              signals: correctedSignals,
+            }
+          : currentResult
+      )
+    );
+
+    setPublishMessage(
+      "Correction saved. If status is Ready, this PDF can now be published to Investor Portal."
+    );
+  }
+
   return (
     <main className="app-page">
       <section className="app-shell">
@@ -713,102 +888,245 @@ export default function PdfIntelligencePage() {
           </div>
         </div>
 
-       <div className="preview-card">
-  <div className="section-heading-row">
-    <div>
-      <p className="eyebrow">PDF Upload Workspace</p>
-      <h2>Upload Investor PDF Dump</h2>
-    </div>
+        <div className="preview-card">
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">PDF Upload Workspace</p>
+              <h2>Upload Investor PDF Dump</h2>
+            </div>
 
-    <span className="status-pill">No template required</span>
-  </div>
+            <span className="status-pill">No template required</span>
+          </div>
 
-  <div className="explain-box">
-    Upload SOAs, IRR statements, distribution notices, capital call notices,
-    tax documents and fund reports. VENTIQ will inspect both the filename and
-    the internal PDF text before sorting.
-  </div>
+          <div className="explain-box">
+            Upload SOAs, IRR statements, distribution notices, capital call
+            notices, tax documents and fund reports. VENTIQ will inspect both
+            the filename and the internal PDF text before sorting.
+          </div>
 
-  <label className="upload-dropzone">
-    <input
-      accept=".pdf"
-      disabled={processing || loadingInvestors}
-      multiple
-      onChange={(event) => handlePdfUpload(event.target.files)}
-      type="file"
-    />
+          <label className="upload-dropzone">
+            <input
+              accept=".pdf"
+              disabled={processing || loadingInvestors}
+              multiple
+              onChange={(event) => handlePdfUpload(event.target.files)}
+              type="file"
+            />
 
-    <span className="upload-icon">↑</span>
-    <strong>Choose PDF dump</strong>
-    <small>
-      Upload one or many investor PDFs. VENTIQ will extract text, classify
-      documents, match investors and calculate confidence.
-    </small>
-  </label>
+            <span className="upload-icon">↑</span>
+            <strong>Choose PDF dump</strong>
+            <small>
+              Upload one or many investor PDFs. VENTIQ will extract text,
+              classify documents, match investors and calculate confidence.
+            </small>
+          </label>
 
-  {message && <div className="logic-note">{message}</div>}
+          {message && <div className="logic-note">{message}</div>}
 
-  {loadingInvestors && (
-    <div className="logic-note">Loading investor master...</div>
-  )}
+          {loadingInvestors && (
+            <div className="logic-note">Loading investor master...</div>
+          )}
 
-  {processing && (
-    <div className="logic-note">
-      Processing files. For large PDF dumps, this may take time.
-    </div>
-  )}
-</div>
+          {processing && (
+            <div className="logic-note">
+              Processing files. For large PDF dumps, this may take time.
+            </div>
+          )}
+        </div>
 
-      <div className="preview-card">
-  <div className="section-heading-row">
-    <div>
-      <p className="eyebrow">Portal Publishing</p>
-      <h2>Publish to Investor Portal</h2>
-    </div>
+        <div className="preview-card">
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">Review & Correction Queue</p>
+              <h2>Correct low-confidence PDF matches</h2>
+            </div>
 
-    <span className="status-pill">
-      {metrics.ready} ready PDF{metrics.ready === 1 ? "" : "s"}
-    </span>
-  </div>
+            <span className="status-pill">
+              {reviewQueue.length} item{reviewQueue.length === 1 ? "" : "s"} to
+              review
+            </span>
+          </div>
 
-  <div className="explain-box">
-    Only high-confidence Ready PDFs with investor matches should be published.
-    Review and unmatched files should stay in the exception queue until
-    corrected by the fund team.
-  </div>
+          <div className="explain-box">
+            If VENTIQ cannot confidently identify the investor, document type or
+            period, the fund team can manually correct it here. Once corrected
+            and marked Ready, the PDF can be published into the Investor Portal.
+          </div>
 
-  <div className="publish-panel">
-    <div className="publish-copy">
-      <span className="publish-kicker">Publishing queue</span>
-      <strong>Investor Portal document library</strong>
-      <p>
-        Upload and process PDFs first. Once VENTIQ marks documents as Ready,
-        they can be published investor-wise into the Investor Portal.
-      </p>
-    </div>
+          {reviewQueue.length === 0 && (
+            <div className="logic-note">
+              No review items yet. Upload PDFs first, or all processed PDFs are
+              already ready / published.
+            </div>
+          )}
 
-    <div className="publish-controls">
-      <button
-        className="publish-primary-button"
-        disabled={publishing || metrics.ready === 0}
-        onClick={publishReadyDocumentsToPortal}
-        type="button"
-      >
-        {publishing ? "Publishing..." : "Publish Ready PDFs"}
-      </button>
+          {reviewQueue.length > 0 && (
+            <div className="review-editor-grid">
+              {reviewQueue.slice(0, 12).map((result) => {
+                const draft = getReviewDraft(result);
 
-      <a className="publish-secondary-button" href="/investor-portal">
-        Open Investor Portal
-      </a>
+                return (
+                  <div
+                    className="review-editor-card"
+                    key={`${result.id}-review`}
+                  >
+                    <div className="review-editor-header">
+                      <div>
+                        <strong>{result.fileName}</strong>
+                        <span>
+                          Current: {result.documentType} ·{" "}
+                          {result.investorName} · {result.periodLabel}
+                        </span>
+                      </div>
 
-      {metrics.ready === 0 && (
-        <small>No Ready PDFs yet. Upload and process PDFs first.</small>
-      )}
-    </div>
-  </div>
+                      <small>{result.confidenceScore}% confidence</small>
+                    </div>
 
-  {publishMessage && <div className="logic-note">{publishMessage}</div>}
-</div>
+                    <div className="review-editor-fields">
+                      <label>
+                        Investor
+                        <select
+                          value={draft.investorId}
+                          onChange={(event) =>
+                            updateReviewDraft(result.id, {
+                              investorId: event.target.value,
+                            })
+                          }
+                        >
+                          <option value="">Select investor</option>
+                          {investors.map((investor) => (
+                            <option key={investor.id} value={investor.id}>
+                              {investor.investor_code} —{" "}
+                              {investor.investor_name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label>
+                        Document type
+                        <select
+                          value={draft.documentType}
+                          onChange={(event) =>
+                            updateReviewDraft(result.id, {
+                              documentType: event.target.value,
+                            })
+                          }
+                        >
+                          {DOCUMENT_TYPE_OPTIONS.map((documentType) => (
+                            <option key={documentType} value={documentType}>
+                              {documentType}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label>
+                        Period
+                        <input
+                          placeholder="Example: Q4 FY26"
+                          value={draft.periodLabel}
+                          onChange={(event) =>
+                            updateReviewDraft(result.id, {
+                              periodLabel: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+
+                      <label>
+                        Status
+                        <select
+                          value={draft.status}
+                          onChange={(event) =>
+                            updateReviewDraft(result.id, {
+                              status: event.target
+                                .value as ReviewDraft["status"],
+                            })
+                          }
+                        >
+                          {REVIEW_STATUS_OPTIONS.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="review-editor-footer">
+                      <button
+                        className="publish-secondary-button"
+                        onClick={() => saveReviewCorrection(result)}
+                        type="button"
+                      >
+                        Save Correction
+                      </button>
+
+                      <span>
+                        Mark as Ready only after investor, document type and
+                        period are correct.
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="preview-card">
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">Portal Publishing</p>
+              <h2>Publish to Investor Portal</h2>
+            </div>
+
+            <span className="status-pill">
+              {metrics.ready} ready PDF{metrics.ready === 1 ? "" : "s"}
+            </span>
+          </div>
+
+          <div className="explain-box">
+            Only high-confidence Ready PDFs with investor matches should be
+            published. Review and unmatched files should stay in the exception
+            queue until corrected by the fund team.
+          </div>
+
+          <div className="publish-panel">
+            <div className="publish-copy">
+              <span className="publish-kicker">Publishing queue</span>
+              <strong>Investor Portal document library</strong>
+              <p>
+                Upload and process PDFs first. Once VENTIQ marks documents as
+                Ready, they can be published investor-wise into the Investor
+                Portal.
+              </p>
+            </div>
+
+            <div className="publish-controls">
+              <button
+                className="publish-primary-button"
+                disabled={publishing || metrics.ready === 0}
+                onClick={publishReadyDocumentsToPortal}
+                type="button"
+              >
+                {publishing ? "Publishing..." : "Publish Ready PDFs"}
+              </button>
+
+              <a className="publish-secondary-button" href="/investor-portal">
+                Open Investor Portal
+              </a>
+
+              {metrics.ready === 0 && (
+                <small>No Ready PDFs yet. Upload and process PDFs first.</small>
+              )}
+            </div>
+          </div>
+
+          {publishMessage && <div className="logic-note">{publishMessage}</div>}
+        </div>
+
         <div className="preview-card">
           <h2>Sorting Results</h2>
 
