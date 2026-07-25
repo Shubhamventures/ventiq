@@ -538,30 +538,35 @@ export default function DataIntakeCommandCenterPage() {
 </div>
 
             <div className="queue-item">
-              <strong>Upload Compliance & Other Data</strong>
-              <br />
-              Upload regulatory filings, audit evidence, tax workings, trustee
-              records, approvals and unmatched files.
-              <br />
-              <br />
-              <button
-                className="secondary-action"
-                onClick={() => downloadTemplate("compliance")}
-                type="button"
-              >
-                Download Compliance Template
-              </button>
-              <br />
-              <br />
-              <input
-                accept=".csv,.xlsx,.xls,.pdf,.doc,.docx"
-                multiple
-                onChange={(event) =>
-                  handleFilesSelected("compliance", event.target.files)
-                }
-                type="file"
-              />
-            </div>
+  <strong>Upload Compliance & Other Data</strong>
+  <br />
+  Upload regulatory filings, audit evidence, tax workings, trustee
+  records, approvals and unmatched files.
+  <br />
+  <br />
+  <button
+    className="secondary-action"
+    onClick={() => downloadTemplate("compliance")}
+    type="button"
+  >
+    Download Compliance Template
+  </button>
+  <br />
+  <br />
+  <input
+    accept=".csv,.xlsx,.xls,.pdf,.doc,.docx"
+    multiple
+    onChange={(event) =>
+      handleFilesSelected("compliance", event.target.files)
+    }
+    type="file"
+  />
+  <br />
+  <br />
+  <a className="secondary-action" href="/migration/compliance-data">
+    Open Compliance Migration Workspace
+  </a>
+</div>
           </div>
 
           {message && <div className="logic-note">{message}</div>}
