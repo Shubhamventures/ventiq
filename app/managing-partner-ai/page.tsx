@@ -211,11 +211,22 @@ export default function ManagingPartnerAIPage() {
   const [latestFundBatch, setLatestFundBatch] = useState<DataRow | null>(null);
   const [latestComplianceBatch, setLatestComplianceBatch] =
     useState<DataRow | null>(null);
-  const [migratedPortfolioInvestments, setMigratedPortfolioInvestments] =
-    useState<DataRow[]>([]);
-  const [migratedComplianceItems, setMigratedComplianceItems] = useState<
-    DataRow[]
-  >([]);
+  const [migratedInvestorMaster, setMigratedInvestorMaster] = useState<
+  DataRow[]
+>([]);
+const [migratedFundCommitments, setMigratedFundCommitments] = useState<
+  DataRow[]
+>([]);
+const [migratedFinancialPositions, setMigratedFinancialPositions] = useState<
+  DataRow[]
+>([]);
+const [migratedFundMaster, setMigratedFundMaster] = useState<DataRow[]>([]);
+const [migratedPortfolioInvestments, setMigratedPortfolioInvestments] =
+  useState<DataRow[]>([]);
+const [migratedComplianceItems, setMigratedComplianceItems] = useState<
+  DataRow[]
+>([]);
+const [migratedPdfDocuments, setMigratedPdfDocuments] = useState<DataRow[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -255,216 +266,216 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
   }, []);
 
   async function loadManagingPartnerDashboard() {
-    if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage(
-  "The sample Managing Partner workspace is temporarily unavailable. Please request a walkthrough."
-);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setErrorMessage("");
-
-    const [
-      fundsResult,
-      commitmentsResult,
-      investorsResult,
-      capitalCallsResult,
-      distributionsResult,
-      documentsResult,
-      matchesResult,
-      circularsResult,
-      portfolioCompaniesResult,
-      fundInvestmentsResult,
-      debtRepaymentsResult,
-      portfolioCompanyMetricsResult,
-      portfolioNewsAlertsResult,
-      fundPerformanceMetricsResult,
-            dataRoomDocumentsResult,
-      dataRoomEngagementResult,
-      dataRoomQuestionsResult,
-      investorMigrationBatchResult,
-      pdfMigrationBatchResult,
-      portfolioMigrationBatchResult,
-      fundMigrationBatchResult,
-      complianceMigrationBatchResult,
-    ] = await Promise.all([
-      supabase.from("funds").select("*"),
-      supabase.from("commitments").select("*"),
-      supabase.from("investors").select("*"),
-      supabase.from("capital_calls").select("*"),
-      supabase.from("distributions").select("*"),
-      supabase.from("investor_documents").select("*"),
-      supabase
-        .from("regulatory_source_matches")
-        .select("*")
-        .eq("status", "needs_review"),
-      supabase.from("regulatory_circulars").select("*").eq("status", "active"),
-
-      supabase.from("portfolio_companies").select("*"),
-      supabase.from("fund_investments").select("*"),
-      supabase.from("debt_repayment_schedules").select("*").order("due_date"),
-      supabase
-        .from("portfolio_company_metrics")
-        .select("*")
-        .order("metric_date", { ascending: false }),
-      supabase
-        .from("portfolio_news_alerts")
-        .select("*")
-        .order("alert_date", { ascending: false }),
-      supabase
-        .from("fund_performance_metrics")
-        .select("*")
-        .order("reporting_date", { ascending: false }),
-      supabase
-        .from("data_room_documents")
-        .select("*")
-        .order("imported_at", { ascending: false }),
-      supabase
-        .from("data_room_engagement_events")
-        .select("*")
-        .order("event_time", { ascending: false }),
-            supabase
-        .from("data_room_questions")
-        .select("*")
-        .order("asked_at", { ascending: false }),
-
-      supabase
-        .from("investor_import_batches")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-
-      supabase
-        .from("pdf_intelligence_batches")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-
-      supabase
-        .from("portfolio_data_migration_batches")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-
-      supabase
-        .from("fund_data_migration_batches")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-
-      supabase
-        .from("compliance_data_migration_batches")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
-    const firstError =
-      fundsResult.error ||
-      commitmentsResult.error ||
-      investorsResult.error ||
-      capitalCallsResult.error ||
-      distributionsResult.error ||
-      documentsResult.error ||
-      matchesResult.error ||
-      circularsResult.error ||
-      portfolioCompaniesResult.error ||
-      fundInvestmentsResult.error ||
-      debtRepaymentsResult.error ||
-      portfolioCompanyMetricsResult.error ||
-      portfolioNewsAlertsResult.error ||
-      fundPerformanceMetricsResult.error ||
-      dataRoomDocumentsResult.error ||
-      dataRoomEngagementResult.error ||
-      dataRoomQuestionsResult.error;
-
-    if (firstError) {
-      setErrorMessage(firstError.message);
-      setLoading(false);
-      return;
-    }
-
-    setFunds((fundsResult.data ?? []) as DataRow[]);
-    setCommitments((commitmentsResult.data ?? []) as DataRow[]);
-    setInvestors((investorsResult.data ?? []) as DataRow[]);
-    setCapitalCalls((capitalCallsResult.data ?? []) as DataRow[]);
-    setDistributions((distributionsResult.data ?? []) as DataRow[]);
-    setInvestorDocuments((documentsResult.data ?? []) as DataRow[]);
-    setRegulatoryMatches((matchesResult.data ?? []) as DataRow[]);
-    setRegulatoryCirculars((circularsResult.data ?? []) as DataRow[]);
-
-    setPortfolioCompanies((portfolioCompaniesResult.data ?? []) as DataRow[]);
-    setFundInvestments((fundInvestmentsResult.data ?? []) as DataRow[]);
-    setDebtRepayments((debtRepaymentsResult.data ?? []) as DataRow[]);
-    setPortfolioCompanyMetrics(
-      (portfolioCompanyMetricsResult.data ?? []) as DataRow[]
+  if (!isSupabaseConfigured || !supabase) {
+    setErrorMessage(
+      "The sample Managing Partner workspace is temporarily unavailable. Please request a walkthrough."
     );
-    setPortfolioNewsAlerts((portfolioNewsAlertsResult.data ?? []) as DataRow[]);
-    setFundPerformanceMetrics(
-      (fundPerformanceMetricsResult.data ?? []) as DataRow[]
-    );
-    setDataRoomDocuments((dataRoomDocumentsResult.data ?? []) as DataRow[]);
-    setDataRoomEngagementEvents(
-      (dataRoomEngagementResult.data ?? []) as DataRow[]
-    );
-    setDataRoomQuestions((dataRoomQuestionsResult.data ?? []) as DataRow[]);
-        const investorMigrationBatch =
-      (investorMigrationBatchResult.data as DataRow | null) ?? null;
-    const pdfMigrationBatch =
-      (pdfMigrationBatchResult.data as DataRow | null) ?? null;
-    const portfolioMigrationBatch =
-      (portfolioMigrationBatchResult.data as DataRow | null) ?? null;
-    const fundMigrationBatch =
-      (fundMigrationBatchResult.data as DataRow | null) ?? null;
-    const complianceMigrationBatch =
-      (complianceMigrationBatchResult.data as DataRow | null) ?? null;
-
-    setLatestInvestorBatch(investorMigrationBatch);
-    setLatestPdfBatch(pdfMigrationBatch);
-    setLatestPortfolioBatch(portfolioMigrationBatch);
-    setLatestFundBatch(fundMigrationBatch);
-    setLatestComplianceBatch(complianceMigrationBatch);
-
-    if (portfolioMigrationBatch) {
-      const portfolioBatchId = getString(portfolioMigrationBatch, ["id"], "");
-
-      if (portfolioBatchId) {
-        const { data: migratedPortfolioData } = await supabase
-          .from("portfolio_investments")
-          .select("*")
-          .eq("batch_id", portfolioBatchId)
-          .order("created_at", { ascending: true });
-
-        setMigratedPortfolioInvestments(
-          (migratedPortfolioData ?? []) as DataRow[]
-        );
-      }
-    }
-
-    if (complianceMigrationBatch) {
-      const complianceBatchId = getString(complianceMigrationBatch, ["id"], "");
-
-      if (complianceBatchId) {
-        const { data: migratedComplianceData } = await supabase
-          .from("compliance_items")
-          .select("*")
-          .eq("batch_id", complianceBatchId)
-          .order("created_at", { ascending: true });
-
-        setMigratedComplianceItems(
-          (migratedComplianceData ?? []) as DataRow[]
-        );
-      }
-    }
-
     setLoading(false);
+    return;
   }
+
+  setLoading(true);
+  setErrorMessage("");
+
+  const db = supabase as any;
+
+  async function selectRows(
+    tableName: string,
+    options?: {
+      orderBy?: string;
+      ascending?: boolean;
+      eq?: {
+        column: string;
+        value: string;
+      };
+    }
+  ) {
+    try {
+      let query = db.from(tableName).select("*");
+
+      if (options?.eq) {
+        query = query.eq(options.eq.column, options.eq.value);
+      }
+
+      if (options?.orderBy) {
+        query = query.order(options.orderBy, {
+          ascending: options.ascending ?? false,
+        });
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.warn(`VENTIQ dashboard skipped ${tableName}:`, error.message);
+        return [] as DataRow[];
+      }
+
+      return (data ?? []) as DataRow[];
+    } catch (error) {
+      console.warn(`VENTIQ dashboard skipped ${tableName}:`, error);
+      return [] as DataRow[];
+    }
+  }
+
+  async function latestRow(tableName: string) {
+    try {
+      const { data, error } = await db
+        .from(tableName)
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.warn(`VENTIQ dashboard skipped latest ${tableName}:`, error.message);
+        return null;
+      }
+
+      return (data as DataRow | null) ?? null;
+    } catch (error) {
+      console.warn(`VENTIQ dashboard skipped latest ${tableName}:`, error);
+      return null;
+    }
+  }
+
+  const [
+    fundsData,
+    commitmentsData,
+    investorsData,
+    capitalCallsData,
+    distributionsData,
+    documentsData,
+    matchesData,
+    circularsData,
+    portfolioCompaniesData,
+    fundInvestmentsData,
+    debtRepaymentsData,
+    portfolioCompanyMetricsData,
+    portfolioNewsAlertsData,
+    fundPerformanceMetricsData,
+    dataRoomDocumentsData,
+    dataRoomEngagementData,
+    dataRoomQuestionsData,
+
+    migratedInvestorMasterData,
+    migratedFundCommitmentsData,
+    migratedFinancialPositionsData,
+    migratedFundMasterData,
+    migratedPortfolioInvestmentsData,
+    migratedComplianceItemsData,
+    migratedPdfDocumentsData,
+
+    investorMigrationBatch,
+    pdfMigrationBatch,
+    portfolioMigrationBatch,
+    fundMigrationBatch,
+    complianceMigrationBatch,
+  ] = await Promise.all([
+    selectRows("funds"),
+    selectRows("commitments"),
+    selectRows("investors"),
+    selectRows("capital_calls"),
+    selectRows("distributions"),
+    selectRows("investor_documents", {
+      orderBy: "published_at",
+      ascending: false,
+    }),
+    selectRows("regulatory_source_matches", {
+      eq: {
+        column: "status",
+        value: "needs_review",
+      },
+    }),
+    selectRows("regulatory_circulars", {
+      eq: {
+        column: "status",
+        value: "active",
+      },
+    }),
+    selectRows("portfolio_companies"),
+    selectRows("fund_investments"),
+    selectRows("debt_repayment_schedules", {
+      orderBy: "due_date",
+      ascending: true,
+    }),
+    selectRows("portfolio_company_metrics", {
+      orderBy: "metric_date",
+      ascending: false,
+    }),
+    selectRows("portfolio_news_alerts", {
+      orderBy: "alert_date",
+      ascending: false,
+    }),
+    selectRows("fund_performance_metrics", {
+      orderBy: "reporting_date",
+      ascending: false,
+    }),
+    selectRows("data_room_documents", {
+      orderBy: "imported_at",
+      ascending: false,
+    }),
+    selectRows("data_room_engagement_events", {
+      orderBy: "event_time",
+      ascending: false,
+    }),
+    selectRows("data_room_questions", {
+      orderBy: "asked_at",
+      ascending: false,
+    }),
+
+    selectRows("investor_master", {
+      orderBy: "investor_code",
+      ascending: true,
+    }),
+    selectRows("fund_commitments"),
+    selectRows("investor_financial_positions"),
+    selectRows("fund_master"),
+    selectRows("portfolio_investments"),
+    selectRows("compliance_items"),
+    selectRows("pdf_intelligence_documents"),
+
+    latestRow("investor_import_batches"),
+    latestRow("pdf_intelligence_batches"),
+    latestRow("portfolio_data_migration_batches"),
+    latestRow("fund_data_migration_batches"),
+    latestRow("compliance_data_migration_batches"),
+  ]);
+
+  setFunds(fundsData);
+  setCommitments(commitmentsData);
+  setInvestors(investorsData);
+  setCapitalCalls(capitalCallsData);
+  setDistributions(distributionsData);
+  setInvestorDocuments(documentsData);
+  setRegulatoryMatches(matchesData);
+  setRegulatoryCirculars(circularsData);
+
+  setPortfolioCompanies(portfolioCompaniesData);
+  setFundInvestments(fundInvestmentsData);
+  setDebtRepayments(debtRepaymentsData);
+  setPortfolioCompanyMetrics(portfolioCompanyMetricsData);
+  setPortfolioNewsAlerts(portfolioNewsAlertsData);
+  setFundPerformanceMetrics(fundPerformanceMetricsData);
+  setDataRoomDocuments(dataRoomDocumentsData);
+  setDataRoomEngagementEvents(dataRoomEngagementData);
+  setDataRoomQuestions(dataRoomQuestionsData);
+
+  setMigratedInvestorMaster(migratedInvestorMasterData);
+  setMigratedFundCommitments(migratedFundCommitmentsData);
+  setMigratedFinancialPositions(migratedFinancialPositionsData);
+  setMigratedFundMaster(migratedFundMasterData);
+  setMigratedPortfolioInvestments(migratedPortfolioInvestmentsData);
+  setMigratedComplianceItems(migratedComplianceItemsData);
+  setMigratedPdfDocuments(migratedPdfDocumentsData);
+
+  setLatestInvestorBatch(investorMigrationBatch);
+  setLatestPdfBatch(pdfMigrationBatch);
+  setLatestPortfolioBatch(portfolioMigrationBatch);
+  setLatestFundBatch(fundMigrationBatch);
+  setLatestComplianceBatch(complianceMigrationBatch);
+
+  setLoading(false);
+}
 
   const fundMap = useMemo(() => {
     return new Map(funds.map((fund) => [getId(fund), fund]));
@@ -474,342 +485,463 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     return new Map(portfolioCompanies.map((company) => [getId(company), company]));
   }, [portfolioCompanies]);
 
-    const dashboardMetrics = useMemo(() => {
-    const migrationInvestorCount = getNumber(latestInvestorBatch ?? undefined, [
-      "total_records",
-    ]);
-    const migrationInvestorCommitment = getNumber(
-      latestInvestorBatch ?? undefined,
-      ["total_commitment"]
-    );
+   const dashboardMetrics = useMemo(() => {
+  function averageFromRows(rows: DataRow[], keys: string[]) {
+    const values = rows
+      .map((row) => getNumber(row, keys))
+      .filter((value) => Number.isFinite(value) && value > 0);
 
-    const migrationPdfCount = getNumber(latestPdfBatch ?? undefined, [
-      "total_files",
-    ]);
-    const migrationPdfReviewCount =
-      getNumber(latestPdfBatch ?? undefined, ["review_files"]) +
-      getNumber(latestPdfBatch ?? undefined, ["unmatched_files"]);
+    if (values.length === 0) return 0;
 
-    const migrationPortfolioCount = getNumber(
-      latestPortfolioBatch ?? undefined,
-      ["total_records"]
-    );
-    const migrationPortfolioCost = getNumber(
-      latestPortfolioBatch ?? undefined,
-      ["total_investment_cost"]
-    );
-    const migrationPortfolioValue = getNumber(
-      latestPortfolioBatch ?? undefined,
-      ["current_portfolio_value"]
-    );
-    const migrationRealizedValue = getNumber(
-      latestPortfolioBatch ?? undefined,
-      ["realised_value", "realized_value"]
-    );
-    const migrationExpectedExitValue = getNumber(
-      latestPortfolioBatch ?? undefined,
-      ["expected_exit_value"]
-    );
-    const migrationPortfolioMoic = getNumber(
-      latestPortfolioBatch ?? undefined,
-      ["portfolio_moic"]
-    );
-    const migrationAtRiskCount = getNumber(latestPortfolioBatch ?? undefined, [
-      "at_risk_count",
-    ]);
-    const migrationRepaymentCount = getNumber(
-      latestPortfolioBatch ?? undefined,
-      ["repayment_count"]
-    );
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  }
 
-    const migrationFundCount = getNumber(latestFundBatch ?? undefined, [
-      "total_funds",
-    ]);
-    const migrationFundCommitted = getNumber(latestFundBatch ?? undefined, [
-      "total_committed_capital",
-    ]);
-    const migrationAverageCarry = getNumber(latestFundBatch ?? undefined, [
-      "average_carry",
-    ]);
-
-    const migrationComplianceItems = getNumber(
-      latestComplianceBatch ?? undefined,
-      ["total_items"]
-    );
-    const migrationComplianceReview = getNumber(
-      latestComplianceBatch ?? undefined,
-      ["pending_review_count"]
-    );
-    const migrationComplianceHighRisk = getNumber(
-      latestComplianceBatch ?? undefined,
-      ["high_risk_count"]
-    );
-
-    const migratedPortfolioCompanyNames = new Set(
-      migratedPortfolioInvestments
-        .map((row) => getString(row, ["portfolio_company"], ""))
-        .filter(Boolean)
-    );
-
-    const migratedInvestmentCost = migratedPortfolioInvestments.reduce(
-      (sum, row) => sum + getNumber(row, ["investment_cost"]),
-      0
-    );
-
-    const migratedCurrentValue = migratedPortfolioInvestments.reduce(
-      (sum, row) => sum + getNumber(row, ["current_value"]),
-      0
-    );
-
-    const migratedRealizedValue = migratedPortfolioInvestments.reduce(
-      (sum, row) => sum + getNumber(row, ["realised_value", "realized_value"]),
-      0
-    );
-
-    const migratedExpectedExitValue = migratedPortfolioInvestments.reduce(
-      (sum, row) => sum + getNumber(row, ["expected_exit_value"]),
-      0
-    );
-
-    const migratedAtRiskRows = migratedPortfolioInvestments.filter(
-      (row) => getString(row, ["risk_status"], "") === "At Risk"
-    ).length;
-
-    const migratedRepaymentRows = migratedPortfolioInvestments.filter((row) =>
-      Boolean(getString(row, ["repayment_due_date"], ""))
-    ).length;
-
-    const migratedComplianceReviewRows = migratedComplianceItems.filter((row) => {
-      const status = getString(row, ["filing_status"], "").toLowerCase();
-
-      return status === "pending" || status === "review" || status === "overdue";
-    }).length;
-
-    const migratedComplianceHighRiskRows = migratedComplianceItems.filter(
-      (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
-    ).length;
-
-    const legacyTotalCommitted = commitments.reduce(
-      (sum, row) =>
-        sum +
-        getNumber(row, [
-          "commitment_amount",
-          "committed_amount",
-          "commitment",
-          "amount",
-        ]),
-      0
-    );
-
-    const totalCommitted =
-      migrationInvestorCommitment ||
-      migrationFundCommitted ||
-      legacyTotalCommitted;
-
-    const approvedCapitalCalls = capitalCalls.filter(isApproved);
-    const draftCapitalCalls = capitalCalls.filter(isDraft);
-
-    const totalCalled = approvedCapitalCalls.reduce(
-      (sum, row) =>
-        sum +
-        getNumber(row, [
-          "capital_call_amount",
-          "call_amount",
-          "total_amount",
-          "amount",
-        ]),
-      0
-    );
-
-    const approvedDistributions = distributions.filter(isApproved);
-    const draftDistributions = distributions.filter(isDraft);
-
-    const totalDistributed = approvedDistributions.reduce(
-      (sum, row) =>
-        sum +
-        getNumber(row, [
-          "distribution_amount",
-          "total_distribution_amount",
-          "amount",
-        ]),
-      0
-    );
-
-    const uncalledCapital = Math.max(totalCommitted - totalCalled, 0);
-
-    const deploymentRate =
-      totalCommitted > 0 ? (totalCalled / totalCommitted) * 100 : 0;
-
-    const legacyStoredDocuments = investorDocuments.filter((row) =>
-      Boolean(getString(row, ["storage_url", "storage_path"], ""))
-    ).length;
-
-    const storedDocuments = Math.max(
-      legacyStoredDocuments,
-      migrationPdfCount
-    );
-
-    const queuedEmails = investorDocuments.filter(
-      (row) => getString(row, ["email_status"], "") === "queued"
-    ).length;
-
-    const sentEmails = investorDocuments.filter(
-      (row) => getString(row, ["email_status"], "") === "sent"
-    ).length;
-
-    const highImpactCirculars = Math.max(
-      regulatoryCirculars.filter(
-        (row) => getString(row, ["impact"], "").toUpperCase() === "HIGH"
-      ).length,
-      migrationComplianceHighRisk,
-      migratedComplianceHighRiskRows
-    );
-
-    const legacyInvestmentCost = fundInvestments.reduce(
-      (sum, row) => sum + getNumber(row, ["original_investment_amount"]),
-      0
-    );
-
-    const totalInvestmentCost =
-      migrationPortfolioCost || migratedInvestmentCost || legacyInvestmentCost;
-
-    const legacyCurrentFairValue = fundInvestments.reduce(
-      (sum, row) => sum + getNumber(row, ["current_fair_value"]),
-      0
-    );
-
-    const currentFairValue =
-      migrationPortfolioValue || migratedCurrentValue || legacyCurrentFairValue;
-
-    const legacyRealizedValue = fundInvestments.reduce(
-      (sum, row) => sum + getNumber(row, ["realized_value"]),
-      0
-    );
-
-    const realizedValue =
-      migrationRealizedValue || migratedRealizedValue || legacyRealizedValue;
-
-    const legacyUnrealizedValue = fundInvestments.reduce(
-      (sum, row) => sum + getNumber(row, ["unrealized_value"]),
-      0
-    );
-
-    const unrealizedValue =
-      currentFairValue > 0 && totalInvestmentCost > 0
-        ? currentFairValue - totalInvestmentCost
-        : legacyUnrealizedValue;
-
-    const latestFundMetric = fundPerformanceMetrics[0];
-
-    const grossIrr = getNumber(latestFundMetric, ["gross_irr"]);
-    const netIrr = getNumber(latestFundMetric, ["net_irr"]);
-    const dpi = getNumber(latestFundMetric, ["dpi"]);
-    const tvpi = getNumber(latestFundMetric, ["tvpi"]);
-    const moic =
-      migrationPortfolioMoic || getNumber(latestFundMetric, ["moic"]);
-    const currentNav =
-      getNumber(latestFundMetric, ["current_nav"]) ||
-      currentFairValue ||
-      migrationFundCommitted;
-
-    const legacyUpcomingRepayments = debtRepayments.filter(
-      (row) => getString(row, ["payment_status"], "") === "upcoming"
-    ).length;
-
-    const upcomingRepayments =
-      migrationRepaymentCount || migratedRepaymentRows || legacyUpcomingRepayments;
-
-    const overdueRepayments = debtRepayments.filter(
-      (row) => getString(row, ["payment_status"], "") === "overdue"
-    ).length;
-
-    const openPortfolioAlerts = portfolioNewsAlerts.filter(
-      (row) => getString(row, ["status"], "") === "open"
-    ).length;
-
-    const legacyHighRiskMetrics = portfolioCompanyMetrics.filter((row) => {
-      const risk = getString(row, ["risk_rating"], "").toLowerCase();
-      const performance = getString(
-        row,
-        ["performance_status"],
-        ""
-      ).toLowerCase();
-
-      return risk === "high" || performance === "below_plan";
-    }).length;
-
-    const highRiskMetrics =
-      migrationAtRiskCount || migratedAtRiskRows || legacyHighRiskMetrics;
-
-    return {
-      totalCommitted,
-      totalCalled,
-      totalDistributed,
-      uncalledCapital,
-      deploymentRate,
-      activeFunds: migrationFundCount || funds.length,
-      investors: migrationInvestorCount || investors.length,
-      pendingCapitalCalls: draftCapitalCalls.length,
-      pendingDistributions: draftDistributions.length,
-      pendingRegulatoryReviews: Math.max(
-        regulatoryMatches.length,
-        migrationComplianceReview,
-        migratedComplianceReviewRows
-      ),
-      generatedDocuments: Math.max(investorDocuments.length, migrationPdfCount),
-      storedDocuments,
-      queuedEmails,
-      sentEmails,
-      highImpactCirculars,
-
-      totalInvestmentCost,
-      currentFairValue,
-      realizedValue,
-      unrealizedValue,
-      grossIrr,
-      netIrr,
-      dpi,
-      tvpi,
-      moic,
-      currentNav,
-      portfolioCompanies:
-        migratedPortfolioCompanyNames.size ||
-        migrationPortfolioCount ||
-        portfolioCompanies.length,
-      fundInvestments: migrationPortfolioCount || fundInvestments.length,
-      upcomingRepayments,
-      overdueRepayments,
-      openPortfolioAlerts,
-      highRiskMetrics,
-      expectedExitValue:
-        migrationExpectedExitValue || migratedExpectedExitValue,
-      migrationPdfReviewCount,
-      migrationAverageCarry,
-      migrationComplianceItems,
-    };
-  }, [
-    commitments,
-    capitalCalls,
-    distributions,
-    funds,
-    investors,
-    investorDocuments,
-    regulatoryMatches,
-    regulatoryCirculars,
-    fundInvestments,
-    fundPerformanceMetrics,
-    debtRepayments,
-    portfolioNewsAlerts,
-    portfolioCompanyMetrics,
-    portfolioCompanies,
-    latestInvestorBatch,
-    latestPdfBatch,
-    latestPortfolioBatch,
-    latestFundBatch,
-    latestComplianceBatch,
-    migratedPortfolioInvestments,
-    migratedComplianceItems,
+  const migrationInvestorCount = getNumber(latestInvestorBatch ?? undefined, [
+    "total_records",
   ]);
+
+  const migrationInvestorCommitment = getNumber(
+    latestInvestorBatch ?? undefined,
+    ["total_commitment"]
+  );
+
+  const migrationPdfCount = getNumber(latestPdfBatch ?? undefined, [
+    "total_files",
+  ]);
+
+  const migrationPdfReviewCount =
+    getNumber(latestPdfBatch ?? undefined, ["review_files"]) +
+    getNumber(latestPdfBatch ?? undefined, ["unmatched_files"]);
+
+  const migrationPortfolioCount = getNumber(
+    latestPortfolioBatch ?? undefined,
+    ["total_records"]
+  );
+
+  const migrationPortfolioCost = getNumber(
+    latestPortfolioBatch ?? undefined,
+    ["total_investment_cost"]
+  );
+
+  const migrationPortfolioValue = getNumber(
+    latestPortfolioBatch ?? undefined,
+    ["current_portfolio_value"]
+  );
+
+  const migrationRealizedValue = getNumber(
+    latestPortfolioBatch ?? undefined,
+    ["realised_value", "realized_value"]
+  );
+
+  const migrationExpectedExitValue = getNumber(
+    latestPortfolioBatch ?? undefined,
+    ["expected_exit_value"]
+  );
+
+  const migrationPortfolioMoic = getNumber(
+    latestPortfolioBatch ?? undefined,
+    ["portfolio_moic"]
+  );
+
+  const migrationAtRiskCount = getNumber(latestPortfolioBatch ?? undefined, [
+    "at_risk_count",
+  ]);
+
+  const migrationRepaymentCount = getNumber(
+    latestPortfolioBatch ?? undefined,
+    ["repayment_count"]
+  );
+
+  const migrationFundCount = getNumber(latestFundBatch ?? undefined, [
+    "total_funds",
+  ]);
+
+  const migrationFundCommitted = getNumber(latestFundBatch ?? undefined, [
+    "total_committed_capital",
+  ]);
+
+  const migrationAverageCarry = getNumber(latestFundBatch ?? undefined, [
+    "average_carry",
+  ]);
+
+  const migrationComplianceItems = getNumber(
+    latestComplianceBatch ?? undefined,
+    ["total_items"]
+  );
+
+  const migrationComplianceReview = getNumber(
+    latestComplianceBatch ?? undefined,
+    ["pending_review_count"]
+  );
+
+  const migrationComplianceHighRisk = getNumber(
+    latestComplianceBatch ?? undefined,
+    ["high_risk_count"]
+  );
+
+  const migratedInvestorCount = migratedInvestorMaster.length;
+
+  const migratedCommitmentTotal = migratedFundCommitments.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "commitment_amount",
+        "committed_amount",
+        "commitment",
+        "amount",
+      ]),
+    0
+  );
+
+  const migratedCapitalCalled = migratedFinancialPositions.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "capital_called",
+        "capital_called_till_date",
+        "called_capital",
+      ]),
+    0
+  );
+
+  const migratedUncalledCapital = migratedFinancialPositions.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "uncalled_capital",
+        "remaining_commitment",
+        "dry_powder",
+      ]),
+    0
+  );
+
+  const migratedDistributions = migratedFinancialPositions.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "distributions",
+        "distributions_till_date",
+        "distributed",
+      ]),
+    0
+  );
+
+  const migratedNav = migratedFinancialPositions.reduce(
+    (sum, row) => sum + getNumber(row, ["nav", "latest_nav", "current_nav"]),
+    0
+  );
+
+  const migratedGrossIrr = averageFromRows(migratedFinancialPositions, [
+    "gross_irr",
+    "irr",
+  ]);
+
+  const migratedNetIrr = averageFromRows(migratedFinancialPositions, [
+    "net_irr",
+  ]);
+
+  const migratedDpi = averageFromRows(migratedFinancialPositions, ["dpi"]);
+
+  const migratedTvpi = averageFromRows(migratedFinancialPositions, ["tvpi"]);
+
+  const migratedMoic = averageFromRows(migratedFinancialPositions, [
+    "moic",
+    "tvpi",
+  ]);
+
+  const migratedPortfolioCompanyNames = new Set(
+    migratedPortfolioInvestments
+      .map((row) => getString(row, ["portfolio_company"], ""))
+      .filter(Boolean)
+  );
+
+  const migratedInvestmentCost = migratedPortfolioInvestments.reduce(
+    (sum, row) => sum + getNumber(row, ["investment_cost"]),
+    0
+  );
+
+  const migratedCurrentValue = migratedPortfolioInvestments.reduce(
+    (sum, row) => sum + getNumber(row, ["current_value"]),
+    0
+  );
+
+  const migratedRealizedValue = migratedPortfolioInvestments.reduce(
+    (sum, row) => sum + getNumber(row, ["realised_value", "realized_value"]),
+    0
+  );
+
+  const migratedExpectedExitValue = migratedPortfolioInvestments.reduce(
+    (sum, row) => sum + getNumber(row, ["expected_exit_value"]),
+    0
+  );
+
+  const migratedAtRiskRows = migratedPortfolioInvestments.filter((row) => {
+    const riskStatus = getString(row, ["risk_status"], "").toLowerCase();
+
+    return (
+      riskStatus.includes("risk") ||
+      riskStatus.includes("watch") ||
+      riskStatus.includes("attention")
+    );
+  }).length;
+
+  const migratedRepaymentRows = migratedPortfolioInvestments.filter((row) =>
+    Boolean(getString(row, ["repayment_due_date"], ""))
+  ).length;
+
+  const migratedComplianceReviewRows = migratedComplianceItems.filter((row) => {
+    const status = getString(row, ["filing_status", "migration_status"], "")
+      .toLowerCase();
+
+    return status === "pending" || status === "review" || status === "overdue";
+  }).length;
+
+  const migratedComplianceHighRiskRows = migratedComplianceItems.filter(
+    (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
+  ).length;
+
+  const legacyTotalCommitted = commitments.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "commitment_amount",
+        "committed_amount",
+        "commitment",
+        "amount",
+      ]),
+    0
+  );
+
+  const totalCommitted =
+    migrationInvestorCommitment ||
+    migratedCommitmentTotal ||
+    migrationFundCommitted ||
+    legacyTotalCommitted;
+
+  const approvedCapitalCalls = capitalCalls.filter(isApproved);
+  const draftCapitalCalls = capitalCalls.filter(isDraft);
+
+  const legacyTotalCalled = approvedCapitalCalls.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "capital_call_amount",
+        "call_amount",
+        "total_amount",
+        "amount",
+      ]),
+    0
+  );
+
+  const totalCalled = migratedCapitalCalled || legacyTotalCalled;
+
+  const approvedDistributions = distributions.filter(isApproved);
+  const draftDistributions = distributions.filter(isDraft);
+
+  const legacyTotalDistributed = approvedDistributions.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "distribution_amount",
+        "total_distribution_amount",
+        "amount",
+      ]),
+    0
+  );
+
+  const totalDistributed = migratedDistributions || legacyTotalDistributed;
+
+  const uncalledCapital =
+    migratedUncalledCapital || Math.max(totalCommitted - totalCalled, 0);
+
+  const deploymentRate =
+    totalCommitted > 0 ? (totalCalled / totalCommitted) * 100 : 0;
+
+  const legacyStoredDocuments = investorDocuments.filter((row) =>
+    Boolean(getString(row, ["storage_url", "storage_path"], ""))
+  ).length;
+
+  const storedDocuments = Math.max(
+    legacyStoredDocuments,
+    investorDocuments.length,
+    migrationPdfCount,
+    migratedPdfDocuments.length
+  );
+
+  const queuedEmails = investorDocuments.filter(
+    (row) => getString(row, ["email_status"], "") === "queued"
+  ).length;
+
+  const sentEmails = investorDocuments.filter(
+    (row) => getString(row, ["email_status"], "") === "sent"
+  ).length;
+
+  const highImpactCirculars = Math.max(
+    regulatoryCirculars.filter(
+      (row) => getString(row, ["impact"], "").toUpperCase() === "HIGH"
+    ).length,
+    migrationComplianceHighRisk,
+    migratedComplianceHighRiskRows
+  );
+
+  const legacyInvestmentCost = fundInvestments.reduce(
+    (sum, row) => sum + getNumber(row, ["original_investment_amount"]),
+    0
+  );
+
+  const totalInvestmentCost =
+    migrationPortfolioCost || migratedInvestmentCost || legacyInvestmentCost;
+
+  const legacyCurrentFairValue = fundInvestments.reduce(
+    (sum, row) => sum + getNumber(row, ["current_fair_value"]),
+    0
+  );
+
+  const currentFairValue =
+    migrationPortfolioValue || migratedCurrentValue || legacyCurrentFairValue;
+
+  const legacyRealizedValue = fundInvestments.reduce(
+    (sum, row) => sum + getNumber(row, ["realized_value"]),
+    0
+  );
+
+  const realizedValue =
+    migrationRealizedValue || migratedRealizedValue || legacyRealizedValue;
+
+  const legacyUnrealizedValue = fundInvestments.reduce(
+    (sum, row) => sum + getNumber(row, ["unrealized_value"]),
+    0
+  );
+
+  const unrealizedValue =
+    currentFairValue > 0 && totalInvestmentCost > 0
+      ? currentFairValue - totalInvestmentCost
+      : legacyUnrealizedValue;
+
+  const latestFundMetric = fundPerformanceMetrics[0];
+
+  const grossIrr =
+    migratedGrossIrr || getNumber(latestFundMetric, ["gross_irr"]);
+
+  const netIrr = migratedNetIrr || getNumber(latestFundMetric, ["net_irr"]);
+
+  const dpi = migratedDpi || getNumber(latestFundMetric, ["dpi"]);
+
+  const tvpi = migratedTvpi || getNumber(latestFundMetric, ["tvpi"]);
+
+  const moic =
+    migrationPortfolioMoic ||
+    migratedMoic ||
+    getNumber(latestFundMetric, ["moic"]);
+
+  const currentNav =
+    migratedNav ||
+    getNumber(latestFundMetric, ["current_nav"]) ||
+    currentFairValue ||
+    migrationFundCommitted;
+
+  const legacyUpcomingRepayments = debtRepayments.filter(
+    (row) => getString(row, ["payment_status"], "") === "upcoming"
+  ).length;
+
+  const upcomingRepayments =
+    migrationRepaymentCount || migratedRepaymentRows || legacyUpcomingRepayments;
+
+  const overdueRepayments = debtRepayments.filter(
+    (row) => getString(row, ["payment_status"], "") === "overdue"
+  ).length;
+
+  const openPortfolioAlerts = portfolioNewsAlerts.filter(
+    (row) => getString(row, ["status"], "") === "open"
+  ).length;
+
+  const legacyHighRiskMetrics = portfolioCompanyMetrics.filter((row) => {
+    const risk = getString(row, ["risk_rating"], "").toLowerCase();
+    const performance = getString(row, ["performance_status"], "").toLowerCase();
+
+    return risk === "high" || performance === "below_plan";
+  }).length;
+
+  const highRiskMetrics =
+    migrationAtRiskCount || migratedAtRiskRows || legacyHighRiskMetrics;
+
+  return {
+    totalCommitted,
+    totalCalled,
+    totalDistributed,
+    uncalledCapital,
+    deploymentRate,
+    activeFunds: migratedFundMaster.length || migrationFundCount || funds.length,
+    investors: migratedInvestorCount || migrationInvestorCount || investors.length,
+    pendingCapitalCalls: draftCapitalCalls.length,
+    pendingDistributions: draftDistributions.length,
+    pendingRegulatoryReviews: Math.max(
+      regulatoryMatches.length,
+      migrationComplianceReview,
+      migratedComplianceReviewRows
+    ),
+    generatedDocuments: Math.max(
+      investorDocuments.length,
+      migrationPdfCount,
+      migratedPdfDocuments.length
+    ),
+    storedDocuments,
+    queuedEmails,
+    sentEmails,
+    highImpactCirculars,
+
+    totalInvestmentCost,
+    currentFairValue,
+    realizedValue,
+    unrealizedValue,
+    grossIrr,
+    netIrr,
+    dpi,
+    tvpi,
+    moic,
+    currentNav,
+    portfolioCompanies:
+      migratedPortfolioCompanyNames.size ||
+      migrationPortfolioCount ||
+      portfolioCompanies.length,
+    fundInvestments: migrationPortfolioCount || migratedPortfolioInvestments.length || fundInvestments.length,
+    upcomingRepayments,
+    overdueRepayments,
+    openPortfolioAlerts,
+    highRiskMetrics,
+    expectedExitValue: migrationExpectedExitValue || migratedExpectedExitValue,
+    migrationPdfReviewCount,
+    migrationAverageCarry,
+    migrationComplianceItems,
+  };
+}, [
+  commitments,
+  capitalCalls,
+  distributions,
+  funds,
+  investors,
+  investorDocuments,
+  regulatoryMatches,
+  regulatoryCirculars,
+  fundInvestments,
+  fundPerformanceMetrics,
+  debtRepayments,
+  portfolioNewsAlerts,
+  portfolioCompanyMetrics,
+  portfolioCompanies,
+  latestInvestorBatch,
+  latestPdfBatch,
+  latestPortfolioBatch,
+  latestFundBatch,
+  latestComplianceBatch,
+  migratedInvestorMaster,
+  migratedFundCommitments,
+  migratedFinancialPositions,
+  migratedFundMaster,
+  migratedPortfolioInvestments,
+  migratedComplianceItems,
+  migratedPdfDocuments,
+]);
   const connectedActivityEvents = useMemo(() => {
     const events: ConnectedActivityEvent[] = [];
 
@@ -1911,6 +2043,51 @@ async function handleGeneratePowerPoint() {
                       <div className="sample-data-ribbon">
               Live workspace preview · Reading migrated investor, PDF, portfolio, fund and compliance records
             </div>
+            <div className="preview-card">
+  <div className="section-heading-row">
+    <div>
+      <p className="eyebrow">Migration Data Connected</p>
+      <h2>Live migrated data is now powering this dashboard</h2>
+    </div>
+
+    <button
+      className="monitor-btn monitor-btn-secondary"
+      onClick={loadManagingPartnerDashboard}
+      type="button"
+    >
+      Refresh Dashboard Data
+    </button>
+  </div>
+
+  <div className="impact-grid">
+    <div className="impact-card">
+      <h3>{migratedInvestorMaster.length}</h3>
+      <p>Investor master records</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>{migratedFundCommitments.length}</h3>
+      <p>Commitment records</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>{migratedPortfolioInvestments.length}</h3>
+      <p>Portfolio records</p>
+    </div>
+
+    <div className="impact-card">
+      <h3>{investorDocuments.length}</h3>
+      <p>Published investor PDFs</p>
+    </div>
+  </div>
+
+  <div className="explain-box">
+    This page now reads directly from investor_master, fund_commitments,
+    investor_financial_positions, portfolio_investments, compliance_items and
+    investor_documents. Migration is now feeding the real Managing Partner
+    dashboard, not only the migration screens.
+  </div>
+</div>
             <div className="preview-card">
               <h2>Managing Partner Workspace Preview</h2>
 
