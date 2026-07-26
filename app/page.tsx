@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
+import { isSupabaseConfigured, supabase } from "../lib/supabaseClient";
 
 export default function Home() {
   const [isDemoOpen, setIsDemoOpen] = useState(false);
@@ -15,6 +16,9 @@ export default function Home() {
     primaryInterest: "",
     message: "",
   });
+  const [isSubmittingDemo, setIsSubmittingDemo] = useState(false);
+const [demoSubmitMessage, setDemoSubmitMessage] = useState("");
+const [demoSubmitError, setDemoSubmitError] = useState("");
 
   const workspacePreviews = [
     {
@@ -286,31 +290,56 @@ export default function Home() {
   const [selectedWorkspaceIndex, setSelectedWorkspaceIndex] = useState(0);
   const selectedWorkspace = workspacePreviews[selectedWorkspaceIndex];
 
-  function handleDemoSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleDemoSubmit(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault();
 
-    const subject = encodeURIComponent("VENTIQ Walkthrough Request");
+  setDemoSubmitMessage("");
+  setDemoSubmitError("");
 
-    const body = encodeURIComponent(
-      `New VENTIQ walkthrough request:
-
-Name: ${demoForm.name}
-Email: ${demoForm.email}
-Phone: ${demoForm.phone}
-Company / Fund: ${demoForm.company}
-Role: ${demoForm.role}
-Firm Type: ${demoForm.firmType}
-Primary Interest: ${demoForm.primaryInterest}
-
-Message:
-${demoForm.message}
-
-Source: useventiq.com`
+  if (!isSupabaseConfigured || !supabase) {
+    setDemoSubmitError(
+      "Unable to save the walkthrough request right now. Please try again in some time."
     );
-
-    window.location.href = `mailto:shubham81079@gmail.com?subject=${subject}&body=${body}`;
-    setIsDemoOpen(false);
+    return;
   }
+
+  setIsSubmittingDemo(true);
+
+  const { error } = await supabase.from("walkthrough_requests").insert({
+    name: demoForm.name.trim(),
+    email: demoForm.email.trim(),
+    phone: demoForm.phone.trim(),
+    company: demoForm.company.trim(),
+    role: demoForm.role.trim(),
+    firm_type: demoForm.firmType,
+    primary_interest: demoForm.primaryInterest,
+    message: demoForm.message.trim(),
+    source: "useventiq.com",
+    status: "New",
+  });
+
+  setIsSubmittingDemo(false);
+
+  if (error) {
+    setDemoSubmitError(error.message);
+    return;
+  }
+
+  setDemoSubmitMessage(
+    "Thanks. Your walkthrough request has been received. I will reach out shortly."
+  );
+
+  setDemoForm({
+    name: "",
+    email: "",
+    phone: "",
+    company: "",
+    role: "",
+    firmType: "",
+    primaryInterest: "",
+    message: "",
+  });
+}
 
   const structuredData = {
     "@context": "https://schema.org",
@@ -1470,7 +1499,17 @@ Source: useventiq.com`
                 ×
               </button>
             </div>
+{demoSubmitMessage && (
+  <div className="explain-box" style={{ marginBottom: "18px" }}>
+    ✅ {demoSubmitMessage}
+  </div>
+)}
 
+{demoSubmitError && (
+  <div className="explain-box" style={{ marginBottom: "18px" }}>
+    ⚠️ {demoSubmitError}
+  </div>
+)}
             <form className="demo-form" onSubmit={handleDemoSubmit}>
               <div className="demo-form-grid">
                 <label>
@@ -1598,9 +1637,9 @@ Source: useventiq.com`
               </div>
 
               <div className="demo-modal-actions">
-                <button className="btn" type="submit">
-                  Send Walkthrough Request
-                </button>
+                <button className="btn" type="submit" disabled={isSubmittingDemo}>
+  {isSubmittingDemo ? "Saving Request..." : "Send Walkthrough Request"}
+</button>
 
                 <button
                   className="demo-secondary-button"
