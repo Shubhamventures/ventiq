@@ -370,20 +370,17 @@ Source: useventiq.com`
           </a>
 
           <div className="ventiq-header-links">
-            <a href="#why-ventiq">Why VENTIQ</a>
-            <a href="#modules">Stakeholders</a>
-            <a href="#all-workspaces">Engines</a>
-<a href="/migration">Migration</a>
-<a href="#about">About</a>
+  <a href="#why-ventiq">Why VENTIQ</a>
+  <a href="#modules">Stakeholders</a>
+  <a href="#all-workspaces">Engines</a>
+  <a href="/demo">Guided Demo</a>
+  <a href="/migration">Migration</a>
+  <a href="#about">About</a>
 
-            <button
-              className="ventiq-header-cta"
-              type="button"
-              onClick={() => setIsDemoOpen(true)}
-            >
-              Request Walkthrough
-            </button>
-          </div>
+  <a className="ventiq-header-cta" href="/demo">
+    Start Demo
+  </a>
+</div>
         </header>
 
         <section className="hero">
@@ -408,22 +405,22 @@ Source: useventiq.com`
   private capital.
 </div>
           <div className="hero-actions">
-            <button
-              className="btn"
-              type="button"
-              onClick={() => setIsDemoOpen(true)}
-            >
-              Request Walkthrough
-            </button>
+  <a className="btn" href="/demo">
+    Start Guided Demo
+  </a>
 
-            <a className="btn-secondary" href="#modules">
-  See Six Dashboards
-</a>
+  <a className="btn-secondary" href="/product-overview">
+    View Product Overview
+  </a>
 
-<a className="btn-secondary" href="/migration">
-  Migration Path
-</a>
-          </div>
+  <button
+    className="btn-secondary"
+    type="button"
+    onClick={() => setIsDemoOpen(true)}
+  >
+    Request Walkthrough
+  </button>
+</div>
         </section>
 
         <div className="hero-metrics">
@@ -452,7 +449,71 @@ Source: useventiq.com`
           </div>
         </div>
 
-        <section className="security-control-strip">
+<section className="section" id="guided-demo">
+  <h2 className="section-title">
+    See how VENTIQ works from data migration to investor portal.
+  </h2>
+
+  <div className="premium-os-card">
+    <div className="premium-os-header">
+      <span>Guided product journey</span>
+
+      <p>
+        Use the guided demo to walk through the full VENTIQ story: upload
+        fund data, classify PDFs, validate readiness, launch stakeholder
+        dashboards and end with the investor-facing portal.
+      </p>
+    </div>
+
+    <div className="roadmap-status-row">
+      <div>
+        <strong>01 · Upload fund data</strong>
+        <p>Investor, fund, portfolio, compliance and PDF records enter VENTIQ.</p>
+      </div>
+
+      <div>
+        <strong>02 · Classify PDFs</strong>
+        <p>Investor documents are matched, reviewed and prepared for publishing.</p>
+      </div>
+
+      <div>
+        <strong>03 · Validate readiness</strong>
+        <p>VENTIQ checks whether the operating data layer is ready for dashboards.</p>
+      </div>
+
+      <div>
+        <strong>04 · Launch dashboards</strong>
+        <p>Managing Partner, Finance, Investment, Compliance and IR views activate.</p>
+      </div>
+
+      <div>
+        <strong>05 · Open investor portal</strong>
+        <p>Investors get clean access to commitments, cashflows and documents.</p>
+      </div>
+    </div>
+
+    <div className="workflow-proof-row">
+      <div>
+        <strong>Best route for a live walkthrough</strong>
+        <p>
+          Start with the migration problem, show PDF intelligence, validate
+          readiness, open role-wise dashboards and close with the investor
+          portal.
+        </p>
+      </div>
+
+      <div className="workflow-proof-pills">
+        <a href="/demo">Start Guided Demo</a>
+        <a href="/migration/data-intake">Data Intake</a>
+        <a href="/migration/pdf-intelligence">PDF Intelligence</a>
+        <a href="/migration/stakeholder-launch">Launch Dashboards</a>
+        <a href="/investor-portal">Investor Portal</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section className="security-control-strip">
           <div className="metric-card trust-card">
             <h3>Single Login Access</h3>
             <p>
@@ -1371,15 +1432,16 @@ Source: useventiq.com`
           <span>© 2026 VENTIQ</span>
 
           <div className="footer-links">
-            <a href="/product-overview">Product Overview</a>
-<a href="/migration">Migration</a>
-<a href="/security">Security</a>
-            <a href="/privacy">Privacy</a>
-            <a href="/terms">Terms</a>
-            <a href="/faq">FAQ</a>
-            <a href="#about">About</a>
-            <a href="#contact">Contact</a>
-          </div>
+  <a href="/demo">Guided Demo</a>
+  <a href="/product-overview">Product Overview</a>
+  <a href="/migration">Migration</a>
+  <a href="/security">Security</a>
+  <a href="/privacy">Privacy</a>
+  <a href="/terms">Terms</a>
+  <a href="/faq">FAQ</a>
+  <a href="#about">About</a>
+  <a href="#contact">Contact</a>
+</div>
 
           <span>One fund. Six stakeholders. One source of truth.</span>
         </footer>
