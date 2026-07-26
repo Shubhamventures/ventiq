@@ -473,7 +473,12 @@ export default function PdfIntelligencePage() {
   );
   const [loadingLatestBatch, setLoadingLatestBatch] = useState(false);
 const [activeBatchName, setActiveBatchName] = useState("");
-  const [deficiencyPeriod, setDeficiencyPeriod] = useState("Q4 FY26");
+const [resetFounderKey, setResetFounderKey] = useState("");
+const [resetConfirmation, setResetConfirmation] = useState("");
+const [resetMessage, setResetMessage] = useState("");
+const [resettingData, setResettingData] = useState(false);
+const [showResetPanel, setShowResetPanel] = useState(false);
+const [deficiencyPeriod, setDeficiencyPeriod] = useState("Q4 FY26");
 const [deficiencyDocumentTypes, setDeficiencyDocumentTypes] = useState<
   string[]
 >(["SOA / Account Statement"]);
@@ -1009,6 +1014,59 @@ setProcessing(false);
 
     setPublishing(false);
   }
+  async function resetPriorMigrationData() {
+  setResetMessage("");
+
+  if (!resetFounderKey.trim()) {
+    setResetMessage("Enter founder key before deleting prior migration data.");
+    return;
+  }
+
+  if (resetConfirmation !== "RESET VENTIQ DATA") {
+    setResetMessage("Type RESET VENTIQ DATA exactly to confirm deletion.");
+    return;
+  }
+
+  setResettingData(true);
+  setResetMessage("Deleting prior migration data. Please wait...");
+
+  try {
+    const response = await fetch("/api/migration/reset-data", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-founder-key": resetFounderKey,
+      },
+      body: JSON.stringify({
+        confirmation: resetConfirmation,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Unable to delete prior migration data.");
+    }
+
+    setResults([]);
+    setReviewDrafts({});
+    setActiveBatchName("");
+    setMessage("Prior migration data deleted. You can upload a fresh dataset.");
+    setPublishMessage("");
+    setResetMessage(
+      "Prior migration data deleted successfully. Go back to Data Intake and upload the new full dataset."
+    );
+    setResetConfirmation("");
+  } catch (error) {
+    setResetMessage(
+      error instanceof Error
+        ? error.message
+        : "Unable to delete prior migration data."
+    );
+  } finally {
+    setResettingData(false);
+  }
+}
 function toggleDeficiencyDocumentType(documentType: string) {
   setDeficiencyDocumentTypes((current) => {
     if (current.includes(documentType)) {
@@ -1166,6 +1224,65 @@ function toggleDeficiencyDocumentType(documentType: string) {
           Actual PDF upload · Text extraction · Investor matching · Confidence
           scoring
         </div>
+        <div className="preview-card">
+  <div className="section-heading-row">
+    <div>
+      <p className="eyebrow">Founder Control</p>
+      <h2>Reset migration data before a fresh upload</h2>
+    </div>
+
+    <button
+      className="monitor-btn monitor-btn-secondary"
+      onClick={() => setShowResetPanel((current) => !current)}
+      type="button"
+    >
+      {showResetPanel ? "Hide Reset Panel" : "Delete Prior Data"}
+    </button>
+  </div>
+
+  <div className="explain-box">
+    Use this only when you want to remove prior uploaded migration data,
+    processed investor records, PDF intelligence batches, portfolio data,
+    fund data and compliance data before uploading a fresh full dataset.
+    Walkthrough leads will not be deleted.
+  </div>
+
+  {showResetPanel && (
+    <div className="demo-form-grid">
+      <label>
+        Founder Key
+        <input
+          placeholder="Enter founder key"
+          type="password"
+          value={resetFounderKey}
+          onChange={(event) => setResetFounderKey(event.target.value)}
+        />
+      </label>
+
+      <label>
+        Confirmation Text
+        <input
+          placeholder="Type RESET VENTIQ DATA"
+          value={resetConfirmation}
+          onChange={(event) => setResetConfirmation(event.target.value)}
+        />
+      </label>
+
+      <div className="action-row">
+        <button
+          className="monitor-btn monitor-btn-primary"
+          disabled={resettingData}
+          onClick={resetPriorMigrationData}
+          type="button"
+        >
+          {resettingData ? "Deleting Prior Data..." : "Confirm Delete Prior Data"}
+        </button>
+      </div>
+    </div>
+  )}
+
+  {resetMessage && <div className="logic-note">{resetMessage}</div>}
+</div>
         <div className="persistence-panel">
   <div>
     <span>Saved batch workspace</span>
@@ -1609,84 +1726,389 @@ function toggleDeficiencyDocumentType(documentType: string) {
           {publishMessage && <div className="logic-note">{publishMessage}</div>}
         </div>
 
-        <div className="preview-card">
-          <h2>Sorting Results</h2>
+       <div className="preview-card">
+  <div className="section-heading-row">
+    <div>
+      <p className="eyebrow">Processed PDF Register</p>
+      <h2>Sorting Results</h2>
+    </div>
 
-          {results.length === 0 && (
-            <div className="logic-note">
-              Upload PDFs above to see classification, investor matching and
-              confidence scoring.
-            </div>
-          )}
+    <span className="status-pill">
+      {results.length} processed PDF{results.length === 1 ? "" : "s"}
+    </span>
+  </div>
 
-          {results.length > 0 && (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>File</th>
-                    <th>Type</th>
-                    <th>Investor</th>
-                    <th>Period</th>
-                    <th>Confidence</th>
-                    <th>Status</th>
-                    <th>Portal</th>
-                  </tr>
-                </thead>
+  {results.length === 0 && (
+    <div className="logic-note">
+      Upload PDFs above to see classification, investor matching and confidence
+      scoring.
+    </div>
+  )}
 
-                <tbody>
-                  {results.map((result) => (
-                    <tr key={result.id}>
-                      <td>
-                        <strong>{result.fileName}</strong>
-                        <br />
-                        {formatFileSize(result.fileSize)}
-                      </td>
-                      <td>{result.documentType}</td>
-                      <td>
-                        {result.investorName}
-                        <br />
-                        {result.investorCode}
-                      </td>
-                      <td>{result.periodLabel}</td>
-                      <td>{result.confidenceScore}%</td>
-                      <td>{result.status}</td>
-                      <td>{result.published ? "Published" : "Not published"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+  {results.length > 0 && (
+    <div
+      style={{
+        display: "grid",
+        gap: "12px",
+      }}
+    >
+      {results.slice(0, 80).map((result) => (
+        <div
+          key={result.id}
+          style={{
+            border: "1px solid rgba(148, 163, 184, 0.18)",
+            borderRadius: "18px",
+            background: "rgba(2, 6, 23, 0.48)",
+            padding: "14px",
+            display: "grid",
+            gridTemplateColumns:
+              "minmax(260px, 2.2fr) minmax(140px, 1fr) minmax(150px, 1fr) minmax(90px, 0.6fr) minmax(90px, 0.6fr) minmax(100px, 0.7fr)",
+            gap: "14px",
+            alignItems: "center",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <strong
+              style={{
+                display: "block",
+                wordBreak: "break-word",
+                lineHeight: "1.35",
+              }}
+            >
+              {result.fileName}
+            </strong>
+
+            <span
+              style={{
+                display: "block",
+                marginTop: "5px",
+                color: "rgba(219, 234, 254, 0.72)",
+                fontSize: "0.82rem",
+              }}
+            >
+              {formatFileSize(result.fileSize)}
+            </span>
+          </div>
+
+          <div>
+            <small>Document Type</small>
+            <strong
+              style={{
+                display: "block",
+                marginTop: "4px",
+                lineHeight: "1.3",
+              }}
+            >
+              {result.documentType}
+            </strong>
+          </div>
+
+          <div>
+            <small>Investor</small>
+            <strong
+              style={{
+                display: "block",
+                marginTop: "4px",
+                lineHeight: "1.3",
+              }}
+            >
+              {result.investorName}
+            </strong>
+            <span>{result.investorCode}</span>
+          </div>
+
+          <div>
+            <small>Period</small>
+            <strong
+              style={{
+                display: "block",
+                marginTop: "4px",
+              }}
+            >
+              {result.periodLabel}
+            </strong>
+          </div>
+
+          <div>
+            <small>Confidence</small>
+            <strong
+              style={{
+                display: "block",
+                marginTop: "4px",
+              }}
+            >
+              {result.confidenceScore}%
+            </strong>
+          </div>
+
+          <div>
+            <small>Status</small>
+            <span
+              className="status-pill"
+              style={{
+                display: "inline-flex",
+                marginTop: "4px",
+              }}
+            >
+              {result.status}
+            </span>
+
+            <span
+              style={{
+                display: "block",
+                marginTop: "6px",
+                color: "rgba(219, 234, 254, 0.72)",
+                fontSize: "0.82rem",
+              }}
+            >
+              {result.published ? "Published" : "Not published"}
+            </span>
+          </div>
         </div>
+      ))}
 
-        {results.length > 0 && (
-          <div className="preview-card">
-            <h2>Review Queue & Signals</h2>
+      {results.length > 80 && (
+        <div className="logic-note">
+          Showing first 80 PDFs for performance. Total processed PDFs:{" "}
+          {results.length}.
+        </div>
+      )}
+    </div>
+  )}
+</div>
+       {results.length > 0 && (
+  <div className="preview-card">
+    <div className="section-heading-row">
+      <div>
+        <p className="eyebrow">Classification Output</p>
+        <h2>PDF Matching Results & Signals</h2>
+      </div>
 
-            <div className="queue-grid">
-              {results.slice(0, 8).map((result) => (
-                <div className="queue-item" key={`${result.id}-signals`}>
-                  <strong>{result.fileName}</strong>
-                  <br />
-                  Status: {result.status}
-                  <br />
-                  Storage: {result.storagePath}
-                  <br />
-                  Portal: {result.published ? "Published" : "Not published"}
-                  <br />
-                  <br />
-                  {result.signals.map((signal) => (
-                    <span key={signal}>
-                      {signal}
-                      <br />
-                    </span>
-                  ))}
+      <span className="status-pill">
+        Showing latest {Math.min(results.length, 12)} of {results.length} PDFs
+      </span>
+    </div>
+
+    <div className="explain-box">
+      This view shows how VENTIQ classified each PDF, matched the investor,
+      detected the period and assigned confidence before portal publishing.
+    </div>
+
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+        gap: "18px",
+      }}
+    >
+      {results.slice(0, 12).map((result) => (
+        <div
+          key={`${result.id}-signals`}
+          style={{
+            border: "1px solid rgba(148, 163, 184, 0.22)",
+            borderRadius: "22px",
+            background: "rgba(2, 6, 23, 0.62)",
+            padding: "18px",
+            minWidth: 0,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "12px",
+              alignItems: "flex-start",
+              marginBottom: "14px",
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <strong
+                style={{
+                  display: "block",
+                  fontSize: "0.95rem",
+                  lineHeight: "1.35",
+                  wordBreak: "break-word",
+                }}
+              >
+                {result.fileName}
+              </strong>
+
+              <span
+                style={{
+                  display: "block",
+                  marginTop: "6px",
+                  color: "rgba(219, 234, 254, 0.72)",
+                  fontSize: "0.8rem",
+                }}
+              >
+                {formatFileSize(result.fileSize)}
+              </span>
+            </div>
+
+            <span
+              className="status-pill"
+              style={{
+                whiteSpace: "nowrap",
+              }}
+            >
+              {result.status}
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "10px",
+              marginBottom: "14px",
+            }}
+          >
+            <div
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.16)",
+                borderRadius: "14px",
+                padding: "10px",
+              }}
+            >
+              <small>Investor</small>
+              <strong
+                style={{
+                  display: "block",
+                  marginTop: "4px",
+                  wordBreak: "break-word",
+                }}
+              >
+                {result.investorName}
+              </strong>
+              <span>{result.investorCode}</span>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.16)",
+                borderRadius: "14px",
+                padding: "10px",
+              }}
+            >
+              <small>Confidence</small>
+              <strong
+                style={{
+                  display: "block",
+                  marginTop: "4px",
+                }}
+              >
+                {result.confidenceScore}%
+              </strong>
+              <span>{result.published ? "Published" : "Not published"}</span>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.16)",
+                borderRadius: "14px",
+                padding: "10px",
+              }}
+            >
+              <small>Document Type</small>
+              <strong
+                style={{
+                  display: "block",
+                  marginTop: "4px",
+                  wordBreak: "break-word",
+                }}
+              >
+                {result.documentType}
+              </strong>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.16)",
+                borderRadius: "14px",
+                padding: "10px",
+              }}
+            >
+              <small>Period</small>
+              <strong
+                style={{
+                  display: "block",
+                  marginTop: "4px",
+                  wordBreak: "break-word",
+                }}
+              >
+                {result.periodLabel}
+              </strong>
+            </div>
+          </div>
+
+          <details>
+            <summary
+              style={{
+                cursor: "pointer",
+                color: "#93c5fd",
+                fontWeight: 800,
+                marginBottom: "10px",
+              }}
+            >
+              View matching signals
+            </summary>
+
+            <div
+              style={{
+                display: "grid",
+                gap: "8px",
+                marginTop: "12px",
+              }}
+            >
+              {result.signals.map((signal, signalIndex) => (
+                <div
+                  key={`${result.id}-signal-${signalIndex}`}
+                  style={{
+                    border: "1px solid rgba(96, 165, 250, 0.16)",
+                    borderRadius: "12px",
+                    padding: "9px 10px",
+                    color: "rgba(219, 234, 254, 0.86)",
+                    fontSize: "0.85rem",
+                    lineHeight: "1.45",
+                  }}
+                >
+                  {signal}
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          </details>
+
+          <details style={{ marginTop: "12px" }}>
+            <summary
+              style={{
+                cursor: "pointer",
+                color: "#93c5fd",
+                fontWeight: 800,
+              }}
+            >
+              Storage path
+            </summary>
+
+            <div
+              style={{
+                marginTop: "10px",
+                border: "1px solid rgba(148, 163, 184, 0.14)",
+                borderRadius: "12px",
+                padding: "10px",
+                color: "rgba(219, 234, 254, 0.7)",
+                fontSize: "0.78rem",
+                lineHeight: "1.45",
+                wordBreak: "break-all",
+              }}
+            >
+              {result.storagePath}
+            </div>
+          </details>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
 
         <div className="preview-card">
           <h2>Next Commercial Upgrade</h2>
