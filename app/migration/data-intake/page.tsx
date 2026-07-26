@@ -2,21 +2,20 @@
 
 import { useMemo, useState } from "react";
 
-type IntakeCategory =
-  | "pdf"
-  | "investor"
-  | "portfolio"
-  | "fund"
-  | "compliance";
+type IntakeCategory = "pdf" | "investor" | "portfolio" | "fund" | "compliance";
+
+type UploadStatus = "Staged" | "Uploading" | "Uploaded" | "Failed" | "Review";
 
 type UploadedFile = {
   id: string;
+  file: File;
   name: string;
   size: number;
   category: IntakeCategory;
   detectedType: string;
-  status: "Ready" | "Review";
+  status: UploadStatus;
   note: string;
+  error?: string;
 };
 
 type TemplateType = "investor" | "portfolio" | "fund" | "compliance";
@@ -78,28 +77,36 @@ function detectPdfType(fileName: string) {
   return "Other / Review";
 }
 
+function getCategoryLabel(category: IntakeCategory) {
+  if (category === "pdf") return "PDF Dump";
+  if (category === "investor") return "Investor Data";
+  if (category === "portfolio") return "Portfolio / Investment Data";
+  if (category === "fund") return "Fund Data";
+  return "Compliance & Evidence";
+}
+
 function getUploadNote(category: IntakeCategory, detectedType: string) {
   if (category === "pdf") {
     if (detectedType === "Other / Review") {
-      return "Needs manual review before publishing.";
+      return "Uploaded to intake. Needs PDF Intelligence review.";
     }
 
-    return "Ready for classification and investor matching.";
+    return "Uploaded to intake. Ready for PDF Intelligence matching.";
   }
 
   if (category === "investor") {
-    return "Will power Investor Portal, capital calls, distributions and IR metrics.";
+    return "Uploaded to intake. Should be processed before PDF matching.";
   }
 
   if (category === "portfolio") {
-    return "Will power Portfolio Intelligence, MP dashboard and exit analysis.";
+    return "Uploaded to intake. Will power investment, portfolio and MP dashboards.";
   }
 
   if (category === "fund") {
-    return "Will power fund setup, fee engine, carry, waterfall and compliance calendar.";
+    return "Uploaded to intake. Will power fund setup, fees, waterfall and compliance.";
   }
 
-  return "Will power compliance evidence, audit trail and exception tracking.";
+  return "Uploaded to intake. Will power compliance evidence and audit trail.";
 }
 
 function getTemplateRows(template: TemplateType) {
@@ -277,17 +284,11 @@ function downloadTemplate(template: TemplateType) {
   URL.revokeObjectURL(url);
 }
 
-function getCategoryLabel(category: IntakeCategory) {
-  if (category === "pdf") return "All PDFs";
-  if (category === "investor") return "Investor Data";
-  if (category === "portfolio") return "Portfolio Data";
-  if (category === "fund") return "Fund Data";
-  return "Compliance & Other Data";
-}
-
 export default function DataIntakeCommandCenterPage() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [message, setMessage] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const [batchId, setBatchId] = useState("");
 
   function handleFilesSelected(
     category: IntakeCategory,
@@ -297,54 +298,138 @@ export default function DataIntakeCommandCenterPage() {
 
     const newFiles: UploadedFile[] = Array.from(fileList).map((file) => {
       const detectedType =
-        category === "pdf"
-          ? detectPdfType(file.name)
-          : getCategoryLabel(category);
+        category === "pdf" ? detectPdfType(file.name) : getCategoryLabel(category);
 
       return {
         id: `${category}-${file.name}-${file.lastModified}-${file.size}`,
+        file,
         name: file.name,
         size: file.size,
         category,
         detectedType,
-        status: detectedType === "Other / Review" ? "Review" : "Ready",
+        status: detectedType === "Other / Review" ? "Review" : "Staged",
         note: getUploadNote(category, detectedType),
       };
     });
 
     setUploadedFiles((current) => [...newFiles, ...current]);
-    setMessage(`${newFiles.length} file(s) added to intake preview.`);
+    setMessage(`${newFiles.length} file(s) staged. Click Upload Migration Data to save.`);
+  }
+
+  function removeFile(fileId: string) {
+    setUploadedFiles((current) => current.filter((file) => file.id !== fileId));
+  }
+
+  async function uploadMigrationData() {
+    const filesToUpload = uploadedFiles.filter(
+      (file) => file.status !== "Uploaded"
+    );
+
+    if (filesToUpload.length === 0) {
+      setMessage("All selected files are already uploaded.");
+      return;
+    }
+
+    setIsUploading(true);
+    setMessage("Uploading migration files. Please wait...");
+
+    setUploadedFiles((current) =>
+      current.map((file) =>
+        file.status === "Uploaded" ? file : { ...file, status: "Uploading" }
+      )
+    );
+
+    const formData = new FormData();
+    formData.append("batchName", `VENTIQ Full Migration Intake ${new Date().toLocaleString("en-IN")}`);
+
+    filesToUpload.forEach((file) => {
+      formData.append("files", file.file);
+      formData.append("categories", file.category);
+      formData.append("detectedTypes", file.detectedType);
+      formData.append("clientIds", file.id);
+      formData.append("notes", file.note);
+    });
+
+    try {
+      const response = await fetch("/api/migration/intake-upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Upload failed.");
+      }
+
+      setBatchId(result.batchId || "");
+
+      setUploadedFiles((current) =>
+        current.map((file) => {
+          const uploadedResult = result.uploadedFiles?.find(
+            (item: { clientId: string }) => item.clientId === file.id
+          );
+
+          if (!uploadedResult) {
+            return file;
+          }
+
+          if (uploadedResult.status === "Uploaded") {
+            return {
+              ...file,
+              status: "Uploaded",
+              error: "",
+            };
+          }
+
+          return {
+            ...file,
+            status: "Failed",
+            error: uploadedResult.error || "Upload failed.",
+          };
+        })
+      );
+
+      setMessage(
+        `${result.uploadedCount} of ${result.totalFiles} file(s) uploaded successfully.`
+      );
+    } catch (error) {
+      setUploadedFiles((current) =>
+        current.map((file) =>
+          file.status === "Uploading"
+            ? {
+                ...file,
+                status: "Failed",
+                error:
+                  error instanceof Error ? error.message : "Upload failed.",
+              }
+            : file
+        )
+      );
+
+      setMessage(error instanceof Error ? error.message : "Upload failed.");
+    } finally {
+      setIsUploading(false);
+    }
   }
 
   const metrics = useMemo(() => {
     const pdfFiles = uploadedFiles.filter((file) => file.category === "pdf");
-
     const investorFiles = uploadedFiles.filter(
       (file) => file.category === "investor"
     );
-
     const portfolioFiles = uploadedFiles.filter(
       (file) => file.category === "portfolio"
     );
-
     const fundFiles = uploadedFiles.filter((file) => file.category === "fund");
-
     const complianceFiles = uploadedFiles.filter(
       (file) => file.category === "compliance"
     );
-
+    const uploadedCount = uploadedFiles.filter(
+      (file) => file.status === "Uploaded"
+    ).length;
     const reviewFiles = uploadedFiles.filter((file) => file.status === "Review");
-
-    const readyFiles = uploadedFiles.filter((file) => file.status === "Ready");
-
-    const expectedQuarterlySoa = 2400;
-    const detectedSoa = Math.min(
-      pdfFiles.filter((file) => file.detectedType === "SOA / Account Statement")
-        .length,
-      expectedQuarterlySoa
-    );
-
-    const missingSoa = Math.max(expectedQuarterlySoa - detectedSoa, 0);
+    const failedFiles = uploadedFiles.filter((file) => file.status === "Failed");
 
     return {
       totalFiles: uploadedFiles.length,
@@ -353,23 +438,20 @@ export default function DataIntakeCommandCenterPage() {
       portfolioFiles: portfolioFiles.length,
       fundFiles: fundFiles.length,
       complianceFiles: complianceFiles.length,
+      uploadedCount,
       reviewFiles: reviewFiles.length,
-      readyFiles: readyFiles.length,
-      missingSoa,
+      failedFiles: failedFiles.length,
+      isInvestorReady: investorFiles.length > 0,
+      isPortfolioReady: portfolioFiles.length > 0,
+      isFundReady: fundFiles.length > 0,
+      isComplianceReady: complianceFiles.length > 0,
+      isPdfReady: pdfFiles.length > 0,
     };
   }, [uploadedFiles]);
 
-  const pdfTypeCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-
-    uploadedFiles
-      .filter((file) => file.category === "pdf")
-      .forEach((file) => {
-        counts.set(file.detectedType, (counts.get(file.detectedType) || 0) + 1);
-      });
-
-    return Array.from(counts.entries());
-  }, [uploadedFiles]);
+  const pendingUploadCount = uploadedFiles.filter(
+    (file) => file.status !== "Uploaded"
+  ).length;
 
   return (
     <main className="app-page">
@@ -379,9 +461,8 @@ export default function DataIntakeCommandCenterPage() {
             <p className="eyebrow">VENTIQ Migration Portal</p>
             <h1>Data Intake Command Center</h1>
             <p>
-              Upload historical PDFs without any format, and upload Excel data
-              using VENTIQ templates for investor, portfolio, fund and
-              compliance records.
+              Stage all historical investor, portfolio, fund, compliance and PDF
+              files first. Then upload the complete migration dump in one action.
             </p>
           </div>
 
@@ -391,24 +472,48 @@ export default function DataIntakeCommandCenterPage() {
         </div>
 
         <div className="sample-data-ribbon">
-          Upload once · Sort documents · Detect gaps · Activate dashboards
+          Stage files · Upload migration data · Confirm uploaded · Continue to processing
         </div>
-        <div className="migration-actions">
-  <a className="primary-action" href="/migration/activation">
-    Open Data Activation Dashboard
-  </a>
-</div>
 
         <div className="preview-card">
-          <h2>How VENTIQ accepts fund data</h2>
+          <h2>Migration Upload Flow</h2>
 
           <div className="explain-box">
-            PDFs do not need any fixed format. The fund can upload a complete
-            historical dump and VENTIQ will classify and sort it. Excel data
-            should follow VENTIQ templates because it powers calculations,
-            dashboards, IRR, DPI, TVPI, capital calls, compliance and portfolio
-            reporting.
+            Upload investor data before PDF Intelligence. The PDF engine needs a
+            clean investor master to match documents correctly. Use this page to
+            upload the raw client dump first, then continue to processing pages.
           </div>
+
+          <div className="action-row">
+            <button
+              className="monitor-btn monitor-btn-primary"
+              disabled={isUploading || uploadedFiles.length === 0}
+              onClick={uploadMigrationData}
+              type="button"
+            >
+              {isUploading
+                ? "Uploading Migration Data..."
+                : pendingUploadCount === 0 && uploadedFiles.length > 0
+                ? "All Files Uploaded"
+                : "Upload Migration Data"}
+            </button>
+
+            <a className="monitor-btn monitor-btn-secondary" href="/migration/pdf-intelligence">
+              Open PDF Intelligence
+            </a>
+
+            <a className="monitor-btn monitor-btn-secondary" href="/migration/activation">
+              Open Activation Dashboard
+            </a>
+          </div>
+
+          {message && <div className="logic-note">{message}</div>}
+
+          {batchId && (
+            <div className="explain-box">
+              ✅ Migration batch created: <strong>{batchId}</strong>
+            </div>
+          )}
         </div>
 
         <div className="impact-grid">
@@ -418,52 +523,34 @@ export default function DataIntakeCommandCenterPage() {
           </div>
 
           <div className="impact-card">
+            <h3>{metrics.uploadedCount}</h3>
+            <p>Uploaded files</p>
+          </div>
+
+          <div className="impact-card">
             <h3>{metrics.pdfFiles}</h3>
-            <p>PDFs uploaded</p>
+            <p>PDFs staged</p>
           </div>
 
           <div className="impact-card">
-            <h3>{metrics.readyFiles}</h3>
-            <p>Ready to process</p>
-          </div>
-
-          <div className="impact-card">
-            <h3>{metrics.reviewFiles}</h3>
-            <p>Review queue</p>
+            <h3>{metrics.failedFiles}</h3>
+            <p>Failed uploads</p>
           </div>
         </div>
 
         <div className="preview-card">
-          <h2>Upload Data</h2>
+          <h2>Upload Migration Files</h2>
 
           <div className="queue-grid">
             <div className="queue-item">
-              <strong>Upload All PDFs</strong>
+              <span className="small-pill">
+                {metrics.isInvestorReady ? "Selected" : "Required First"}
+              </span>
               <br />
-              No template required. Upload SOAs, capital calls, distributions,
-              IRR statements, tax files, portfolio reports and fund documents.
+              <strong>Investor Data Excel</strong>
               <br />
-              <br />
-              <input
-                accept=".pdf"
-                multiple
-                onChange={(event) =>
-                  handleFilesSelected("pdf", event.target.files)
-                }
-                type="file"
-              />
-              <br />
-              <br />
-              <a className="secondary-action" href="/migration/pdf-intelligence">
-                Open PDF Intelligence Engine
-              </a>
-            </div>
-
-            <div className="queue-item">
-              <strong>Upload Investor Data</strong>
-              <br />
-              Use template for investor master, commitments, drawdowns,
-              distributions, setup cost, KYC, bank and cashflows.
+              Investor master, commitments, KYC, bank details, drawdowns,
+              distributions and cashflows.
               <br />
               <br />
               <button
@@ -484,309 +571,157 @@ export default function DataIntakeCommandCenterPage() {
               />
             </div>
 
-           <div className="queue-item">
-  <strong>Upload Portfolio Data</strong>
-  <br />
-  Use template for investment cost, instrument type, exits,
-  repayments, valuation, covenants and portfolio updates.
-  <br />
-  <br />
-  <button
-    className="secondary-action"
-    onClick={() => downloadTemplate("portfolio")}
-    type="button"
-  >
-    Download Portfolio Template
-  </button>
-  <br />
-  <br />
-  <input
-    accept=".csv,.xlsx,.xls"
-    onChange={(event) =>
-      handleFilesSelected("portfolio", event.target.files)
-    }
-    type="file"
-  />
-  <br />
-  <br />
-  <a className="secondary-action" href="/migration/portfolio-data">
-    Open Portfolio Migration Workspace
-  </a>
-</div>
-
-           <div className="queue-item">
-  <strong>Upload Fund Data</strong>
-  <br />
-  Use template for fund type, closes, corpus, fee structure, carry,
-  hurdle, waterfall, sponsor and trustee details.
-  <br />
-  <br />
-  <button
-    className="secondary-action"
-    onClick={() => downloadTemplate("fund")}
-    type="button"
-  >
-    Download Fund Template
-  </button>
-  <br />
-  <br />
-  <input
-    accept=".csv,.xlsx,.xls"
-    onChange={(event) => handleFilesSelected("fund", event.target.files)}
-    type="file"
-  />
-  <br />
-  <br />
-  <a className="secondary-action" href="/migration/fund-data">
-    Open Fund Migration Workspace
-  </a>
-</div>
+            <div className="queue-item">
+              <span className="small-pill">
+                {metrics.isPortfolioReady ? "Selected" : "Pending"}
+              </span>
+              <br />
+              <strong>Investment / Portfolio Data Excel</strong>
+              <br />
+              500 investments, cost, current value, IRR, MOIC, exits, covenants,
+              repayments and latest updates.
+              <br />
+              <br />
+              <button
+                className="secondary-action"
+                onClick={() => downloadTemplate("portfolio")}
+                type="button"
+              >
+                Download Portfolio Template
+              </button>
+              <br />
+              <br />
+              <input
+                accept=".csv,.xlsx,.xls"
+                onChange={(event) =>
+                  handleFilesSelected("portfolio", event.target.files)
+                }
+                type="file"
+              />
+            </div>
 
             <div className="queue-item">
-  <strong>Upload Compliance & Other Data</strong>
-  <br />
-  Upload regulatory filings, audit evidence, tax workings, trustee
-  records, approvals and unmatched files.
-  <br />
-  <br />
-  <button
-    className="secondary-action"
-    onClick={() => downloadTemplate("compliance")}
-    type="button"
-  >
-    Download Compliance Template
-  </button>
-  <br />
-  <br />
-  <input
-    accept=".csv,.xlsx,.xls,.pdf,.doc,.docx"
-    multiple
-    onChange={(event) =>
-      handleFilesSelected("compliance", event.target.files)
-    }
-    type="file"
-  />
-  <br />
-  <br />
-  <a className="secondary-action" href="/migration/compliance-data">
-    Open Compliance Migration Workspace
-  </a>
-</div>
-          </div>
-
-          {message && <div className="logic-note">{message}</div>}
-        </div>
-<div className="preview-card">
-  <h2>PDF Intelligence Rules</h2>
-
-  <div className="explain-box">
-    VENTIQ should not rely only on the PDF file name. The PDF Intelligence
-    Engine will read the file name, extract text inside the PDF, search for
-    investor identity, detect document type, detect period, assign confidence
-    and then sort the file into the correct folder.
-  </div>
-  <div className="migration-actions">
-  <a className="primary-action" href="/migration/pdf-intelligence">
-    Launch PDF Intelligence Engine
-  </a>
-</div>
-
-  <div className="impact-grid">
-    <div className="impact-card">
-      <h3>1</h3>
-      <p>Read filename</p>
-    </div>
-
-    <div className="impact-card">
-      <h3>2</h3>
-      <p>Search PDF text</p>
-    </div>
-
-    <div className="impact-card">
-      <h3>3</h3>
-      <p>Match investor</p>
-    </div>
-
-    <div className="impact-card">
-      <h3>4</h3>
-      <p>Detect period</p>
-    </div>
-  </div>
-
-  <div className="queue-grid">
-    <div className="queue-item">
-      <strong>Document type detection</strong>
-      <br />
-      VENTIQ searches for SOA, Statement of Account, IRR Statement, Capital Call
-      Notice, Drawdown Notice, Distribution Notice, Tax Certificate, Form 64C,
-      Form 64D and similar keywords.
-    </div>
-
-    <div className="queue-item">
-      <strong>Investor matching</strong>
-      <br />
-      VENTIQ searches investor code, investor name, email, PAN / tax ID, folio
-      number, class name and commitment reference inside the PDF.
-    </div>
-
-    <div className="queue-item">
-      <strong>Period detection</strong>
-      <br />
-      VENTIQ detects Q1, Q2, Q3, Q4, FY, quarter ended dates, March / June /
-      September / December periods and document dates.
-    </div>
-
-    <div className="queue-item">
-      <strong>Confidence scoring</strong>
-      <br />
-      High-confidence files are auto-sorted. Medium-confidence files move to
-      review. Low-confidence files remain unmatched until approved manually.
-    </div>
-  </div>
-</div>
-
-<div className="preview-card">
-  <h2>Investor-wise Folder Sorting</h2>
-
-  <div className="explain-box">
-    After classification, VENTIQ should create investor-wise folders and place
-    each document into the correct category and period. This is what makes the
-    Investor Portal clean and audit-ready.
-  </div>
-
-  <div className="queue-grid">
-    <div className="queue-item">
-      <strong>INV-0001 — Aarav Shah</strong>
-      <br />
-      SOA / Q1 FY26
-      <br />
-      SOA / Q2 FY26
-      <br />
-      Capital Call Notice / March 2026
-      <br />
-      Distribution Notice / June 2026
-    </div>
-
-    <div className="queue-item">
-      <strong>INV-0002 — Vivaan Jain</strong>
-      <br />
-      SOA / Q1 FY26
-      <br />
-      IRR Statement / FY26
-      <br />
-      Distribution Notice / June 2026
-      <br />
-      Tax Document / FY26
-    </div>
-
-    <div className="queue-item">
-      <strong>Unmatched / Review Queue</strong>
-      <br />
-      PDF has document type but no investor match
-      <br />
-      Investor name found but period missing
-      <br />
-      Duplicate document detected
-      <br />
-      Low confidence match
-    </div>
-
-    <div className="queue-item">
-      <strong>Deficiency Output</strong>
-      <br />
-      Missing Q4 SOA
-      <br />
-      Missing IRR Statement
-      <br />
-      Missing tax certificate
-      <br />
-      Missing distribution notice
-    </div>
-  </div>
-</div>
-
-<div className="preview-card">
-  <h2>PDF Confidence Score Model</h2>
-
-  <div className="explain-box">
-    Every PDF should receive a confidence score before publishing. This protects
-    the fund from wrongly showing documents to the wrong investor.
-  </div>
-
-  <div className="queue-grid">
-    <div className="queue-item">
-      <strong>Filename match</strong>
-      <br />
-      +20 points if filename includes SOA, IRR, capital call, distribution,
-      investor code or period.
-    </div>
-
-    <div className="queue-item">
-      <strong>PDF text match</strong>
-      <br />
-      +30 points if PDF text contains document keywords such as Statement of
-      Account, Capital Call Notice or Distribution Notice.
-    </div>
-
-    <div className="queue-item">
-      <strong>Investor match</strong>
-      <br />
-      +30 points if investor code, investor name, email or tax ID is found
-      inside the PDF.
-    </div>
-
-    <div className="queue-item">
-      <strong>Period match</strong>
-      <br />
-      +20 points if quarter, FY, month, year or document date is detected.
-    </div>
-  </div>
-
-  <div className="impact-grid">
-    <div className="impact-card">
-      <h3>85%+</h3>
-      <p>Auto-sort</p>
-    </div>
-
-    <div className="impact-card">
-      <h3>60–84%</h3>
-      <p>Review queue</p>
-    </div>
-
-    <div className="impact-card">
-      <h3>&lt;60%</h3>
-      <p>Unmatched</p>
-    </div>
-
-    <div className="impact-card">
-      <h3>100%</h3>
-      <p>Publish-ready</p>
-    </div>
-  </div>
-</div>
-        <div className="preview-card">
-          <h2>PDF Sorting Preview</h2>
-
-          <div className="explain-box">
-        VENTIQ will classify the PDF dump using filename signals first. In the full
-commercial version, it will also extract PDF text, search investor names,
-investor codes, fund names, periods and document keywords, then create
-investor-wise folders with confidence scoring and deficiency tracking.
-          </div>
-
-          {pdfTypeCounts.length === 0 && (
-            <div className="logic-note">
-              Upload PDF files above to preview document sorting.
+              <span className="small-pill">
+                {metrics.isFundReady ? "Selected" : "Pending"}
+              </span>
+              <br />
+              <strong>Fund Data Excel</strong>
+              <br />
+              Fund structure, closes, corpus, management fee, setup cost, carry,
+              hurdle, waterfall and sponsor commitment.
+              <br />
+              <br />
+              <button
+                className="secondary-action"
+                onClick={() => downloadTemplate("fund")}
+                type="button"
+              >
+                Download Fund Template
+              </button>
+              <br />
+              <br />
+              <input
+                accept=".csv,.xlsx,.xls"
+                onChange={(event) =>
+                  handleFilesSelected("fund", event.target.files)
+                }
+                type="file"
+              />
             </div>
-          )}
 
-          {pdfTypeCounts.length > 0 && (
+            <div className="queue-item">
+              <span className="small-pill">
+                {metrics.isComplianceReady ? "Selected" : "Pending"}
+              </span>
+              <br />
+              <strong>Compliance Data / Evidence</strong>
+              <br />
+              Compliance tracker, filings, audit evidence, tax workings,
+              approvals and regulatory documents.
+              <br />
+              <br />
+              <button
+                className="secondary-action"
+                onClick={() => downloadTemplate("compliance")}
+                type="button"
+              >
+                Download Compliance Template
+              </button>
+              <br />
+              <br />
+              <input
+                accept=".csv,.xlsx,.xls,.pdf,.doc,.docx"
+                multiple
+                onChange={(event) =>
+                  handleFilesSelected("compliance", event.target.files)
+                }
+                type="file"
+              />
+            </div>
+
+            <div className="queue-item">
+              <span className="small-pill">
+                {metrics.isPdfReady ? "Selected" : "After Investor Data"}
+              </span>
+              <br />
+              <strong>Investor PDF Dump</strong>
+              <br />
+              SOAs, capital call notices, distribution notices, tax documents,
+              IRR statements, reports and unmatched PDFs.
+              <br />
+              <br />
+              <input
+                accept=".pdf"
+                multiple
+                onChange={(event) =>
+                  handleFilesSelected("pdf", event.target.files)
+                }
+                type="file"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="preview-card">
+          <h2>Upload Status</h2>
+
+          {uploadedFiles.length === 0 ? (
+            <div className="explain-box">
+              No files selected yet. Select investor, portfolio, fund, compliance
+              and PDF files above.
+            </div>
+          ) : (
             <div className="queue-grid">
-              {pdfTypeCounts.map(([type, count]) => (
-                <div className="queue-item" key={type}>
-                  <strong>{type}</strong>
+              {uploadedFiles.map((file) => (
+                <div className="queue-item" key={file.id}>
+                  <span className="small-pill">{file.status}</span>
                   <br />
-                  {count} file(s)
+                  <strong>{file.name}</strong>
+                  <br />
+                  Category: {getCategoryLabel(file.category)}
+                  <br />
+                  Type: {file.detectedType}
+                  <br />
+                  Size: {formatFileSize(file.size)}
+                  <br />
+                  Note: {file.note}
+                  {file.error && (
+                    <>
+                      <br />
+                      Error: {file.error}
+                    </>
+                  )}
+                  <br />
+                  <br />
+                  {file.status !== "Uploaded" && !isUploading && (
+                    <button
+                      className="secondary-action"
+                      onClick={() => removeFile(file.id)}
+                      type="button"
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -794,94 +729,46 @@ investor-wise folders with confidence scoring and deficiency tracking.
         </div>
 
         <div className="preview-card">
-          <h2>Deficiency & Coverage Tracker</h2>
-
-          <div className="explain-box">
-            After upload, VENTIQ should not only sort data. It should also tell
-            the fund what is missing, duplicated, unmatched or low confidence.
-            This creates a proper onboarding audit trail.
-          </div>
-
-          <div className="impact-grid">
-            <div className="impact-card">
-              <h3>{metrics.missingSoa}</h3>
-              <p>Expected SOAs still missing</p>
-            </div>
-
-            <div className="impact-card">
-              <h3>{metrics.reviewFiles}</h3>
-              <p>Files needing manual review</p>
-            </div>
-
-            <div className="impact-card">
-              <h3>{metrics.investorFiles ? "Ready" : "Missing"}</h3>
-              <p>Investor Excel</p>
-            </div>
-
-            <div className="impact-card">
-              <h3>{metrics.portfolioFiles ? "Ready" : "Missing"}</h3>
-              <p>Portfolio Excel</p>
-            </div>
-          </div>
+          <h2>Recommended Testing Sequence</h2>
 
           <div className="queue-grid">
             <div className="queue-item">
-              <strong>Example deficiency</strong>
+              <strong>1. Upload Investor Excel first</strong>
               <br />
-              3 investors may be missing Q4 SOA records.
+              This creates the base data needed for investor matching.
             </div>
 
             <div className="queue-item">
-              <strong>Example deficiency</strong>
+              <strong>2. Upload portfolio, fund and compliance data</strong>
               <br />
-              7 PDFs could not be matched confidently to an investor.
+              These power MP, investment, finance and compliance dashboards.
             </div>
 
             <div className="queue-item">
-              <strong>Example deficiency</strong>
+              <strong>3. Upload PDF dump</strong>
               <br />
-              Portfolio repayment schedule missing for 2 debt investments.
+              Start with 25–50 PDFs first, then test the full batch.
             </div>
 
             <div className="queue-item">
-              <strong>Example deficiency</strong>
+              <strong>4. Continue to processing</strong>
               <br />
-              Fund carry and hurdle structure not uploaded yet.
+              Use PDF Intelligence, Activation Dashboard and Stakeholder Launch.
             </div>
           </div>
-        </div>
 
-        <div className="preview-card">
-          <h2>Where this data flows</h2>
+          <div className="action-row">
+            <a className="monitor-btn monitor-btn-primary" href="/migration/pdf-intelligence">
+              Continue to PDF Intelligence
+            </a>
 
-          <div className="queue-grid">
-            <div className="queue-item">
-              <strong>Investor Data</strong>
-              <br />
-              Investor Portal, Finance Head, Capital Calls, Distributions,
-              Investor Relations and MP Dashboard.
-            </div>
+            <a className="monitor-btn monitor-btn-secondary" href="/migration/activation">
+              Continue to Activation
+            </a>
 
-            <div className="queue-item">
-              <strong>Portfolio Data</strong>
-              <br />
-              Portfolio Intelligence, Investment Team, Repayment Notices, Exit
-              Analysis and MP Dashboard.
-            </div>
-
-            <div className="queue-item">
-              <strong>Fund Data</strong>
-              <br />
-              Fund setup, fee engine, carry, waterfall, compliance calendar and
-              MP Dashboard.
-            </div>
-
-            <div className="queue-item">
-              <strong>PDFs & Evidence</strong>
-              <br />
-              Document Engine, Investor Portal, Data Room, Compliance Evidence
-              and audit trail.
-            </div>
+            <a className="monitor-btn monitor-btn-secondary" href="/migration/stakeholder-launch">
+              Launch Dashboards
+            </a>
           </div>
         </div>
       </section>
