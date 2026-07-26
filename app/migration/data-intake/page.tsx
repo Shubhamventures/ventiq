@@ -289,6 +289,8 @@ export default function DataIntakeCommandCenterPage() {
   const [message, setMessage] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [batchId, setBatchId] = useState("");
+  const [isProcessingIntake, setIsProcessingIntake] = useState(false);
+const [processMessage, setProcessMessage] = useState("");
 
   function handleFilesSelected(
     category: IntakeCategory,
@@ -356,11 +358,41 @@ export default function DataIntakeCommandCenterPage() {
         body: formData,
       });
 
-      const result = await response.json();
+      const responseText = await response.text();
 
-      if (!response.ok) {
-        throw new Error(result.error || "Upload failed.");
-      }
+let result = {} as {
+  batchId?: string;
+  error?: string;
+  message?: string;
+  uploadedFiles?: Array<{
+    clientId: string;
+    fileName: string;
+    category: string;
+    status: string;
+    storagePath?: string;
+    error?: string;
+  }>;
+  uploadedCount?: number;
+  totalFiles?: number;
+  summary?: {
+    investorRows: number;
+    pdfRows: number;
+    portfolioRows: number;
+    fundRows: number;
+    complianceRows: number;
+  };
+};
+try {
+  result = responseText ? JSON.parse(responseText) : {};
+} catch {
+  throw new Error(
+    responseText || `Process API failed with status ${response.status}`
+  );
+}
+
+if (!response.ok) {
+  throw new Error(result.error || "Unable to process migration intake.");
+}
 
       setBatchId(result.batchId || "");
 
@@ -412,6 +444,43 @@ export default function DataIntakeCommandCenterPage() {
       setIsUploading(false);
     }
   }
+  async function processMigrationData() {
+  if (!batchId) {
+    setProcessMessage("Please upload migration data before processing.");
+    return;
+  }
+
+  setIsProcessingIntake(true);
+  setProcessMessage("Processing uploaded intake files into VENTIQ data tables...");
+
+  try {
+    const response = await fetch("/api/migration/process-intake", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        batchId,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Unable to process migration intake.");
+    }
+
+    setProcessMessage(
+      `Processing completed. Investors: ${result.summary.investorRows}, PDFs: ${result.summary.pdfRows}, Portfolio records: ${result.summary.portfolioRows}, Fund records: ${result.summary.fundRows}, Compliance records: ${result.summary.complianceRows}.`
+    );
+  } catch (error) {
+    setProcessMessage(
+      error instanceof Error ? error.message : "Unable to process migration intake."
+    );
+  } finally {
+    setIsProcessingIntake(false);
+  }
+}
 
   const metrics = useMemo(() => {
     const pdfFiles = uploadedFiles.filter((file) => file.category === "pdf");
@@ -484,30 +553,40 @@ export default function DataIntakeCommandCenterPage() {
             upload the raw client dump first, then continue to processing pages.
           </div>
 
-          <div className="action-row">
-            <button
-              className="monitor-btn monitor-btn-primary"
-              disabled={isUploading || uploadedFiles.length === 0}
-              onClick={uploadMigrationData}
-              type="button"
-            >
-              {isUploading
-                ? "Uploading Migration Data..."
-                : pendingUploadCount === 0 && uploadedFiles.length > 0
-                ? "All Files Uploaded"
-                : "Upload Migration Data"}
-            </button>
+         <div className="action-row">
+  <button
+    className="monitor-btn monitor-btn-primary"
+    disabled={isUploading || uploadedFiles.length === 0}
+    onClick={uploadMigrationData}
+    type="button"
+  >
+    {isUploading
+      ? "Uploading Migration Data..."
+      : pendingUploadCount === 0 && uploadedFiles.length > 0
+      ? "All Files Uploaded"
+      : "Upload Migration Data"}
+  </button>
 
-            <a className="monitor-btn monitor-btn-secondary" href="/migration/pdf-intelligence">
-              Open PDF Intelligence
-            </a>
+  <button
+    className="monitor-btn monitor-btn-primary"
+    disabled={!batchId || isProcessingIntake}
+    onClick={processMigrationData}
+    type="button"
+  >
+    {isProcessingIntake ? "Processing..." : "Process Migration Data"}
+  </button>
 
-            <a className="monitor-btn monitor-btn-secondary" href="/migration/activation">
-              Open Activation Dashboard
-            </a>
-          </div>
+  <a className="monitor-btn monitor-btn-secondary" href="/migration/pdf-intelligence">
+    Open PDF Intelligence
+  </a>
+
+  <a className="monitor-btn monitor-btn-secondary" href="/migration/activation">
+    Open Activation Dashboard
+  </a>
+</div>
 
           {message && <div className="logic-note">{message}</div>}
+          {processMessage && <div className="logic-note">{processMessage}</div>}
 
           {batchId && (
             <div className="explain-box">
