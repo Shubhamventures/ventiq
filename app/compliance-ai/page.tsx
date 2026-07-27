@@ -23,6 +23,14 @@ function getString(row: DataRow | undefined, keys: string[], fallback = "-") {
     if (typeof value === "string" && value.trim()) {
       return value;
     }
+
+    if (typeof value === "boolean") {
+      return value ? "true" : "false";
+    }
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
   }
 
   return fallback;
@@ -119,8 +127,91 @@ function getActivityIcon(status: string) {
   if (value.includes("tax")) return "💼";
   if (value.includes("audit")) return "🔍";
   if (value.includes("valuation")) return "📊";
+  if (value.includes("imported")) return "📥";
+  if (value.includes("regulatory")) return "⚖️";
 
   return "⚪";
+}
+
+function hasEvidence(row: DataRow) {
+  const directValue = row["evidence_available"];
+
+  if (directValue === true) return true;
+
+  const evidenceStatus = getString(
+    row,
+    [
+      "evidence_available",
+      "evidence_status",
+      "evidence",
+      "document_status",
+      "supporting_document_status",
+    ],
+    ""
+  ).toLowerCase();
+
+  return (
+    evidenceStatus === "true" ||
+    evidenceStatus === "yes" ||
+    evidenceStatus === "available" ||
+    evidenceStatus === "uploaded" ||
+    evidenceStatus === "ready" ||
+    evidenceStatus === "stored"
+  );
+}
+
+function isPendingStatus(row: DataRow) {
+  const status = getString(
+    row,
+    ["filing_status", "migration_status", "status"],
+    ""
+  ).toLowerCase();
+
+  return (
+    status === "pending" ||
+    status === "review" ||
+    status === "under review" ||
+    status === "needs review" ||
+    status === "overdue" ||
+    status.includes("pending") ||
+    status.includes("review")
+  );
+}
+
+function isReadyStatus(row: DataRow) {
+  const status = getString(
+    row,
+    ["filing_status", "migration_status", "status"],
+    ""
+  ).toLowerCase();
+
+  return (
+    status === "ready" ||
+    status === "filed" ||
+    status === "completed" ||
+    status === "complete" ||
+    status === "available" ||
+    status === "published"
+  );
+}
+
+function isHighRisk(row: DataRow) {
+  const risk = getString(row, ["risk_level", "risk_status"], "").toLowerCase();
+
+  return (
+    risk === "high" ||
+    risk.includes("high") ||
+    risk.includes("risk") ||
+    risk.includes("overdue")
+  );
+}
+
+function getDocumentTitle(row: DataRow) {
+  return getString(
+    row,
+    ["document_name", "filing_name", "item_name", "title", "file_name"],
+    "Compliance item"
+  );
 }
 
 export default function ComplianceAIPage() {
@@ -128,10 +219,21 @@ export default function ComplianceAIPage() {
     useState<DataRow | null>(null);
   const [latestPdfBatch, setLatestPdfBatch] = useState<DataRow | null>(null);
   const [latestFundBatch, setLatestFundBatch] = useState<DataRow | null>(null);
+  const [latestPortfolioBatch, setLatestPortfolioBatch] =
+    useState<DataRow | null>(null);
+  const [latestInvestorBatch, setLatestInvestorBatch] =
+    useState<DataRow | null>(null);
 
   const [complianceItems, setComplianceItems] = useState<DataRow[]>([]);
   const [fundMasterRows, setFundMasterRows] = useState<DataRow[]>([]);
+  const [portfolioInvestments, setPortfolioInvestments] = useState<DataRow[]>(
+    []
+  );
+  const [investorMasterRows, setInvestorMasterRows] = useState<DataRow[]>([]);
   const [investorDocuments, setInvestorDocuments] = useState<DataRow[]>([]);
+  const [pdfIntelligenceDocuments, setPdfIntelligenceDocuments] = useState<
+    DataRow[]
+  >([]);
   const [regulatoryMatches, setRegulatoryMatches] = useState<DataRow[]>([]);
   const [regulatoryCirculars, setRegulatoryCirculars] = useState<DataRow[]>([]);
 
@@ -150,139 +252,142 @@ export default function ComplianceAIPage() {
     setLoading(true);
     setErrorMessage("");
 
+    const db = supabase as any;
+
+    async function selectRows(
+      tableName: string,
+      options?: {
+        orderBy?: string;
+        ascending?: boolean;
+        eq?: {
+          column: string;
+          value: string;
+        };
+      }
+    ) {
+      try {
+        let query = db.from(tableName).select("*");
+
+        if (options?.eq) {
+          query = query.eq(options.eq.column, options.eq.value);
+        }
+
+        if (options?.orderBy) {
+          query = query.order(options.orderBy, {
+            ascending: options.ascending ?? false,
+          });
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+          console.warn(
+            `VENTIQ compliance dashboard skipped ${tableName}:`,
+            error.message
+          );
+          return [] as DataRow[];
+        }
+
+        return (data ?? []) as DataRow[];
+      } catch (error) {
+        console.warn(`VENTIQ compliance dashboard skipped ${tableName}:`, error);
+        return [] as DataRow[];
+      }
+    }
+
+    async function latestRow(tableName: string) {
+      try {
+        const { data, error } = await db
+          .from(tableName)
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          console.warn(
+            `VENTIQ compliance dashboard skipped latest ${tableName}:`,
+            error.message
+          );
+          return null;
+        }
+
+        return (data as DataRow | null) ?? null;
+      } catch (error) {
+        console.warn(
+          `VENTIQ compliance dashboard skipped latest ${tableName}:`,
+          error
+        );
+        return null;
+      }
+    }
+
     try {
       const [
-        complianceBatchResult,
-        pdfBatchResult,
-        fundBatchResult,
-        investorDocumentsResult,
-        regulatoryMatchesResult,
-        regulatoryCircularsResult,
+        complianceRows,
+        fundRows,
+        portfolioRows,
+        investorRows,
+        investorDocumentRows,
+        pdfDocumentRows,
+        matchesRows,
+        circularRows,
+
+        complianceBatch,
+        pdfBatch,
+        fundBatch,
+        portfolioBatch,
+        investorBatch,
       ] = await Promise.all([
-        supabase
-          .from("compliance_data_migration_batches")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+        selectRows("compliance_items"),
+        selectRows("fund_master"),
+        selectRows("portfolio_investments"),
+        selectRows("investor_master"),
+        selectRows("investor_documents"),
+        selectRows("pdf_intelligence_documents"),
+        selectRows("regulatory_source_matches", {
+          eq: {
+            column: "status",
+            value: "needs_review",
+          },
+        }),
+        selectRows("regulatory_circulars", {
+          eq: {
+            column: "status",
+            value: "active",
+          },
+        }),
 
-        supabase
-          .from("pdf_intelligence_batches")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-
-        supabase
-          .from("fund_data_migration_batches")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-
-        supabase
-          .from("investor_documents")
-          .select("*")
-          .order("created_at", { ascending: false }),
-
-        supabase
-          .from("regulatory_source_matches")
-          .select("*")
-          .eq("status", "needs_review"),
-
-        supabase.from("regulatory_circulars").select("*").eq("status", "active"),
+        latestRow("compliance_data_migration_batches"),
+        latestRow("pdf_intelligence_batches"),
+        latestRow("fund_data_migration_batches"),
+        latestRow("portfolio_data_migration_batches"),
+        latestRow("investor_import_batches"),
       ]);
 
-      if (complianceBatchResult.error) {
-        setErrorMessage(complianceBatchResult.error.message);
-        setLoading(false);
-        return;
-      }
-
-      if (pdfBatchResult.error) {
-        setErrorMessage(pdfBatchResult.error.message);
-        setLoading(false);
-        return;
-      }
-
-      if (fundBatchResult.error) {
-        setErrorMessage(fundBatchResult.error.message);
-        setLoading(false);
-        return;
-      }
-
-      const complianceBatch =
-        (complianceBatchResult.data as DataRow | null) ?? null;
-      const pdfBatch = (pdfBatchResult.data as DataRow | null) ?? null;
-      const fundBatch = (fundBatchResult.data as DataRow | null) ?? null;
+      setComplianceItems(complianceRows);
+      setFundMasterRows(fundRows);
+      setPortfolioInvestments(portfolioRows);
+      setInvestorMasterRows(investorRows);
+      setInvestorDocuments(investorDocumentRows);
+      setPdfIntelligenceDocuments(pdfDocumentRows);
+      setRegulatoryMatches(matchesRows);
+      setRegulatoryCirculars(circularRows);
 
       setLatestComplianceBatch(complianceBatch);
       setLatestPdfBatch(pdfBatch);
       setLatestFundBatch(fundBatch);
-
-      if (!investorDocumentsResult.error) {
-        setInvestorDocuments((investorDocumentsResult.data ?? []) as DataRow[]);
-      }
-
-      if (!regulatoryMatchesResult.error) {
-        setRegulatoryMatches((regulatoryMatchesResult.data ?? []) as DataRow[]);
-      }
-
-      if (!regulatoryCircularsResult.error) {
-        setRegulatoryCirculars(
-          (regulatoryCircularsResult.data ?? []) as DataRow[]
-        );
-      }
-
-      const complianceBatchId = getString(
-        complianceBatch ?? undefined,
-        ["id"],
-        ""
-      );
-
-      const fundBatchId = getString(fundBatch ?? undefined, ["id"], "");
-
-      const [complianceItemsResult, fundMasterResult] = await Promise.all([
-        complianceBatchId
-          ? supabase
-              .from("compliance_items")
-              .select("*")
-              .eq("batch_id", complianceBatchId)
-              .order("due_date", { ascending: true })
-          : Promise.resolve({ data: [], error: null }),
-
-        fundBatchId
-          ? supabase
-              .from("fund_master")
-              .select("*")
-              .eq("batch_id", fundBatchId)
-              .order("created_at", { ascending: true })
-          : Promise.resolve({ data: [], error: null }),
-      ]);
-
-      if (complianceItemsResult.error) {
-        setErrorMessage(complianceItemsResult.error.message);
-        setLoading(false);
-        return;
-      }
-
-      if (fundMasterResult.error) {
-        setErrorMessage(fundMasterResult.error.message);
-        setLoading(false);
-        return;
-      }
-
-      setComplianceItems((complianceItemsResult.data ?? []) as DataRow[]);
-      setFundMasterRows((fundMasterResult.data ?? []) as DataRow[]);
+      setLatestPortfolioBatch(portfolioBatch);
+      setLatestInvestorBatch(investorBatch);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
           ? error.message
           : "Unable to load Compliance workspace."
       );
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   useEffect(() => {
@@ -311,23 +416,13 @@ export default function ComplianceAIPage() {
       "ready_count",
     ]);
 
-    const rowEvidenceAvailable = complianceItems.filter((row) =>
-      Boolean(row["evidence_available"])
-    ).length;
+    const rowEvidenceAvailable = complianceItems.filter(hasEvidence).length;
 
-    const rowPendingReview = complianceItems.filter((row) => {
-      const status = getString(row, ["filing_status"], "").toLowerCase();
+    const rowPendingReview = complianceItems.filter(isPendingStatus).length;
 
-      return status === "pending" || status === "review" || status === "overdue";
-    }).length;
+    const rowHighRisk = complianceItems.filter(isHighRisk).length;
 
-    const rowHighRisk = complianceItems.filter(
-      (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
-    ).length;
-
-    const rowReady = complianceItems.filter(
-      (row) => getString(row, ["filing_status"], "").toLowerCase() === "ready"
-    ).length;
+    const rowReady = complianceItems.filter(isReadyStatus).length;
 
     const totalItems = batchTotalItems || complianceItems.length;
     const evidenceAvailable = batchEvidenceAvailable || rowEvidenceAvailable;
@@ -337,51 +432,114 @@ export default function ComplianceAIPage() {
 
     const missingEvidence = Math.max(totalItems - evidenceAvailable, 0);
 
-    const pdfTotal = getNumber(latestPdfBatch ?? undefined, ["total_files"]);
-    const pdfReady = getNumber(latestPdfBatch ?? undefined, ["ready_files"]);
+    const pdfReadyRows = pdfIntelligenceDocuments.filter((row) => {
+      const status = getString(row, ["status"], "").toLowerCase();
+
+      return status.includes("ready") || status.includes("published");
+    }).length;
+
+    const pdfReviewRows = pdfIntelligenceDocuments.filter((row) => {
+      const status = getString(row, ["status"], "").toLowerCase();
+
+      return (
+        status.includes("review") ||
+        status.includes("unmatched") ||
+        status.includes("failed")
+      );
+    }).length;
+
+    const pdfTotal = Math.max(
+      getNumber(latestPdfBatch ?? undefined, ["total_files"]),
+      pdfIntelligenceDocuments.length,
+      investorDocuments.length
+    );
+
+    const pdfReady = Math.max(
+      getNumber(latestPdfBatch ?? undefined, ["ready_files"]),
+      pdfReadyRows
+    );
+
     const pdfReview =
       getNumber(latestPdfBatch ?? undefined, ["review_files"]) +
-      getNumber(latestPdfBatch ?? undefined, ["unmatched_files"]);
+      getNumber(latestPdfBatch ?? undefined, ["unmatched_files"]) +
+      pdfReviewRows;
 
-    const fundCount = getNumber(latestFundBatch ?? undefined, ["total_funds"]);
-    const fundMasterCount = fundMasterRows.length;
+    const fundCount =
+      getNumber(latestFundBatch ?? undefined, ["total_funds"]) ||
+      fundMasterRows.length ||
+      new Set(
+        complianceItems
+          .map((row) => getString(row, ["fund_name"], ""))
+          .filter(Boolean)
+      ).size;
+
+    const portfolioRecordCount =
+      getNumber(latestPortfolioBatch ?? undefined, ["total_records"]) ||
+      portfolioInvestments.length;
+
+    const investorRecordCount =
+      getNumber(latestInvestorBatch ?? undefined, ["total_records"]) ||
+      investorMasterRows.length;
 
     const sebiItems = complianceItems.filter((row) => {
       const authority = getString(row, ["authority"], "").toLowerCase();
       const itemType = getString(row, ["item_type"], "").toLowerCase();
+      const category = getString(row, ["category"], "").toLowerCase();
 
-      return authority.includes("sebi") || itemType.includes("sebi");
+      return (
+        authority.includes("sebi") ||
+        itemType.includes("sebi") ||
+        category.includes("sebi")
+      );
     }).length;
 
     const taxItems = complianceItems.filter((row) => {
       const authority = getString(row, ["authority"], "").toLowerCase();
       const itemType = getString(row, ["item_type"], "").toLowerCase();
-      const documentName = getString(row, ["document_name"], "").toLowerCase();
+      const documentName = getDocumentTitle(row).toLowerCase();
 
       return (
         authority.includes("tax") ||
         itemType.includes("tax") ||
         documentName.includes("64c") ||
-        documentName.includes("64d")
+        documentName.includes("64d") ||
+        documentName.includes("tax")
       );
     }).length;
 
     const auditItems = complianceItems.filter((row) => {
       const category = getString(row, ["category"], "").toLowerCase();
       const itemType = getString(row, ["item_type"], "").toLowerCase();
+      const documentName = getDocumentTitle(row).toLowerCase();
 
-      return category.includes("audit") || itemType.includes("audit");
+      return (
+        category.includes("audit") ||
+        itemType.includes("audit") ||
+        documentName.includes("audit")
+      );
     }).length;
 
     const valuationItems = complianceItems.filter((row) => {
       const category = getString(row, ["category"], "").toLowerCase();
       const itemType = getString(row, ["item_type"], "").toLowerCase();
-      const documentName = getString(row, ["document_name"], "").toLowerCase();
+      const documentName = getDocumentTitle(row).toLowerCase();
 
       return (
         category.includes("valuation") ||
         itemType.includes("valuation") ||
         documentName.includes("valuation")
+      );
+    }).length;
+
+    const trusteeItems = complianceItems.filter((row) => {
+      const category = getString(row, ["category"], "").toLowerCase();
+      const authority = getString(row, ["authority"], "").toLowerCase();
+      const documentName = getDocumentTitle(row).toLowerCase();
+
+      return (
+        category.includes("trustee") ||
+        authority.includes("trustee") ||
+        documentName.includes("trustee")
       );
     }).length;
 
@@ -393,14 +551,38 @@ export default function ComplianceAIPage() {
 
     const overdueItems = complianceItems.filter((row) => {
       const days = getDaysUntil(row["due_date"]);
-      const status = getString(row, ["filing_status"], "").toLowerCase();
+      const status = getString(
+        row,
+        ["filing_status", "migration_status", "status"],
+        ""
+      ).toLowerCase();
 
-      return (days !== null && days < 0) || status === "overdue";
+      return (
+        (days !== null && days < 0) ||
+        status === "overdue" ||
+        status.includes("overdue")
+      );
     }).length;
 
     const storedInvestorDocuments = investorDocuments.filter((row) =>
-      Boolean(getString(row, ["storage_url", "storage_path"], ""))
+      Boolean(getString(row, ["storage_url", "storage_path", "file_url"], ""))
     ).length;
+
+    const portfolioLinkedItems = complianceItems.filter((row) => {
+      const linkedCompany = getString(
+        row,
+        ["portfolio_company", "portfolio_company_name", "company_name"],
+        ""
+      );
+
+      return Boolean(linkedCompany);
+    }).length;
+
+    const ownerAssignedItems = complianceItems.filter((row) => {
+      const owner = getString(row, ["owner", "responsible_person"], "");
+
+      return Boolean(owner);
+    }).length;
 
     const evidenceReadinessScore = Math.min(
       95,
@@ -409,7 +591,8 @@ export default function ComplianceAIPage() {
         45 +
           Math.min(25, evidenceAvailable * 5) +
           Math.min(10, readyItems * 3) +
-          Math.min(10, pdfReady * 2) -
+          Math.min(10, pdfReady * 2) +
+          Math.min(10, ownerAssignedItems * 2) -
           Math.min(20, missingEvidence * 4) -
           Math.min(15, highRiskItems * 5) -
           Math.min(10, overdueItems * 4)
@@ -426,14 +609,19 @@ export default function ComplianceAIPage() {
       pdfTotal,
       pdfReady,
       pdfReview,
-      fundCount: fundCount || fundMasterCount,
+      fundCount,
+      portfolioRecordCount,
+      investorRecordCount,
       sebiItems,
       taxItems,
       auditItems,
       valuationItems,
+      trusteeItems,
       dueSoonItems,
       overdueItems,
       storedInvestorDocuments,
+      portfolioLinkedItems,
+      ownerAssignedItems,
       pendingRegulatoryMatches: regulatoryMatches.length,
       activeRegulatoryCirculars: regulatoryCirculars.length,
       evidenceReadinessScore,
@@ -442,9 +630,14 @@ export default function ComplianceAIPage() {
     latestComplianceBatch,
     latestPdfBatch,
     latestFundBatch,
+    latestPortfolioBatch,
+    latestInvestorBatch,
     complianceItems,
     fundMasterRows,
+    portfolioInvestments,
+    investorMasterRows,
     investorDocuments,
+    pdfIntelligenceDocuments,
     regulatoryMatches,
     regulatoryCirculars,
   ]);
@@ -452,17 +645,25 @@ export default function ComplianceAIPage() {
   const priorityItems = useMemo(() => {
     return complianceItems
       .filter((row) => {
-        const status = getString(row, ["filing_status"], "").toLowerCase();
-        const risk = getString(row, ["risk_level"], "").toLowerCase();
-        const evidenceAvailable = Boolean(row["evidence_available"]);
+        const status = getString(
+          row,
+          ["filing_status", "migration_status", "status"],
+          ""
+        ).toLowerCase();
+
+        const risk = getString(row, ["risk_level", "risk_status"], "")
+          .toLowerCase();
         const days = getDaysUntil(row["due_date"]);
 
         return (
           status === "pending" ||
           status === "review" ||
           status === "overdue" ||
+          status.includes("pending") ||
+          status.includes("review") ||
           risk === "high" ||
-          !evidenceAvailable ||
+          risk.includes("high") ||
+          !hasEvidence(row) ||
           (days !== null && days <= 15)
         );
       })
@@ -482,9 +683,58 @@ export default function ComplianceAIPage() {
   }, [complianceItems]);
 
   const missingEvidenceRows = useMemo(() => {
+    return complianceItems.filter((row) => !hasEvidence(row)).slice(0, 8);
+  }, [complianceItems]);
+
+  const ownerQueueRows = useMemo(() => {
     return complianceItems
-      .filter((row) => !Boolean(row["evidence_available"]))
+      .filter((row) => Boolean(getString(row, ["owner", "responsible_person"], "")))
       .slice(0, 8);
+  }, [complianceItems]);
+
+  const fundWiseRows = useMemo(() => {
+    const grouped = new Map<
+      string,
+      {
+        fundName: string;
+        total: number;
+        pending: number;
+        highRisk: number;
+        evidence: number;
+      }
+    >();
+
+    complianceItems.forEach((row) => {
+      const fundName = getString(row, ["fund_name"], "Unmapped fund");
+
+      const existing =
+        grouped.get(fundName) ??
+        {
+          fundName,
+          total: 0,
+          pending: 0,
+          highRisk: 0,
+          evidence: 0,
+        };
+
+      existing.total += 1;
+
+      if (isPendingStatus(row)) {
+        existing.pending += 1;
+      }
+
+      if (isHighRisk(row)) {
+        existing.highRisk += 1;
+      }
+
+      if (hasEvidence(row)) {
+        existing.evidence += 1;
+      }
+
+      grouped.set(fundName, existing);
+    });
+
+    return Array.from(grouped.values()).slice(0, 8);
   }, [complianceItems]);
 
   const complianceActivityEvents = useMemo(() => {
@@ -508,12 +758,12 @@ export default function ComplianceAIPage() {
     }
 
     complianceItems.slice(0, 10).forEach((row) => {
-      const documentName = getString(
+      const documentName = getDocumentTitle(row);
+      const filingStatus = getString(
         row,
-        ["document_name"],
-        "Compliance item"
+        ["filing_status", "migration_status", "status"],
+        "Review"
       );
-      const filingStatus = getString(row, ["filing_status"], "Review");
       const riskLevel = getString(row, ["risk_level"], "Medium");
       const authority = getString(row, ["authority"], "Authority not provided");
 
@@ -630,7 +880,7 @@ export default function ComplianceAIPage() {
 
         <div className="sample-data-ribbon">
           Connected compliance workspace · Reading migrated compliance, PDF,
-          fund, investor document and regulatory evidence records
+          fund, portfolio, investor document and regulatory evidence records
         </div>
 
         {loading && (
@@ -654,13 +904,82 @@ export default function ComplianceAIPage() {
         {!loading && !errorMessage && (
           <>
             <div className="preview-card">
+              <div className="section-heading-row">
+                <div>
+                  <p className="eyebrow">Migration Data Connected</p>
+                  <h2>Live compliance data is now powering this dashboard</h2>
+                </div>
+
+                <button
+                  className="monitor-btn monitor-btn-secondary"
+                  onClick={loadComplianceWorkspace}
+                  type="button"
+                >
+                  Refresh Dashboard Data
+                </button>
+              </div>
+
+              <div className="impact-grid">
+                <div className="impact-card">
+                  <h3>{complianceItems.length}</h3>
+                  <p>Compliance records</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{pdfIntelligenceDocuments.length}</h3>
+                  <p>PDF intelligence records</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{investorDocuments.length}</h3>
+                  <p>Investor document records</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{fundMasterRows.length}</h3>
+                  <p>Fund records</p>
+                </div>
+              </div>
+
+              <div className="impact-grid">
+                <div className="impact-card">
+                  <h3>{portfolioInvestments.length}</h3>
+                  <p>Portfolio records</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{investorMasterRows.length}</h3>
+                  <p>Investor records</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{complianceMetrics.missingEvidence}</h3>
+                  <p>Evidence missing</p>
+                </div>
+
+                <div className="impact-card">
+                  <h3>{complianceMetrics.evidenceReadinessScore}%</h3>
+                  <p>Evidence readiness</p>
+                </div>
+              </div>
+
+              <div className="explain-box">
+                This Compliance dashboard now reads directly from
+                compliance_items, compliance_data_migration_batches,
+                pdf_intelligence_documents, investor_documents, fund_master,
+                portfolio_investments, investor_master and regulatory source
+                records.
+              </div>
+            </div>
+
+            <div className="preview-card">
               <h2>Compliance Workspace Preview</h2>
 
               <div className="explain-box">
                 VENTIQ reviewed {complianceMetrics.totalItems} migrated
                 compliance item(s), {complianceMetrics.evidenceAvailable} item(s)
                 with evidence available, {complianceMetrics.pendingReview} item(s)
-                pending or under review, {complianceMetrics.highRiskItems}
+                pending or under review, {complianceMetrics.highRiskItems}{" "}
                 high-risk item(s), {complianceMetrics.pdfReview} PDF review
                 item(s) and {complianceMetrics.dueSoonItems} item(s) due within
                 15 days.
@@ -743,8 +1062,8 @@ export default function ComplianceAIPage() {
               </div>
 
               <div className="impact-card">
-                <h3>{complianceMetrics.evidenceReadinessScore}%</h3>
-                <p>Evidence readiness</p>
+                <h3>{complianceMetrics.overdueItems}</h3>
+                <p>Overdue items</p>
               </div>
             </div>
 
@@ -773,13 +1092,13 @@ export default function ComplianceAIPage() {
                 </div>
 
                 <div className="journal-row">
-                  <span>Missing evidence</span>
-                  <strong>{complianceMetrics.missingEvidence}</strong>
+                  <span>Trustee / governance items</span>
+                  <strong>{complianceMetrics.trusteeItems}</strong>
                 </div>
 
                 <div className="journal-row">
-                  <span>Overdue items</span>
-                  <strong>{complianceMetrics.overdueItems}</strong>
+                  <span>Portfolio-linked compliance items</span>
+                  <strong>{complianceMetrics.portfolioLinkedItems}</strong>
                 </div>
 
                 <div className="journal-row">
@@ -810,16 +1129,14 @@ export default function ComplianceAIPage() {
                     const riskLevel = getString(row, ["risk_level"], "Medium");
                     const filingStatus = getString(
                       row,
-                      ["filing_status"],
+                      ["filing_status", "migration_status", "status"],
                       "Review"
                     );
 
                     return (
                       <div className="queue-item" key={getId(row)}>
                         {getRiskEmoji(riskLevel)}{" "}
-                        <strong>
-                          {getString(row, ["document_name"], "Compliance item")}
-                        </strong>
+                        <strong>{getDocumentTitle(row)}</strong>
                         <br />
                         {getString(row, ["authority"], "Authority not provided")} ·{" "}
                         {getString(row, ["category"], "Category not provided")}
@@ -849,7 +1166,7 @@ export default function ComplianceAIPage() {
                     {filingCalendarRows.map((row) => (
                       <div className="journal-row" key={`calendar-${getId(row)}`}>
                         <span>
-                          {getString(row, ["document_name"], "Compliance item")}
+                          {getDocumentTitle(row)}
                           <br />
                           {getString(row, ["authority"], "Authority")} · Owner:{" "}
                           {getString(row, ["owner"], "Not assigned")}
@@ -900,14 +1217,68 @@ export default function ComplianceAIPage() {
                 <div className="queue-grid">
                   {missingEvidenceRows.map((row) => (
                     <div className="queue-item" key={`missing-${getId(row)}`}>
-                      🔴{" "}
-                      <strong>
-                        {getString(row, ["document_name"], "Compliance item")}
-                      </strong>
+                      🔴 <strong>{getDocumentTitle(row)}</strong>
                       <br />
                       Owner: {getString(row, ["owner"], "Not assigned")}
                       <br />
                       Remarks: {getString(row, ["remarks"], "No remarks")}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="preview-card">
+              <h2>Owner-wise Compliance Queue</h2>
+
+              {ownerQueueRows.length === 0 && (
+                <div className="explain-box">
+                  No owner assignments found yet in migrated compliance data.
+                </div>
+              )}
+
+              {ownerQueueRows.length > 0 && (
+                <div className="journal-preview">
+                  {ownerQueueRows.map((row) => (
+                    <div className="journal-row" key={`owner-${getId(row)}`}>
+                      <span>
+                        {getString(row, ["owner", "responsible_person"], "Owner")}
+                        <br />
+                        {getDocumentTitle(row)}
+                      </span>
+                      <strong>
+                        {getString(
+                          row,
+                          ["filing_status", "migration_status", "status"],
+                          "Review"
+                        )}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="preview-card">
+              <h2>Fund-wise Compliance Status</h2>
+
+              {fundWiseRows.length === 0 && (
+                <div className="explain-box">
+                  Fund-wise compliance mapping is not available yet.
+                </div>
+              )}
+
+              {fundWiseRows.length > 0 && (
+                <div className="journal-preview">
+                  {fundWiseRows.map((row) => (
+                    <div className="journal-row" key={row.fundName}>
+                      <span>
+                        {row.fundName}
+                        <br />
+                        Evidence: {row.evidence}/{row.total} · Pending:{" "}
+                        {row.pending}
+                      </span>
+                      <strong>{row.highRisk} high-risk</strong>
                     </div>
                   ))}
                 </div>
