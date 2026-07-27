@@ -134,577 +134,710 @@ export default function FinanceHeadAIPage() {
   const [latestCapitalCallAllocationBatch, setLatestCapitalCallAllocationBatch] =
     useState<DataRow | null>(null);
 
-  const [migratedFundMasterRows, setMigratedFundMasterRows] = useState<
-    DataRow[]
-  >([]);
-  const [migratedPortfolioInvestments, setMigratedPortfolioInvestments] =
-    useState<DataRow[]>([]);
-  const [migratedComplianceItems, setMigratedComplianceItems] = useState<
-    DataRow[]
-  >([]);
-
+  const [migratedInvestorMaster, setMigratedInvestorMaster] = useState<
+  DataRow[]
+>([]);
+const [migratedFundCommitments, setMigratedFundCommitments] = useState<
+  DataRow[]
+>([]);
+const [migratedFinancialPositions, setMigratedFinancialPositions] = useState<
+  DataRow[]
+>([]);
+const [migratedInvestorCashflows, setMigratedInvestorCashflows] = useState<
+  DataRow[]
+>([]);
+const [migratedFundMasterRows, setMigratedFundMasterRows] = useState<
+  DataRow[]
+>([]);
+const [migratedPortfolioInvestments, setMigratedPortfolioInvestments] =
+  useState<DataRow[]>([]);
+const [migratedComplianceItems, setMigratedComplianceItems] = useState<
+  DataRow[]
+>([]);
+const [
+  migratedPdfIntelligenceDocuments,
+  setMigratedPdfIntelligenceDocuments,
+] = useState<DataRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    async function loadFinanceHeadWorkspace() {
-      if (!isSupabaseConfigured || !supabase) {
-        setErrorMessage(
-          "The sample Finance Head workspace is temporarily unavailable. Please request a walkthrough."
-        );
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      setErrorMessage("");
-
-      const [
-        capitalCallsResult,
-        distributionsResult,
-        documentsResult,
-        matchesResult,
-        circularsResult,
-      ] = await Promise.all([
-        supabase
-          .from("capital_calls")
-          .select("*")
-          .order("created_at", { ascending: false }),
-
-        supabase
-          .from("distributions")
-          .select("*")
-          .order("created_at", { ascending: false }),
-
-        supabase
-          .from("investor_documents")
-          .select("*")
-          .order("generated_at", { ascending: false }),
-
-        supabase
-          .from("regulatory_source_matches")
-          .select("*")
-          .eq("status", "needs_review"),
-
-        supabase.from("regulatory_circulars").select("*").eq("status", "active"),
-      ]);
-
-      const firstError =
-        capitalCallsResult.error ||
-        distributionsResult.error ||
-        documentsResult.error ||
-        matchesResult.error ||
-        circularsResult.error;
-
-      if (firstError) {
-        setErrorMessage(firstError.message);
-        setLoading(false);
-        return;
-      }
-
-      setCapitalCalls((capitalCallsResult.data ?? []) as DataRow[]);
-      setDistributions((distributionsResult.data ?? []) as DataRow[]);
-      setInvestorDocuments((documentsResult.data ?? []) as DataRow[]);
-      setRegulatoryMatches((matchesResult.data ?? []) as DataRow[]);
-      setRegulatoryCirculars((circularsResult.data ?? []) as DataRow[]);
-
-      try {
-        const [
-          investorMigrationBatchResult,
-          pdfMigrationBatchResult,
-          portfolioMigrationBatchResult,
-          fundMigrationBatchResult,
-          complianceMigrationBatchResult,
-          capitalCallAllocationBatchResult,
-        ] = await Promise.all([
-          supabase
-            .from("investor_import_batches")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-
-          supabase
-            .from("pdf_intelligence_batches")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-
-          supabase
-            .from("portfolio_data_migration_batches")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-
-          supabase
-            .from("fund_data_migration_batches")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-
-          supabase
-            .from("compliance_data_migration_batches")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-
-          supabase
-            .from("capital_call_allocation_batches")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-        ]);
-
-        const investorMigrationBatch =
-          investorMigrationBatchResult.error
-            ? null
-            : ((investorMigrationBatchResult.data as DataRow | null) ?? null);
-
-        const pdfMigrationBatch =
-          pdfMigrationBatchResult.error
-            ? null
-            : ((pdfMigrationBatchResult.data as DataRow | null) ?? null);
-
-        const portfolioMigrationBatch =
-          portfolioMigrationBatchResult.error
-            ? null
-            : ((portfolioMigrationBatchResult.data as DataRow | null) ?? null);
-
-        const fundMigrationBatch =
-          fundMigrationBatchResult.error
-            ? null
-            : ((fundMigrationBatchResult.data as DataRow | null) ?? null);
-
-        const complianceMigrationBatch =
-          complianceMigrationBatchResult.error
-            ? null
-            : ((complianceMigrationBatchResult.data as DataRow | null) ?? null);
-
-        const capitalCallAllocationBatch =
-          capitalCallAllocationBatchResult.error
-            ? null
-            : ((capitalCallAllocationBatchResult.data as DataRow | null) ??
-              null);
-
-        setLatestInvestorBatch(investorMigrationBatch);
-        setLatestPdfBatch(pdfMigrationBatch);
-        setLatestPortfolioBatch(portfolioMigrationBatch);
-        setLatestFundBatch(fundMigrationBatch);
-        setLatestComplianceBatch(complianceMigrationBatch);
-        setLatestCapitalCallAllocationBatch(capitalCallAllocationBatch);
-
-        const fundBatchId = getString(fundMigrationBatch ?? undefined, ["id"], "");
-        const portfolioBatchId = getString(
-          portfolioMigrationBatch ?? undefined,
-          ["id"],
-          ""
-        );
-        const complianceBatchId = getString(
-          complianceMigrationBatch ?? undefined,
-          ["id"],
-          ""
-        );
-
-        const [fundMasterResult, portfolioRowsResult, complianceRowsResult] =
-          await Promise.all([
-            fundBatchId
-              ? supabase
-                  .from("fund_master")
-                  .select("*")
-                  .eq("batch_id", fundBatchId)
-                  .order("created_at", { ascending: true })
-              : Promise.resolve({ data: [], error: null }),
-
-            portfolioBatchId
-              ? supabase
-                  .from("portfolio_investments")
-                  .select("*")
-                  .eq("batch_id", portfolioBatchId)
-                  .order("created_at", { ascending: true })
-              : Promise.resolve({ data: [], error: null }),
-
-            complianceBatchId
-              ? supabase
-                  .from("compliance_items")
-                  .select("*")
-                  .eq("batch_id", complianceBatchId)
-                  .order("created_at", { ascending: true })
-              : Promise.resolve({ data: [], error: null }),
-          ]);
-
-        if (!fundMasterResult.error) {
-          setMigratedFundMasterRows((fundMasterResult.data ?? []) as DataRow[]);
-        }
-
-        if (!portfolioRowsResult.error) {
-          setMigratedPortfolioInvestments(
-            (portfolioRowsResult.data ?? []) as DataRow[]
-          );
-        }
-
-        if (!complianceRowsResult.error) {
-          setMigratedComplianceItems(
-            (complianceRowsResult.data ?? []) as DataRow[]
-          );
-        }
-      } catch (migrationError) {
-        console.warn("Migration finance data could not be loaded", migrationError);
-      }
-
+  async function loadFinanceHeadWorkspace() {
+    if (!isSupabaseConfigured || !supabase) {
+      setErrorMessage(
+        "The sample Finance Head workspace is temporarily unavailable. Please request a walkthrough."
+      );
       setLoading(false);
+      return;
     }
 
-    loadFinanceHeadWorkspace();
-  }, []);
+    setLoading(true);
+    setErrorMessage("");
+
+    const db = supabase as any;
+
+    async function selectRows(
+      tableName: string,
+      options?: {
+        orderBy?: string;
+        ascending?: boolean;
+        eq?: {
+          column: string;
+          value: string;
+        };
+      }
+    ) {
+      try {
+        let query = db.from(tableName).select("*");
+
+        if (options?.eq) {
+          query = query.eq(options.eq.column, options.eq.value);
+        }
+
+        if (options?.orderBy) {
+          query = query.order(options.orderBy, {
+            ascending: options.ascending ?? false,
+          });
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+          console.warn(
+            `VENTIQ finance dashboard skipped ${tableName}:`,
+            error.message
+          );
+          return [] as DataRow[];
+        }
+
+        return (data ?? []) as DataRow[];
+      } catch (error) {
+        console.warn(`VENTIQ finance dashboard skipped ${tableName}:`, error);
+        return [] as DataRow[];
+      }
+    }
+
+    async function latestRow(tableName: string) {
+      try {
+        const { data, error } = await db
+          .from(tableName)
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          console.warn(
+            `VENTIQ finance dashboard skipped latest ${tableName}:`,
+            error.message
+          );
+          return null;
+        }
+
+        return (data as DataRow | null) ?? null;
+      } catch (error) {
+        console.warn(
+          `VENTIQ finance dashboard skipped latest ${tableName}:`,
+          error
+        );
+        return null;
+      }
+    }
+
+    try {
+      const [
+        capitalCallsData,
+        distributionsData,
+        documentsData,
+        matchesData,
+        circularsData,
+
+        migratedInvestorMasterData,
+        migratedFundCommitmentsData,
+        migratedFinancialPositionsData,
+        migratedInvestorCashflowsData,
+        migratedFundMasterData,
+        migratedPortfolioInvestmentsData,
+        migratedComplianceItemsData,
+        migratedPdfDocumentsData,
+
+        investorMigrationBatch,
+        pdfMigrationBatch,
+        portfolioMigrationBatch,
+        fundMigrationBatch,
+        complianceMigrationBatch,
+        capitalCallAllocationBatch,
+      ] = await Promise.all([
+        selectRows("capital_calls", {
+          orderBy: "created_at",
+          ascending: false,
+        }),
+
+        selectRows("distributions", {
+          orderBy: "created_at",
+          ascending: false,
+        }),
+
+        selectRows("investor_documents"),
+
+        selectRows("regulatory_source_matches", {
+          eq: {
+            column: "status",
+            value: "needs_review",
+          },
+        }),
+
+        selectRows("regulatory_circulars", {
+          eq: {
+            column: "status",
+            value: "active",
+          },
+        }),
+
+        selectRows("investor_master", {
+          orderBy: "investor_code",
+          ascending: true,
+        }),
+
+        selectRows("fund_commitments"),
+
+        selectRows("investor_financial_positions"),
+
+        selectRows("investor_cashflows", {
+          orderBy: "cashflow_date",
+          ascending: false,
+        }),
+
+        selectRows("fund_master"),
+
+        selectRows("portfolio_investments"),
+
+        selectRows("compliance_items"),
+
+        selectRows("pdf_intelligence_documents"),
+
+        latestRow("investor_import_batches"),
+
+        latestRow("pdf_intelligence_batches"),
+
+        latestRow("portfolio_data_migration_batches"),
+
+        latestRow("fund_data_migration_batches"),
+
+        latestRow("compliance_data_migration_batches"),
+
+        latestRow("capital_call_allocation_batches"),
+      ]);
+
+      setCapitalCalls(capitalCallsData);
+      setDistributions(distributionsData);
+      setInvestorDocuments(documentsData);
+      setRegulatoryMatches(matchesData);
+      setRegulatoryCirculars(circularsData);
+
+      setMigratedInvestorMaster(migratedInvestorMasterData);
+      setMigratedFundCommitments(migratedFundCommitmentsData);
+      setMigratedFinancialPositions(migratedFinancialPositionsData);
+      setMigratedInvestorCashflows(migratedInvestorCashflowsData);
+      setMigratedFundMasterRows(migratedFundMasterData);
+      setMigratedPortfolioInvestments(migratedPortfolioInvestmentsData);
+      setMigratedComplianceItems(migratedComplianceItemsData);
+      setMigratedPdfIntelligenceDocuments(migratedPdfDocumentsData);
+
+      setLatestInvestorBatch(investorMigrationBatch);
+      setLatestPdfBatch(pdfMigrationBatch);
+      setLatestPortfolioBatch(portfolioMigrationBatch);
+      setLatestFundBatch(fundMigrationBatch);
+      setLatestComplianceBatch(complianceMigrationBatch);
+      setLatestCapitalCallAllocationBatch(capitalCallAllocationBatch);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load Finance Head workspace."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  loadFinanceHeadWorkspace();
+}, []);
 
   const financeMetrics = useMemo(() => {
-    const approvedCapitalCalls = capitalCalls.filter(isApproved);
-    const draftCapitalCalls = capitalCalls.filter(isDraft);
+  const approvedCapitalCalls = capitalCalls.filter(isApproved);
+  const draftCapitalCalls = capitalCalls.filter(isDraft);
 
-    const approvedDistributions = distributions.filter(isApproved);
-    const draftDistributions = distributions.filter(isDraft);
+  const approvedDistributions = distributions.filter(isApproved);
+  const draftDistributions = distributions.filter(isDraft);
 
-    const totalApprovedCapitalCallAmount = approvedCapitalCalls.reduce(
-      (sum, row) =>
-        sum +
-        getNumber(row, [
-          "call_amount",
-          "capital_call_amount",
-          "total_amount",
-          "amount",
-        ]),
-      0
-    );
-
-    const totalDraftCapitalCallAmount = draftCapitalCalls.reduce(
-      (sum, row) =>
-        sum +
-        getNumber(row, [
-          "call_amount",
-          "capital_call_amount",
-          "total_amount",
-          "amount",
-        ]),
-      0
-    );
-
-    const totalApprovedDistributionAmount = approvedDistributions.reduce(
-      (sum, row) =>
-        sum +
-        getNumber(row, [
-          "distribution_amount",
-          "total_distribution_amount",
-          "amount",
-        ]),
-      0
-    );
-
-    const migrationInvestorCount = getNumber(latestInvestorBatch ?? undefined, [
-      "total_records",
-    ]);
-
-    const migrationInvestorCommitment = getNumber(
-      latestInvestorBatch ?? undefined,
-      ["total_commitment"]
-    );
-
-    const migrationPdfTotal = getNumber(latestPdfBatch ?? undefined, [
-      "total_files",
-    ]);
-
-    const migrationPdfReady = getNumber(latestPdfBatch ?? undefined, [
-      "ready_files",
-    ]);
-
-    const migrationPdfReview =
-      getNumber(latestPdfBatch ?? undefined, ["review_files"]) +
-      getNumber(latestPdfBatch ?? undefined, ["unmatched_files"]);
-
-    const migrationFundCommitted = getNumber(latestFundBatch ?? undefined, [
-      "total_committed_capital",
-    ]);
-
-    const migrationSponsorCommitment = getNumber(latestFundBatch ?? undefined, [
-      "total_sponsor_commitment",
-    ]);
-
-    const migrationAverageManagementFee = getNumber(
-      latestFundBatch ?? undefined,
-      ["average_management_fee"]
-    );
-
-    const migrationAverageCarry = getNumber(latestFundBatch ?? undefined, [
-      "average_carry",
-    ]);
-
-    const migrationFundCount = getNumber(latestFundBatch ?? undefined, [
-      "total_funds",
-    ]);
-
-    const migratedFundCommitted = migratedFundMasterRows.reduce(
-      (sum, row) => sum + getNumber(row, ["committed_capital"]),
-      0
-    );
-
-    const managementFeeRows = migratedFundMasterRows
-      .map((row) => getNumber(row, ["management_fee_rate"]))
-      .filter((value) => value > 0);
-
-    const carryRows = migratedFundMasterRows
-      .map((row) => getNumber(row, ["carry_rate"]))
-      .filter((value) => value > 0);
-
-    const averageManagementFee =
-      migrationAverageManagementFee ||
-      (managementFeeRows.length
-        ? managementFeeRows.reduce((sum, value) => sum + value, 0) /
-          managementFeeRows.length
-        : 0);
-
-    const averageCarry =
-      migrationAverageCarry ||
-      (carryRows.length
-        ? carryRows.reduce((sum, value) => sum + value, 0) / carryRows.length
-        : 0);
-
-    const committedCapital =
-      migrationInvestorCommitment ||
-      migrationFundCommitted ||
-      migratedFundCommitted;
-
-    const uncalledCapital = Math.max(
-      committedCapital - totalApprovedCapitalCallAmount,
-      0
-    );
-
-    const migrationComplianceItems = getNumber(
-      latestComplianceBatch ?? undefined,
-      ["total_items"]
-    );
-
-    const migrationComplianceEvidence = getNumber(
-      latestComplianceBatch ?? undefined,
-      ["evidence_available_count"]
-    );
-
-    const migrationCompliancePending = getNumber(
-      latestComplianceBatch ?? undefined,
-      ["pending_review_count"]
-    );
-
-    const migrationComplianceHighRisk = getNumber(
-      latestComplianceBatch ?? undefined,
-      ["high_risk_count"]
-    );
-
-    const migratedCompliancePendingRows = migratedComplianceItems.filter((row) => {
-      const status = getString(row, ["filing_status"], "").toLowerCase();
-
-      return status === "pending" || status === "review" || status === "overdue";
-    }).length;
-
-    const migratedComplianceHighRiskRows = migratedComplianceItems.filter(
-      (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
-    ).length;
-
-    const migratedEvidenceAvailableRows = migratedComplianceItems.filter((row) =>
-      Boolean(row["evidence_available"])
-    ).length;
-
-    const portfolioRepaymentItems = migratedPortfolioInvestments.filter((row) =>
-      Boolean(getString(row, ["repayment_due_date"], ""))
-    ).length;
-
-    const portfolioAtRiskItems = migratedPortfolioInvestments.filter(
-      (row) => getString(row, ["risk_status"], "").toLowerCase() === "at risk"
-    ).length;
-
-    const allocationDraftAmount = getNumber(
-      latestCapitalCallAllocationBatch ?? undefined,
-      [
-        "total_call_amount",
-        "total_allocation_amount",
-        "capital_call_amount",
+  const totalApprovedCapitalCallAmount = approvedCapitalCalls.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
         "call_amount",
+        "capital_call_amount",
+        "total_amount",
         "amount",
-      ]
-    );
+      ]),
+    0
+  );
 
-    const allocationReadyCount = getNumber(
-      latestCapitalCallAllocationBatch ?? undefined,
-      [
-        "ready_allocations",
-        "ready_count",
-        "approved_allocations",
-        "total_ready",
-      ]
-    );
+  const totalDraftCapitalCallAmount = draftCapitalCalls.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "call_amount",
+        "capital_call_amount",
+        "total_amount",
+        "amount",
+      ]),
+    0
+  );
 
-    const allocationExceptionCount = getNumber(
-      latestCapitalCallAllocationBatch ?? undefined,
-      [
-        "exception_count",
-        "exceptions",
-        "exception_queue",
-        "review_count",
-      ]
-    );
+  const totalApprovedDistributionAmount = approvedDistributions.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "distribution_amount",
+        "total_distribution_amount",
+        "amount",
+      ]),
+    0
+  );
 
-    const capitalCallAllocationDrafts = latestCapitalCallAllocationBatch ? 1 : 0;
-
-    const storedDocuments = investorDocuments.filter((row) =>
-      Boolean(getString(row, ["storage_url", "storage_path"], ""))
-    );
-
-    const portalAvailableDocuments = investorDocuments.filter(
-      (row) => getString(row, ["portal_status"], "") === "available"
-    );
-
-    const queuedEmails = investorDocuments.filter(
-      (row) => getString(row, ["email_status"], "") === "queued"
-    );
-
-    const sentEmails = investorDocuments.filter(
-      (row) => getString(row, ["email_status"], "") === "sent"
-    );
-
-    const generatedDocuments = investorDocuments.filter((row) =>
-      Boolean(getString(row, ["document_type"], ""))
-    );
-
-    const documentsNotStored = investorDocuments.filter(
-      (row) => !getString(row, ["storage_url", "storage_path"], "")
-    );
-
-    const investorReportingDocuments = generatedDocuments.filter((row) => {
-      const documentType = getString(row, ["document_type"], "").toLowerCase();
-
-      return (
-        documentType.includes("notice") ||
-        documentType.includes("report") ||
-        documentType.includes("soa") ||
-        documentType.includes("statement") ||
-        documentType.includes("certificate")
-      );
-    });
-
-    const finalGeneratedDocuments = Math.max(
-      generatedDocuments.length,
-      migrationPdfTotal
-    );
-
-    const finalStoredDocuments = Math.max(
-      storedDocuments.length,
-      migrationPdfReady
-    );
-
-    const finalDocumentsNotStored = Math.max(
-      documentsNotStored.length,
-      migrationPdfReview
-    );
-
-    const ddqSupportItems = Math.min(
-      4,
-      Math.max(1, Math.ceil(finalGeneratedDocuments / 5) || 1)
-    );
-
-    const investorDocumentReadinessScore = Math.min(
-      95,
-      55 +
-        Math.min(20, finalStoredDocuments * 4) +
-        Math.min(15, portalAvailableDocuments.length * 3) +
-        (finalDocumentsNotStored === 0 && finalGeneratedDocuments > 0 ? 5 : 0)
-    );
-
-    const highImpactCirculars = regulatoryCirculars.filter(
-      (row) => getString(row, ["impact"], "").toUpperCase() === "HIGH"
-    );
-
-    const pendingRegulatoryReviews = Math.max(
-      regulatoryMatches.length,
-      migrationCompliancePending,
-      migratedCompliancePendingRows
-    );
-
-    const highRiskComplianceItems = Math.max(
-      migrationComplianceHighRisk,
-      migratedComplianceHighRiskRows
-    );
-
-    const evidenceAvailable = Math.max(
-      migrationComplianceEvidence,
-      migratedEvidenceAvailableRows
-    );
-
-    return {
-      approvedCapitalCalls: approvedCapitalCalls.length,
-      draftCapitalCalls: draftCapitalCalls.length,
-      approvedDistributions: approvedDistributions.length,
-      draftDistributions: draftDistributions.length,
-      totalApprovedCapitalCallAmount,
-      totalDraftCapitalCallAmount,
-      totalApprovedDistributionAmount,
-
-      investorCount: migrationInvestorCount,
-      totalCommitment: committedCapital,
-      uncalledCapital,
-      committedCapital,
-      fundCount: migrationFundCount || migratedFundMasterRows.length,
-      sponsorCommitment: migrationSponsorCommitment,
-      averageManagementFee,
-      averageCarry,
-
-      capitalCallAllocationDrafts,
-      capitalCallAllocationAmount: allocationDraftAmount,
-      capitalCallAllocationExceptions: allocationExceptionCount,
-      readyAllocations: allocationReadyCount,
-
-      generatedDocuments: finalGeneratedDocuments,
-      storedDocuments: finalStoredDocuments,
-      documentsNotStored: finalDocumentsNotStored,
-      portalAvailableDocuments: portalAvailableDocuments.length,
-      queuedEmails: queuedEmails.length,
-      sentEmails: sentEmails.length,
-      investorReportingDocuments: Math.max(
-        investorReportingDocuments.length,
-        migrationPdfReady
-      ),
-      ddqSupportItems,
-      investorDocumentReadinessScore,
-
-      pendingRegulatoryReviews,
-      highImpactCirculars: Math.max(
-        highImpactCirculars.length,
-        highRiskComplianceItems
-      ),
-      complianceItems: migrationComplianceItems || migratedComplianceItems.length,
-      evidenceAvailable,
-      highRiskComplianceItems,
-
-      portfolioRepaymentItems,
-      portfolioAtRiskItems,
-    };
-  }, [
-    capitalCalls,
-    distributions,
-    investorDocuments,
-    regulatoryMatches,
-    regulatoryCirculars,
-    latestInvestorBatch,
-    latestPdfBatch,
-    latestPortfolioBatch,
-    latestFundBatch,
-    latestComplianceBatch,
-    latestCapitalCallAllocationBatch,
-    migratedFundMasterRows,
-    migratedPortfolioInvestments,
-    migratedComplianceItems,
+  const migrationInvestorCount = getNumber(latestInvestorBatch ?? undefined, [
+    "total_records",
   ]);
+
+  const migrationInvestorCommitment = getNumber(
+    latestInvestorBatch ?? undefined,
+    ["total_commitment"]
+  );
+
+  const migrationPdfTotal = getNumber(latestPdfBatch ?? undefined, [
+    "total_files",
+  ]);
+
+  const migrationPdfReady = getNumber(latestPdfBatch ?? undefined, [
+    "ready_files",
+  ]);
+
+  const migrationPdfReview =
+    getNumber(latestPdfBatch ?? undefined, ["review_files"]) +
+    getNumber(latestPdfBatch ?? undefined, ["unmatched_files"]);
+
+  const migrationFundCommitted = getNumber(latestFundBatch ?? undefined, [
+    "total_committed_capital",
+  ]);
+
+  const migrationSponsorCommitment = getNumber(latestFundBatch ?? undefined, [
+    "total_sponsor_commitment",
+  ]);
+
+  const migrationAverageManagementFee = getNumber(
+    latestFundBatch ?? undefined,
+    ["average_management_fee"]
+  );
+
+  const migrationAverageCarry = getNumber(latestFundBatch ?? undefined, [
+    "average_carry",
+  ]);
+
+  const migrationFundCount = getNumber(latestFundBatch ?? undefined, [
+    "total_funds",
+  ]);
+
+  const migratedInvestorCount = migratedInvestorMaster.length;
+
+  const migratedCommitmentTotal = migratedFundCommitments.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "commitment_amount",
+        "committed_amount",
+        "commitment",
+        "amount",
+      ]),
+    0
+  );
+
+  const migratedPositionCommitment = migratedFinancialPositions.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, ["commitment_amount", "committed_amount", "commitment"]),
+    0
+  );
+
+  const migratedCapitalCalled = migratedFinancialPositions.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "capital_called_till_date",
+        "capital_called",
+        "called_capital",
+        "called_amount",
+      ]),
+    0
+  );
+
+  const migratedUncalledCapital = migratedFinancialPositions.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "uncalled_capital",
+        "unfunded_commitment",
+        "remaining_commitment",
+      ]),
+    0
+  );
+
+  const migratedDistributions = migratedFinancialPositions.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "distributions_till_date",
+        "distributions",
+        "distributed_amount",
+      ]),
+    0
+  );
+
+  const migratedCurrentNav = migratedFinancialPositions.reduce(
+    (sum, row) =>
+      sum + getNumber(row, ["current_nav", "nav", "latest_nav"]),
+    0
+  );
+
+  const migratedFundCommitted = migratedFundMasterRows.reduce(
+    (sum, row) =>
+      sum +
+      getNumber(row, [
+        "committed_capital",
+        "total_committed_capital",
+        "commitment_amount",
+      ]),
+    0
+  );
+
+  const managementFeeRows = migratedFundMasterRows
+    .map((row) =>
+      getNumber(row, [
+        "management_fee_rate",
+        "management_fee",
+        "average_management_fee",
+      ])
+    )
+    .filter((value) => value > 0);
+
+  const carryRows = migratedFundMasterRows
+    .map((row) => getNumber(row, ["carry_rate", "carry", "average_carry"]))
+    .filter((value) => value > 0);
+
+  const averageManagementFee =
+    migrationAverageManagementFee ||
+    (managementFeeRows.length
+      ? managementFeeRows.reduce((sum, value) => sum + value, 0) /
+        managementFeeRows.length
+      : 0);
+
+  const averageCarry =
+    migrationAverageCarry ||
+    (carryRows.length
+      ? carryRows.reduce((sum, value) => sum + value, 0) / carryRows.length
+      : 0);
+
+  const committedCapital =
+    migrationInvestorCommitment ||
+    migratedCommitmentTotal ||
+    migratedPositionCommitment ||
+    migrationFundCommitted ||
+    migratedFundCommitted;
+
+  const calledCapital = migratedCapitalCalled || totalApprovedCapitalCallAmount;
+
+  const uncalledCapital =
+    migratedUncalledCapital || Math.max(committedCapital - calledCapital, 0);
+
+  const distributedCapital =
+    migratedDistributions || totalApprovedDistributionAmount;
+
+  const migrationComplianceItems = getNumber(
+    latestComplianceBatch ?? undefined,
+    ["total_items"]
+  );
+
+  const migrationComplianceEvidence = getNumber(
+    latestComplianceBatch ?? undefined,
+    ["evidence_available_count"]
+  );
+
+  const migrationCompliancePending = getNumber(
+    latestComplianceBatch ?? undefined,
+    ["pending_review_count"]
+  );
+
+  const migrationComplianceHighRisk = getNumber(
+    latestComplianceBatch ?? undefined,
+    ["high_risk_count"]
+  );
+
+  const migratedCompliancePendingRows = migratedComplianceItems.filter((row) => {
+    const status = getString(row, ["filing_status", "migration_status"], "")
+      .toLowerCase();
+
+    return status === "pending" || status === "review" || status === "overdue";
+  }).length;
+
+  const migratedComplianceHighRiskRows = migratedComplianceItems.filter(
+    (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
+  ).length;
+
+  const migratedEvidenceAvailableRows = migratedComplianceItems.filter((row) => {
+    const evidenceStatus = getString(
+      row,
+      ["evidence_available", "evidence_status"],
+      ""
+    ).toLowerCase();
+
+    return (
+      row["evidence_available"] === true ||
+      evidenceStatus === "true" ||
+      evidenceStatus === "yes" ||
+      evidenceStatus === "available"
+    );
+  }).length;
+
+  const portfolioRepaymentItems = migratedPortfolioInvestments.filter((row) =>
+    Boolean(getString(row, ["repayment_due_date"], ""))
+  ).length;
+
+  const portfolioAtRiskItems = migratedPortfolioInvestments.filter((row) => {
+    const riskStatus = getString(row, ["risk_status"], "").toLowerCase();
+
+    return (
+      riskStatus.includes("risk") ||
+      riskStatus.includes("watch") ||
+      riskStatus.includes("attention")
+    );
+  }).length;
+
+  const allocationDraftAmount = getNumber(
+    latestCapitalCallAllocationBatch ?? undefined,
+    [
+      "total_call_amount",
+      "total_allocation_amount",
+      "capital_call_amount",
+      "call_amount",
+      "amount",
+    ]
+  );
+
+  const allocationReadyCount = getNumber(
+    latestCapitalCallAllocationBatch ?? undefined,
+    [
+      "ready_allocations",
+      "ready_count",
+      "approved_allocations",
+      "total_ready",
+    ]
+  );
+
+  const allocationExceptionCount = getNumber(
+    latestCapitalCallAllocationBatch ?? undefined,
+    ["exception_count", "exceptions", "exception_queue", "review_count"]
+  );
+
+  const capitalCallAllocationDrafts = latestCapitalCallAllocationBatch ? 1 : 0;
+
+  const storedDocuments = investorDocuments.filter((row) =>
+    Boolean(getString(row, ["storage_url", "storage_path", "file_url"], ""))
+  );
+
+  const portalAvailableDocuments = investorDocuments.filter((row) => {
+    const portalStatus = getString(row, ["portal_status"], "").toLowerCase();
+    const migrationStatus = getString(row, ["migration_status"], "").toLowerCase();
+    const status = getString(row, ["status"], "").toLowerCase();
+
+    return (
+      portalStatus.includes("available") ||
+      portalStatus.includes("published") ||
+      migrationStatus.includes("published") ||
+      status.includes("published") ||
+      status.includes("available")
+    );
+  });
+
+  const queuedEmails = investorDocuments.filter(
+    (row) => getString(row, ["email_status"], "") === "queued"
+  );
+
+  const sentEmails = investorDocuments.filter(
+    (row) => getString(row, ["email_status"], "") === "sent"
+  );
+
+  const generatedDocuments = investorDocuments.filter((row) =>
+    Boolean(getString(row, ["document_type", "document_name", "file_name"], ""))
+  );
+
+  const documentsNotStored = investorDocuments.filter(
+    (row) => !getString(row, ["storage_url", "storage_path", "file_url"], "")
+  );
+
+  const migratedPdfReadyRows = migratedPdfIntelligenceDocuments.filter((row) => {
+    const status = getString(row, ["status"], "").toLowerCase();
+
+    return status === "ready" || status === "published";
+  }).length;
+
+  const migratedPdfReviewRows = migratedPdfIntelligenceDocuments.filter((row) => {
+    const status = getString(row, ["status"], "").toLowerCase();
+
+    return (
+      status === "review" ||
+      status === "unmatched" ||
+      status === "failed" ||
+      status.includes("review")
+    );
+  }).length;
+
+  const investorReportingDocuments = generatedDocuments.filter((row) => {
+    const documentType = getString(row, ["document_type"], "").toLowerCase();
+
+    return (
+      documentType.includes("notice") ||
+      documentType.includes("report") ||
+      documentType.includes("soa") ||
+      documentType.includes("statement") ||
+      documentType.includes("certificate")
+    );
+  });
+
+  const finalGeneratedDocuments = Math.max(
+    generatedDocuments.length,
+    investorDocuments.length,
+    migrationPdfTotal,
+    migratedPdfIntelligenceDocuments.length
+  );
+
+  const finalStoredDocuments = Math.max(
+    storedDocuments.length,
+    migrationPdfReady,
+    migratedPdfReadyRows
+  );
+
+  const finalDocumentsNotStored = Math.max(
+    documentsNotStored.length,
+    migrationPdfReview,
+    migratedPdfReviewRows
+  );
+
+  const ddqSupportItems = Math.min(
+    4,
+    Math.max(1, Math.ceil(finalGeneratedDocuments / 5) || 1)
+  );
+
+  const investorDocumentReadinessScore = Math.min(
+    95,
+    55 +
+      Math.min(20, finalStoredDocuments * 4) +
+      Math.min(15, portalAvailableDocuments.length * 3) +
+      (finalDocumentsNotStored === 0 && finalGeneratedDocuments > 0 ? 5 : 0)
+  );
+
+  const highImpactCirculars = regulatoryCirculars.filter(
+    (row) => getString(row, ["impact"], "").toUpperCase() === "HIGH"
+  );
+
+  const pendingRegulatoryReviews = Math.max(
+    regulatoryMatches.length,
+    migrationCompliancePending,
+    migratedCompliancePendingRows
+  );
+
+  const highRiskComplianceItems = Math.max(
+    migrationComplianceHighRisk,
+    migratedComplianceHighRiskRows
+  );
+
+  const evidenceAvailable = Math.max(
+    migrationComplianceEvidence,
+    migratedEvidenceAvailableRows
+  );
+
+  return {
+    approvedCapitalCalls: approvedCapitalCalls.length,
+    draftCapitalCalls: draftCapitalCalls.length,
+    approvedDistributions: approvedDistributions.length,
+    draftDistributions: draftDistributions.length,
+    totalApprovedCapitalCallAmount,
+    totalDraftCapitalCallAmount,
+    totalApprovedDistributionAmount,
+
+    investorCount: migratedInvestorCount || migrationInvestorCount,
+    totalCommitment: committedCapital,
+    calledCapital,
+    distributedCapital,
+    currentNav: migratedCurrentNav,
+    uncalledCapital,
+    committedCapital,
+    fundCount: migrationFundCount || migratedFundMasterRows.length,
+    sponsorCommitment: migrationSponsorCommitment,
+    averageManagementFee,
+    averageCarry,
+
+    capitalCallAllocationDrafts,
+    capitalCallAllocationAmount: allocationDraftAmount,
+    capitalCallAllocationExceptions: allocationExceptionCount,
+    readyAllocations: allocationReadyCount,
+
+    generatedDocuments: finalGeneratedDocuments,
+    storedDocuments: finalStoredDocuments,
+    documentsNotStored: finalDocumentsNotStored,
+    portalAvailableDocuments: portalAvailableDocuments.length,
+    queuedEmails: queuedEmails.length,
+    sentEmails: sentEmails.length,
+    investorReportingDocuments: Math.max(
+      investorReportingDocuments.length,
+      migrationPdfReady,
+      migratedPdfReadyRows
+    ),
+    ddqSupportItems,
+    investorDocumentReadinessScore,
+
+    pendingRegulatoryReviews,
+    highImpactCirculars: Math.max(
+      highImpactCirculars.length,
+      highRiskComplianceItems
+    ),
+    complianceItems: migrationComplianceItems || migratedComplianceItems.length,
+    evidenceAvailable,
+    highRiskComplianceItems,
+
+    portfolioRepaymentItems,
+    portfolioAtRiskItems,
+    cashflowRecords: migratedInvestorCashflows.length,
+  };
+}, [
+  capitalCalls,
+  distributions,
+  investorDocuments,
+  regulatoryMatches,
+  regulatoryCirculars,
+  latestInvestorBatch,
+  latestPdfBatch,
+  latestFundBatch,
+  latestComplianceBatch,
+  latestCapitalCallAllocationBatch,
+  migratedInvestorMaster,
+  migratedFundCommitments,
+  migratedFinancialPositions,
+  migratedInvestorCashflows,
+  migratedFundMasterRows,
+  migratedPortfolioInvestments,
+  migratedComplianceItems,
+  migratedPdfIntelligenceDocuments,
+]);
 
   const financeActivityEvents = useMemo(() => {
     const events: FinanceActivityEvent[] = [];
@@ -781,7 +914,11 @@ export default function FinanceHeadAIPage() {
         ["investor_name"],
         "Investor"
       );
-      const generatedAt = getString(documentRecord, ["generated_at"], "");
+      const generatedAt = getString(
+  documentRecord,
+  ["published_at", "generated_at", "uploaded_at", "created_at"],
+  ""
+);
 
       events.push({
         id: `document-generated-${documentId}`,
@@ -1119,10 +1256,70 @@ export default function FinanceHeadAIPage() {
           </div>
         )}
 
-        {!loading && !errorMessage && (
-          <>
-            <div className="preview-card">
-              <h2>Finance Head Workspace Preview</h2>
+       {!loading && !errorMessage && (
+  <>
+    <div className="preview-card">
+      <div className="section-heading-row">
+        <div>
+          <p className="eyebrow">Migration Data Connected</p>
+          <h2>Live finance data is now powering this dashboard</h2>
+        </div>
+      </div>
+
+      <div className="impact-grid">
+        <div className="impact-card">
+          <h3>{migratedInvestorMaster.length}</h3>
+          <p>Investor records</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{migratedFundCommitments.length}</h3>
+          <p>Commitment records</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{migratedFinancialPositions.length}</h3>
+          <p>Financial position records</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{migratedInvestorCashflows.length}</h3>
+          <p>Cashflow records</p>
+        </div>
+      </div>
+
+      <div className="impact-grid">
+        <div className="impact-card">
+          <h3>{formatCurrencyCr(financeMetrics.calledCapital)}</h3>
+          <p>Capital called</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{formatCurrencyCr(financeMetrics.distributedCapital)}</h3>
+          <p>Distributions</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{formatCurrencyCr(financeMetrics.currentNav)}</h3>
+          <p>Current NAV</p>
+        </div>
+
+        <div className="impact-card">
+          <h3>{migratedPdfIntelligenceDocuments.length}</h3>
+          <p>PDF intelligence records</p>
+        </div>
+      </div>
+
+      <div className="explain-box">
+        This Finance Head dashboard now reads directly from investor_master,
+        fund_commitments, investor_financial_positions, investor_cashflows,
+        investor_documents, pdf_intelligence_documents, fund_master,
+        portfolio_investments and compliance_items.
+      </div>
+    </div>
+
+    <div className="preview-card">
+      <h2>Finance Head Workspace Preview</h2>
 
               <div className="explain-box">
                 VENTIQ reviewed {financeMetrics.investorCount} migrated

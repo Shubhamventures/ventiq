@@ -661,14 +661,24 @@ export default function MigrationPage() {
           </div>
 
           <div className="migration-hero-card">
-            <p className="migration-eyebrow">Commercial pilot model</p>
-            <h2>No full replacement on day one.</h2>
-            <p>
-              Land with Investor Portal, Data Room, Finance Workspace,
-              Compliance Dashboard or Managing Partner Dashboard. Then connect
-              the next workflow into the same source of truth.
-            </p>
-          </div>
+  <p className="migration-eyebrow">Commercial pilot model</p>
+  <h2>No full replacement on day one.</h2>
+  <p>
+    Land with Investor Portal, Data Room, Finance Workspace,
+    Compliance Dashboard or Managing Partner Dashboard. Then connect
+    the next workflow into the same source of truth.
+  </p>
+
+  <div className="migration-actions">
+    <a className="primary-action" href="/migration/data-intake">
+      Start Data Intake
+    </a>
+
+    <a className="secondary-action" href="/migration/activation">
+      View Activation Dashboard
+    </a>
+  </div>
+</div>
         </section>
 
         <section className="migration-stat-grid">
