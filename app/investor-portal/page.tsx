@@ -29,6 +29,7 @@ type Commitment = {
 type InvestorDocument = {
   id: string;
   investor_id?: string | null;
+  investor_code?: string | null;
   document_type: string | null;
   document_name: string | null;
   document_category?: string | null;
@@ -175,6 +176,14 @@ function getNumber(row: DataRow | undefined, keys: string[]) {
 function toCr(value: number | null | undefined) {
   return Number(value || 0) / 10000000;
 }
+function getPositionNumber(
+  position: InvestorFinancialPosition | null,
+  keys: string[]
+) {
+  if (!position) return 0;
+
+  return getNumber(position as unknown as DataRow, keys);
+}
 
 function formatCr(value: number) {
   return `₹${value.toFixed(2)} Cr`;
@@ -300,21 +309,26 @@ function normalizeText(value: string | null | undefined) {
 function investorMatchesText(
   investor: Investor | undefined,
   name?: string | null,
-  email?: string | null
+  email?: string | null,
+  investorCode?: string | null
 ) {
   if (!investor) return false;
 
   const investorName = normalizeText(investor.name);
   const investorEmail = normalizeText(investor.email);
+  const investorCodeValue = normalizeText(investor.investor_code);
   const incomingName = normalizeText(name);
   const incomingEmail = normalizeText(email);
+  const incomingInvestorCode = normalizeText(investorCode);
 
   return Boolean(
-    (incomingEmail && investorEmail && incomingEmail === investorEmail) ||
+    (incomingInvestorCode &&
+      investorCodeValue &&
+      incomingInvestorCode === investorCodeValue) ||
+      (incomingEmail && investorEmail && incomingEmail === investorEmail) ||
       (incomingName && investorName && incomingName === investorName)
   );
 }
-
 function documentMatchesExpectedType(
   documentRecord: InvestorDocument,
   expectedType: string
@@ -633,13 +647,14 @@ export default function InvestorPortalPage() {
               (fallbackDocumentsResult.data as InvestorDocument[] | null) ?? []
             ).filter((documentRecord) => {
               return (
-                documentRecord.investor_id === selectedInvestorId ||
-                investorMatchesText(
-                  selectedInvestor,
-                  documentRecord.investor_name,
-                  documentRecord.investor_email || documentRecord.email
-                )
-              );
+  documentRecord.investor_id === selectedInvestorId ||
+  investorMatchesText(
+    selectedInvestor,
+    documentRecord.investor_name,
+    documentRecord.investor_email || documentRecord.email,
+    documentRecord.investor_code
+  )
+);
             });
           }
         }
@@ -737,32 +752,63 @@ export default function InvestorPortalPage() {
     );
 
     const displayedCommitment = financialPosition
-      ? toCr(financialPosition.commitment_amount)
-      : totalCommitment;
+  ? toCr(
+      getPositionNumber(financialPosition, [
+        "commitment_amount",
+        "committed_amount",
+        "commitment",
+      ])
+    )
+  : totalCommitment;
 
-    const displayedCalled = financialPosition
-      ? toCr(financialPosition.capital_called_till_date)
-      : totalCalled;
+const displayedCalled = financialPosition
+  ? toCr(
+      getPositionNumber(financialPosition, [
+        "capital_called_till_date",
+        "capital_called",
+        "called_capital",
+        "called_amount",
+      ])
+    )
+  : totalCalled;
 
-    const displayedRemaining = financialPosition
-      ? toCr(financialPosition.uncalled_capital)
-      : totalRemaining;
+const displayedRemaining = financialPosition
+  ? toCr(
+      getPositionNumber(financialPosition, [
+        "uncalled_capital",
+        "unfunded_commitment",
+        "remaining_commitment",
+      ])
+    )
+  : totalRemaining;
 
-    const displayedDistributed = financialPosition
-      ? toCr(financialPosition.distributions_till_date)
-      : totalDistributedFromDocuments;
+const displayedDistributed = financialPosition
+  ? toCr(
+      getPositionNumber(financialPosition, [
+        "distributions_till_date",
+        "distributions",
+        "distributed_amount",
+      ])
+    )
+  : totalDistributedFromDocuments;
 
-    const displayedCurrentNav = financialPosition
-      ? toCr(financialPosition.current_nav)
-      : 0;
+const displayedCurrentNav = financialPosition
+  ? toCr(
+      getPositionNumber(financialPosition, [
+        "current_nav",
+        "nav",
+        "latest_nav",
+      ])
+    )
+  : 0;
 
-    const displayedSetupFee = financialPosition
-      ? toCr(financialPosition.setup_fee)
-      : 0;
+const displayedSetupFee = financialPosition
+  ? toCr(getPositionNumber(financialPosition, ["setup_fee"]))
+  : 0;
 
-    const displayedManagementFee = financialPosition
-      ? toCr(financialPosition.management_fee)
-      : 0;
+const displayedManagementFee = financialPosition
+  ? toCr(getPositionNumber(financialPosition, ["management_fee"]))
+  : 0;
 
     const capitalCallDocuments = documents.filter((documentRecord) =>
       getDocumentType(documentRecord).toLowerCase().includes("capital")
