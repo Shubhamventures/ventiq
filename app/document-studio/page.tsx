@@ -106,6 +106,11 @@ type BatchGenerationResponse = {
   };
   queuedDocuments?: number;
 };
+type PublishResponse = {
+  message?: string;
+  batch_id?: string;
+  publishedDocuments?: number;
+};
 
 const investors: InvestorProfile[] = [
   {
@@ -576,6 +581,9 @@ const [previewMergeData, setPreviewMergeData] =
 const [batchResult, setBatchResult] = useState<BatchGenerationResponse | null>(
   null
 );
+const [publishResult, setPublishResult] = useState<PublishResponse | null>(
+  null
+);
 const [apiBusy, setApiBusy] = useState(false);
 const [statusMessage, setStatusMessage] = useState(
   "Template Builder ready. Insert blocks, map fields, preview and batch generate."
@@ -879,11 +887,54 @@ async function runBatch() {
   }
 }
 
-function publishQueue() {
-  setWorkspaceTab("publish");
-  setStatusMessage(
-    "Publish queue prepared. Generated PDFs can be pushed to Investor Portal."
-  );
+async function publishQueue() {
+  try {
+    setWorkspaceTab("publish");
+
+    const batchId = batchResult?.batch?.id;
+
+    if (!batchId) {
+      setStatusMessage(
+        "Prepare a batch first before publishing documents to Investor Portal."
+      );
+      return;
+    }
+
+    setApiBusy(true);
+    setStatusMessage("Publishing generated document records to Investor Portal...");
+
+    const response = await fetch("/api/document-studio/publish", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        batch_id: batchId,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Unable to publish documents.");
+    }
+
+    setPublishResult(result);
+
+    setStatusMessage(
+      result.message ||
+        "Documents published to Investor Portal successfully."
+    );
+  } catch (error) {
+    setPublishResult(null);
+    setStatusMessage(
+      error instanceof Error
+        ? error.message
+        : "Unable to publish documents to Investor Portal."
+    );
+  } finally {
+    setApiBusy(false);
+  }
 }
 
   function renderRibbon() {
@@ -2054,43 +2105,84 @@ function publishQueue() {
   );
 }
 
-  function renderPublish() {
-    return (
-      <div className="ids-simple-page">
-        <div className="ids-studio-hero">
-          <p className="ids-eyebrow">Publish Queue</p>
-          <h2>Push approved PDFs to Investor Portal</h2>
-          <p>
-            Final documents can be stored in the investor vault, marked as
-            available, and shown inside the Investor Portal.
-          </p>
-        </div>
+ function renderPublish() {
+  const batch = batchResult?.batch;
 
-        <div className="ids-publish-grid">
-          {investors.map((investor) => (
-            <div className="ids-publish-card" key={investor.id}>
-              <strong>{investor.name}</strong>
-              <span>{investor.code}</span>
-              <p>{selectedDocumentType}</p>
-              <em>Ready to publish</em>
-            </div>
-          ))}
-        </div>
-
-        <button
-          className="ids-primary-btn"
-          onClick={() =>
-            setStatusMessage(
-              "Documents published to Investor Portal queue. Next version will save generated PDFs to investor_documents."
-            )
-          }
-          type="button"
-        >
-          Publish to Investor Portal
-        </button>
+  return (
+    <div className="ids-simple-page">
+      <div className="ids-studio-hero">
+        <p className="ids-eyebrow">Publish Queue</p>
+        <h2>Push approved documents to Investor Portal</h2>
+        <p>
+          Final generated documents are inserted into investor_documents and
+          become visible inside the Investor Portal.
+        </p>
       </div>
-    );
-  }
+
+      {!batch && (
+        <div className="ids-explain" style={{ marginTop: 22 }}>
+          No batch is prepared yet. Go to Batch Generation and prepare a batch
+          first.
+        </div>
+      )}
+
+      {batch && (
+        <>
+          <div className="ids-import-hero" style={{ marginTop: 22 }}>
+            <div>
+              <p className="ids-eyebrow">Current Batch</p>
+              <h3>{batch.batch_name}</h3>
+              <p>
+                Total investors: {batch.total_investors} · Ready:{" "}
+                {batch.ready_count} · Already published:{" "}
+                {publishResult?.publishedDocuments ?? batch.published_count ?? 0}
+              </p>
+            </div>
+
+            <button
+              className="ids-primary-btn"
+              disabled={apiBusy}
+              onClick={publishQueue}
+              type="button"
+            >
+              {apiBusy ? "Publishing..." : "Publish to Investor Portal"}
+            </button>
+          </div>
+
+          {publishResult && (
+            <div className="ids-import-hero" style={{ marginTop: 22 }}>
+              <div>
+                <p className="ids-eyebrow">Published</p>
+                <h3>{publishResult.publishedDocuments} document records pushed</h3>
+                <p>
+                  These records are now available in investor_documents and can
+                  be surfaced inside the Investor Portal.
+                </p>
+              </div>
+
+              <a className="ids-primary-btn" href="/investor-portal">
+                Open Investor Portal
+              </a>
+            </div>
+          )}
+
+          <div className="ids-publish-grid">
+            {investors.map((investor) => (
+              <div className="ids-publish-card" key={investor.id}>
+                <strong>{investor.name}</strong>
+                <span>{investor.code}</span>
+                <p>{selectedDocumentType}</p>
+                <em>
+                  {publishResult ? "Published to Portal" : "Ready to publish"}
+                </em>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
   return (
     <main className="ids-page">
