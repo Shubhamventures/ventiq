@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import type { ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type WorkspaceTab =
   | "library"
@@ -122,6 +123,26 @@ type PdfGenerationResponse = {
     file_name?: string;
     file_url?: string;
   }[];
+};
+type ImportTemplateResponse = {
+  message?: string;
+  detectedDocumentType?: string;
+  importConfidence?: number;
+  detectedFields?: string[];
+  detectedSections?: string[];
+  suggestedBlocks?: TemplateBlock[];
+  unmappedItems?: string[];
+  storage?: {
+    bucket?: string;
+    path?: string;
+  };
+  importRecord?: {
+    id?: string;
+    file_name?: string;
+    file_type?: string;
+    import_confidence?: number;
+    detected_document_type?: string;
+  };
 };
 const investors: InvestorProfile[] = [
   {
@@ -597,6 +618,9 @@ const [publishResult, setPublishResult] = useState<PublishResponse | null>(
 );
 const [pdfGenerationResult, setPdfGenerationResult] =
   useState<PdfGenerationResponse | null>(null);
+const [importResult, setImportResult] =
+  useState<ImportTemplateResponse | null>(null);
+const fileInputRef = useRef<HTMLInputElement | null>(null);
 const [apiBusy, setApiBusy] = useState(false);
 const [statusMessage, setStatusMessage] = useState(
   "Template Builder ready. Insert blocks, map fields, preview and batch generate."
@@ -690,61 +714,120 @@ useEffect(() => {
     );
   }
 
-  function simulateImport() {
-    setImportDone(true);
-    setWorkspaceTab("builder");
-    setRibbonTab("insert");
+  function fallbackImportedBlocks(): TemplateBlock[] {
+  return [
+    {
+      id: "import-letterhead",
+      kind: "letterhead",
+      title: "Imported letterhead",
+      subtitle: "Detected from uploaded Word/PDF",
+    },
+    {
+      id: "import-identity",
+      kind: "identity",
+      title: "Imported investor identity",
+      subtitle: "Investor name, folio and fund fields need review",
+    },
+    {
+      id: "import-summary",
+      kind: "summary",
+      title: "Imported capital summary",
+      subtitle: "Commitment, called capital, NAV and uncalled capital",
+    },
+    {
+      id: "import-transactions",
+      kind: "transactions",
+      title: "Imported transaction table",
+      subtitle: "Suggested source: Transactions",
+      repeatSource: "transactions",
+    },
+    {
+      id: "import-financial",
+      kind: "financial",
+      title: "Imported financial statement",
+      subtitle: "Suggested source: P&L line items",
+      repeatSource: "pnl",
+    },
+    {
+      id: "import-signature",
+      kind: "signature",
+      title: "Imported signature block",
+      subtitle: "Authorized signatory section",
+    },
+  ];
+}
+
+function applyImportedTemplate(result: ImportTemplateResponse, fileName: string) {
+  const suggestedBlocks =
+    result.suggestedBlocks && result.suggestedBlocks.length > 0
+      ? result.suggestedBlocks
+      : fallbackImportedBlocks();
+
+  setImportDone(true);
+  setImportResult(result);
+  setBlocks(suggestedBlocks);
+  setSelectedBlockId(
+    suggestedBlocks.find((block) => block.kind === "transactions")?.id ||
+      suggestedBlocks[0]?.id ||
+      "import-letterhead"
+  );
+  setSelectedDocumentType(
+    result.detectedDocumentType || "Statement of Account (SOA)"
+  );
+  setTemplateName(fileName.replace(/\.[^.]+$/, " Smart Template"));
+  setWorkspaceTab("builder");
+  setRibbonTab("insert");
+  setMergeMode("import");
+  setStatusMessage(
+    result.message ||
+      "Template imported. Review detected blocks, unmapped fields and merge mappings."
+  );
+}
+
+function simulateImport() {
+  fileInputRef.current?.click();
+}
+
+async function importTemplateFile(event: ChangeEvent<HTMLInputElement>) {
+  try {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setApiBusy(true);
+    setStatusMessage("Uploading and analyzing existing template...");
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch("/api/document-studio/import-template", {
+      method: "POST",
+      body: formData,
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Unable to import template.");
+    }
+
+    applyImportedTemplate(result, file.name);
+  } catch (error) {
     setStatusMessage(
-      "Imported template detected with 87% layout confidence, 5 tables, 23 fields and 4 unmapped values."
+      error instanceof Error
+        ? error.message
+        : "Unable to import Word/PDF template."
     );
-    setBlocks([
-      {
-        id: "import-letterhead",
-        kind: "letterhead",
-        title: "Imported letterhead",
-        subtitle: "Detected from uploaded Word / PDF",
-      },
-      {
-        id: "import-identity",
-        kind: "identity",
-        title: "Imported investor identity",
-        subtitle: "Auto-mapped investor name, folio and fund fields",
-      },
-      {
-        id: "import-summary",
-        kind: "summary",
-        title: "Imported capital summary",
-        subtitle: "Auto-mapped commitment, called capital, NAV and uncalled",
-      },
-      {
-        id: "import-transactions",
-        kind: "transactions",
-        title: "Imported transaction table",
-        subtitle: "3 columns detected, source suggested: Transactions",
-        repeatSource: "transactions",
-      },
-      {
-        id: "import-financial",
-        kind: "financial",
-        title: "Imported financial statement",
-        subtitle: "P&L rows detected, 4 calculated fields suggested",
-        repeatSource: "pnl",
-      },
-      {
-        id: "import-chart",
-        kind: "chart",
-        title: "Imported chart placeholder",
-        subtitle: "Chart detected, requires series mapping",
-      },
-      {
-        id: "import-signature",
-        kind: "signature",
-        title: "Imported signature block",
-        subtitle: "Authorized signatory block detected",
-      },
-    ]);
-    setSelectedBlockId("import-transactions");
+  } finally {
+    setApiBusy(false);
+
+    if (event.target) {
+      event.target.value = "";
+    }
   }
+}
 
   async function saveTemplate() {
   try {
@@ -1752,44 +1835,114 @@ async function publishQueue() {
           </div>
         )}
 
-        {mergeMode === "import" && (
+               {mergeMode === "import" && (
           <div className="ids-panel-body">
             <div className="ids-import-score">
-              <strong>{importDone ? "87%" : "—"}</strong>
+              <strong>
+                {importResult?.importConfidence !== undefined
+                  ? `${importResult.importConfidence}%`
+                  : importDone
+                  ? "87%"
+                  : "—"}
+              </strong>
               <span>Import confidence</span>
             </div>
 
             <div className="ids-import-grid">
               <div>
-                <strong>{importDone ? "5" : "0"}</strong>
-                <span>Tables detected</span>
+                <strong>
+                  {importResult?.suggestedBlocks?.filter(
+                    (block) =>
+                      block.kind === "transactions" ||
+                      block.kind === "financial" ||
+                      block.kind === "summary"
+                  ).length ?? (importDone ? 5 : 0)}
+                </strong>
+                <span>Tables / blocks detected</span>
               </div>
+
               <div>
-                <strong>{importDone ? "23" : "0"}</strong>
+                <strong>
+                  {importResult?.detectedFields?.length ?? (importDone ? 23 : 0)}
+                </strong>
                 <span>Fields detected</span>
               </div>
+
               <div>
-                <strong>{importDone ? "19" : "0"}</strong>
+                <strong>
+                  {Math.max(
+                    0,
+                    (importResult?.detectedFields?.length ?? 0) -
+                      (importResult?.unmappedItems?.length ?? 0)
+                  ) || (importDone ? 19 : 0)}
+                </strong>
                 <span>Auto-mapped</span>
               </div>
+
               <div>
-                <strong>{importDone ? "4" : "0"}</strong>
+                <strong>
+                  {importResult?.unmappedItems?.length ?? (importDone ? 4 : 0)}
+                </strong>
                 <span>Need review</span>
               </div>
             </div>
 
+            {importResult?.detectedDocumentType && (
+              <div className="ids-source-card">
+                <strong>Detected activity</strong>
+                <span>{importResult.detectedDocumentType}</span>
+              </div>
+            )}
+
+            {importResult?.detectedSections &&
+              importResult.detectedSections.length > 0 && (
+                <div className="ids-source-card">
+                  <strong>Detected sections</strong>
+                  <span>{importResult.detectedSections.join(" · ")}</span>
+                </div>
+              )}
+
+            {importResult?.detectedFields &&
+              importResult.detectedFields.length > 0 && (
+                <div className="ids-source-card">
+                  <strong>Detected merge fields</strong>
+                  <div className="ids-chip-row">
+                    {importResult.detectedFields.slice(0, 18).map((field) => (
+                      <button key={field} type="button">
+                        {`{${field}}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            {importResult?.unmappedItems &&
+              importResult.unmappedItems.length > 0 && (
+                <div className="ids-source-card">
+                  <strong>Needs mapping review</strong>
+                  <div className="ids-chip-row">
+                    {importResult.unmappedItems.slice(0, 12).map((field) => (
+                      <button key={field} type="button">
+                        {`{${field}}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
             <button
               className="ids-primary-btn full"
+              disabled={apiBusy}
               onClick={simulateImport}
               type="button"
             >
-              Simulate Word/PDF Import
+              {apiBusy ? "Importing..." : "Import Word/PDF Template"}
             </button>
 
             <div className="ids-explain">
-              In the production version, this panel will show auto-detected
-              headings, tables, signature blocks, charts, merged cells and
-              unmapped fields after uploading an existing Word/PDF template.
+              Word .docx templates are parsed for merge fields, AIF sections and
+              smart block suggestions. PDF upload is stored and classified now;
+              deep PDF layout extraction will come in the next version.
             </div>
           </div>
         )}
@@ -2069,7 +2222,7 @@ async function publishQueue() {
           </div>
 
           <button className="ids-primary-btn" onClick={simulateImport} type="button">
-            Simulate Import
+            Import Existing Template
           </button>
         </div>
       </div>
@@ -2350,7 +2503,15 @@ function renderPublish() {
           >
             Publish Queue
           </button>
-        </div>
+                </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".docx,.pdf"
+          onChange={importTemplateFile}
+          style={{ display: "none" }}
+        />
 
         {workspaceTab === "builder" && (
           <div className="ids-studio-frame">
