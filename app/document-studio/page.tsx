@@ -947,16 +947,31 @@ function updateSelectedTableColumn(
 
 function addTableColumn() {
   const tableConfig = selectedBlock?.tableConfig || createTableConfig();
+  const sourceFields = tableFieldOptions[tableConfig.repeatSource];
+
+  const alreadyUsedFields = new Set(
+    tableConfig.columns.map((column) => column.fieldKey)
+  );
+
+  const nextAvailableField =
+    sourceFields.find((field) => !alreadyUsedFields.has(field.value)) ||
+    sourceFields[sourceFields.length - 1];
 
   const nextColumnNumber = tableConfig.columns.length + 1;
 
   const nextColumn: TableColumnConfig = {
     id: `column-${Date.now()}`,
-    header: `Column ${nextColumnNumber}`,
-    fieldKey: "particulars",
+    header: nextAvailableField?.label || `Column ${nextColumnNumber}`,
+    fieldKey: nextAvailableField?.value || "particulars",
     width: 20,
-    format: "text",
-    align: "left",
+    format:
+      (nextAvailableField?.format as TableColumnConfig["format"]) || "text",
+    align:
+      nextAvailableField?.format === "currency" ||
+      nextAvailableField?.format === "number" ||
+      nextAvailableField?.format === "percentage"
+        ? "right"
+        : "left",
   };
 
   updateSelectedTableConfig({
@@ -966,7 +981,9 @@ function addTableColumn() {
   setRibbonTab("table");
   setMergeMode("column");
   setStatusMessage(
-    `Column ${nextColumnNumber} added to ${selectedBlock?.title || "table"}. Total mapped columns: ${nextColumnNumber}.`
+    `${nextColumn.header} column added to ${
+      selectedBlock?.title || "table"
+    }. Total mapped columns: ${nextColumnNumber}.`
   );
 }
 
@@ -1972,7 +1989,11 @@ return (
 
       
         {isConfigurableTableBlock(block) && (
-  <table className="ids-template-table">
+  <table
+  className={`ids-template-table table-border-${
+    block.tableConfig?.borderPreset || "all"
+  } table-header-${block.tableConfig?.headerStyle || "gold"}`}
+>
     <thead>
       <tr>
         <th colSpan={block.tableConfig?.columns.length || 3}>
@@ -1995,7 +2016,7 @@ return (
     </thead>
 
     <tbody>
-      {[0, 1, 2].map((rowIndex) => (
+      {(block.tableConfig?.repeatRows ? [0, 1, 2] : [0]).map((rowIndex) => (
         <tr key={`sample-row-${block.id}-${rowIndex}`}>
           {(block.tableConfig?.columns || getDefaultTableConfigForBlock(block).columns).map(
             (column) => (
@@ -2014,8 +2035,9 @@ return (
         <td colSpan={block.tableConfig?.columns.length || 3}>
           <span className="ids-repeat-pill">
             ↻ repeats from{" "}
-            {block.tableConfig?.repeatSource || block.repeatSource || "table"} ·{" "}
-            {block.tableConfig?.columns.length || 3} mapped columns
+         {block.tableConfig?.repeatRows ? "↻ repeats from" : "Static table from"}{" "}
+{block.tableConfig?.repeatSource || block.repeatSource || "table"} ·{" "}
+{block.tableConfig?.columns.length || 3} mapped columns
           </span>
         </td>
       </tr>
@@ -4542,6 +4564,46 @@ function renderPublish() {
 .ids-table-action-row button:active {
   transform: translateY(1px);
   opacity: 0.86;
+}.ids-template-table.table-border-all th,
+.ids-template-table.table-border-all td {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.ids-template-table.table-border-horizontal th,
+.ids-template-table.table-border-horizontal td {
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.ids-template-table.table-border-none th,
+.ids-template-table.table-border-none td {
+  border-color: transparent;
+}
+
+.ids-template-table.table-header-gold thead tr:first-child th,
+.ids-template-table.table-header-gold thead tr:nth-child(2) th {
+  background: rgba(180, 131, 20, 0.16);
+  color: #f8fafc;
+}
+
+.ids-template-table.table-header-minimal thead tr:first-child th,
+.ids-template-table.table-header-minimal thead tr:nth-child(2) th {
+  background: rgba(15, 23, 42, 0.42);
+  color: #cbd5e1;
+}
+
+.ids-template-table.table-header-dark thead tr:first-child th,
+.ids-template-table.table-header-dark thead tr:nth-child(2) th {
+  background: rgba(2, 6, 23, 0.78);
+  color: #ffffff;
+}
+
+.ids-template-table.table-header-light thead tr:first-child th,
+.ids-template-table.table-header-light thead tr:nth-child(2) th {
+  background: rgba(248, 250, 252, 0.9);
+  color: #0f172a;
 }
       `}</style>
     </main>
