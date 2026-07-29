@@ -25,14 +25,40 @@ type BlockKind =
   | "notes"
   | "signature";
 
+type TableColumnConfig = {
+  id: string;
+  header: string;
+  fieldKey: string;
+  width: number;
+  format: "text" | "date" | "currency" | "number" | "percentage";
+  align: "left" | "center" | "right";
+};
+
+type TableBlockConfig = {
+  repeatSource:
+    | "transactions"
+    | "pnl"
+    | "cashflows"
+    | "capitalAccount"
+    | "taxBreakup"
+    | "distributionDetails"
+    | "unitMovements"
+    | "portfolioPerformance"
+    | "genericTable";
+  repeatRows: boolean;
+  borderPreset: "all" | "outer" | "horizontal" | "none";
+  headerStyle: "dark" | "light" | "gold" | "minimal";
+  columns: TableColumnConfig[];
+};
+
 type TemplateBlock = {
   id: string;
   kind: BlockKind;
   title: string;
-  subtitle?: string;
+  subtitle: string;
   repeatSource?: string;
+  tableConfig?: TableBlockConfig;
 };
-
 type InvestorProfile = {
   id: string;
   name: string;
@@ -197,7 +223,91 @@ const investors: InvestorProfile[] = [
     distribution: "₹1,10,50,000",
   },
 ];
+const tableFieldOptions = {
+  transactions: [
+    { label: "Date", value: "transaction_date", format: "date" },
+    { label: "Description", value: "transaction_description", format: "text" },
+    { label: "Type", value: "transaction_type", format: "text" },
+    { label: "Amount", value: "transaction_amount", format: "currency" },
+    { label: "Units", value: "units", format: "number" },
+    { label: "NAV", value: "nav", format: "currency" },
+  ],
+  pnl: [
+    { label: "Particular", value: "particular", format: "text" },
+    { label: "Reference", value: "reference", format: "text" },
+    { label: "Amount", value: "amount", format: "currency" },
+    { label: "Formula", value: "formula", format: "text" },
+  ],
+  cashflows: [
+    { label: "Cashflow Date", value: "cashflow_date", format: "date" },
+    { label: "Cashflow Type", value: "cashflow_type", format: "text" },
+    { label: "Amount", value: "amount", format: "currency" },
+    { label: "Remarks", value: "remarks", format: "text" },
+  ],
+  capitalAccount: [
+    { label: "Opening Capital", value: "opening_capital", format: "currency" },
+    { label: "Capital Contribution", value: "capital_contribution", format: "currency" },
+    { label: "Income Allocation", value: "income_allocation", format: "currency" },
+    { label: "Distribution", value: "distribution", format: "currency" },
+    { label: "Closing Capital", value: "closing_capital", format: "currency" },
+  ],
+  taxBreakup: [
+    { label: "Income Head", value: "income_head", format: "text" },
+    { label: "Gross Income", value: "gross_income", format: "currency" },
+    { label: "TDS", value: "tds", format: "currency" },
+    { label: "Net Income", value: "net_income", format: "currency" },
+  ],
+  distributionDetails: [
+    { label: "Distribution Date", value: "distribution_date", format: "date" },
+    { label: "Gross Distribution", value: "gross_distribution", format: "currency" },
+    { label: "Tax Withheld", value: "tax_withheld", format: "currency" },
+    { label: "Net Distribution", value: "net_distribution", format: "currency" },
+  ],
+  unitMovements: [
+    { label: "Date", value: "unit_date", format: "date" },
+    { label: "Opening Units", value: "opening_units", format: "number" },
+    { label: "Units Added", value: "units_added", format: "number" },
+    { label: "Units Redeemed", value: "units_redeemed", format: "number" },
+    { label: "Closing Units", value: "closing_units", format: "number" },
+  ],
+  portfolioPerformance: [
+    { label: "Company", value: "company_name", format: "text" },
+    { label: "Invested Amount", value: "invested_amount", format: "currency" },
+    { label: "Current Value", value: "current_value", format: "currency" },
+    { label: "MOIC", value: "moic", format: "number" },
+    { label: "IRR", value: "irr", format: "percentage" },
+  ],
+  genericTable: [
+    { label: "Particulars", value: "particulars", format: "text" },
+    { label: "Amount", value: "amount", format: "currency" },
+  ],
+} as const;
 
+function createTableConfig(
+  repeatSource: TableBlockConfig["repeatSource"] = "transactions"
+): TableBlockConfig {
+  const fields = tableFieldOptions[repeatSource];
+
+  return {
+    repeatSource,
+    repeatRows: true,
+    borderPreset: "all",
+    headerStyle: "gold",
+    columns: fields.slice(0, 4).map((field, index) => ({
+      id: `${repeatSource}-column-${index + 1}`,
+      header: field.label,
+      fieldKey: field.value,
+      width: index === 1 ? 42 : 19,
+      format: field.format as TableColumnConfig["format"],
+      align:
+        field.format === "currency" ||
+        field.format === "number" ||
+        field.format === "percentage"
+          ? "right"
+          : "left",
+    })),
+  };
+}
 const initialBlocks: TemplateBlock[] = [
   {
     id: "letterhead",
@@ -212,25 +322,29 @@ const initialBlocks: TemplateBlock[] = [
     subtitle: "Investor name, folio, PAN and address",
   },
   {
-    id: "summary",
-    kind: "summary",
-    title: "Capital account summary",
-    subtitle: "Commitment, called capital, NAV and uncalled capital",
-  },
+  id: "summary",
+  kind: "summary",
+  title: "Capital account summary",
+  subtitle: "Commitment, called capital, NAV and uncalled capital",
+  repeatSource: "capitalAccount",
+  tableConfig: createTableConfig("capitalAccount"),
+},
   {
-    id: "transactions",
-    kind: "transactions",
-    title: "Transaction summary",
-    subtitle: "Repeats from Transactions",
-    repeatSource: "transactions",
-  },
+  id: "transactions",
+  kind: "transactions",
+  title: "Transaction table",
+  subtitle: "Capital calls, distributions, unit movements and investor activity",
+  repeatSource: "transactions",
+  tableConfig: createTableConfig("transactions"),
+},
   {
-    id: "financial",
-    kind: "financial",
-    title: "Financial statement",
-    subtitle: "Income, expenses, net income and payout",
-    repeatSource: "pnl",
-  },
+  id: "financial",
+  kind: "financial",
+  title: "Financial statement",
+  subtitle: "Income, expenses, net income and payout",
+  repeatSource: "pnl",
+  tableConfig: createTableConfig("pnl"),
+},
   {
     id: "performance",
     kind: "performance",
@@ -684,12 +798,13 @@ function normalizeSavedTemplateBlocks(value: unknown): TemplateBlock[] {
     .map((item) => item as Partial<TemplateBlock>)
     .filter((item) => item.kind && allowedKinds.includes(item.kind))
     .map((item, index) => ({
-      id: item.id || `saved-block-${index}`,
-      kind: item.kind as BlockKind,
-      title: item.title || "Saved template block",
-      subtitle: item.subtitle || "Loaded from saved template",
-      repeatSource: item.repeatSource,
-    }));
+  id: item.id || `saved-block-${index}`,
+  kind: item.kind as BlockKind,
+  title: item.title || "Saved template block",
+  subtitle: item.subtitle || "Loaded from saved template",
+  repeatSource: item.repeatSource,
+  tableConfig: item.tableConfig,
+}));
 
   return cleanBlocks.length > 0 ? cleanBlocks : initialBlocks;
 }
@@ -776,6 +891,115 @@ function openSavedTemplate(template: SavedTemplate) {
   );
 }
 
+
+function updateSelectedBlock(updates: Partial<TemplateBlock>) {
+  setBlocks((currentBlocks) =>
+    currentBlocks.map((block) =>
+      block.id === selectedBlockId ? { ...block, ...updates } : block
+    )
+  );
+}
+
+function updateSelectedTableConfig(updates: Partial<TableBlockConfig>) {
+  setBlocks((currentBlocks) =>
+    currentBlocks.map((block) => {
+      if (block.id !== selectedBlockId) {
+        return block;
+      }
+
+      const existingConfig =
+        block.tableConfig || createTableConfig("transactions");
+
+      return {
+        ...block,
+        tableConfig: {
+          ...existingConfig,
+          ...updates,
+        },
+        repeatSource: updates.repeatSource || block.repeatSource,
+      };
+    })
+  );
+}
+
+function updateSelectedTableColumn(
+  columnId: string,
+  updates: Partial<TableColumnConfig>
+) {
+  setBlocks((currentBlocks) =>
+    currentBlocks.map((block) => {
+      if (block.id !== selectedBlockId || !block.tableConfig) {
+        return block;
+      }
+
+      return {
+        ...block,
+        tableConfig: {
+          ...block.tableConfig,
+          columns: block.tableConfig.columns.map((column) =>
+            column.id === columnId ? { ...column, ...updates } : column
+          ),
+        },
+      };
+    })
+  );
+}
+
+function addTableColumn() {
+  const tableConfig = selectedBlock?.tableConfig || createTableConfig();
+
+  const nextColumnNumber = tableConfig.columns.length + 1;
+
+  const nextColumn: TableColumnConfig = {
+    id: `column-${Date.now()}`,
+    header: `Column ${nextColumnNumber}`,
+    fieldKey: "particulars",
+    width: 20,
+    format: "text",
+    align: "left",
+  };
+
+  updateSelectedTableConfig({
+    columns: [...tableConfig.columns, nextColumn],
+  });
+
+  setRibbonTab("table");
+  setMergeMode("column");
+  setStatusMessage(
+    `Column ${nextColumnNumber} added to ${selectedBlock?.title || "table"}. Total mapped columns: ${nextColumnNumber}.`
+  );
+}
+
+function deleteTableColumn(columnId: string) {
+  const tableConfig = selectedBlock?.tableConfig;
+
+  if (!tableConfig || tableConfig.columns.length <= 1) {
+    setStatusMessage("At least one table column is required.");
+    return;
+  }
+
+  updateSelectedTableConfig({
+    columns: tableConfig.columns.filter((column) => column.id !== columnId),
+  });
+}
+
+function changeTableRepeatSource(
+  repeatSource: TableBlockConfig["repeatSource"]
+) {
+  const nextConfig = createTableConfig(repeatSource);
+
+  updateSelectedTableConfig(nextConfig);
+  updateSelectedBlock({
+    repeatSource,
+    subtitle: `Repeating table mapped to ${repeatSource}`,
+  });
+
+  setRibbonTab("table");
+  setMergeMode("column");
+  setStatusMessage(
+    `Table source changed to ${repeatSource}. Columns have been remapped automatically.`
+  );
+}
   function addBlock(kind: BlockKind) {
     const id = `${kind}-${Date.now()}`;
 
@@ -791,41 +1015,124 @@ function openSavedTemplate(template: SavedTemplate) {
       signature: "Signature block",
     };
 
-    const block: TemplateBlock = {
-      id,
-      kind,
-      title: titles[kind],
-      subtitle:
-        kind === "transactions"
-          ? "Repeats from Transactions"
-          : kind === "financial"
-          ? "Repeats from P&L line items"
-          : "Inserted from VENTIQ block library",
-      repeatSource:
-        kind === "transactions"
-          ? "transactions"
-          : kind === "financial"
-          ? "pnl"
-          : undefined,
-    };
-
+   const block: TemplateBlock = {
+  id,
+  kind,
+  title: titles[kind],
+  subtitle:
+    kind === "transactions"
+      ? "Repeats from Transactions"
+      : kind === "financial"
+      ? "Repeats from P&L line items"
+      : "Inserted from VENTIQ block library",
+  repeatSource:
+    kind === "transactions"
+      ? "transactions"
+      : kind === "financial"
+      ? "pnl"
+      : undefined,
+  tableConfig:
+  kind === "summary"
+    ? createTableConfig("capitalAccount")
+    : kind === "transactions"
+    ? createTableConfig("transactions")
+    : kind === "financial"
+    ? createTableConfig("pnl")
+    : undefined,
+};
     setBlocks((current) => [...current, block]);
     setSelectedBlockId(id);
     setStatusMessage(`${titles[kind]} inserted into the template.`);
     setWorkspaceTab("builder");
 
-    if (kind === "transactions" || kind === "financial") {
-      setRibbonTab("table");
-      setMergeMode("column");
-    } else if (kind === "chart") {
-      setRibbonTab("chart");
-      setMergeMode("calculated");
-    } else {
-      setRibbonTab("home");
-      setMergeMode("cell");
-    }
+   if (isConfigurableTableBlock(block)) {
+  setRibbonTab("table");
+  setMergeMode("column");
+} else if (kind === "chart") {
+  setRibbonTab("chart");
+  setMergeMode("calculated");
+} else {
+  setRibbonTab("home");
+  setMergeMode("cell");
+}
   }
+  function isConfigurableTableBlock(block?: TemplateBlock) {
+  return (
+    block?.kind === "summary" ||
+    block?.kind === "transactions" ||
+    block?.kind === "financial"
+  );
+}
 
+function getTableTitle(block: TemplateBlock) {
+  const source = block.tableConfig?.repeatSource || block.repeatSource;
+
+  if (source === "capitalAccount") return "Capital Account";
+  if (source === "pnl") return "Financial Statement";
+  if (source === "cashflows") return "Cashflows";
+  if (source === "taxBreakup") return "Tax Breakup";
+  if (source === "distributionDetails") return "Distribution Details";
+  if (source === "unitMovements") return "Unit Movements";
+  if (source === "portfolioPerformance") return "Portfolio Performance";
+  return "Transactions";
+}
+
+function getDefaultTableConfigForBlock(block: TemplateBlock) {
+  if (block.kind === "summary") return createTableConfig("capitalAccount");
+  if (block.kind === "financial") return createTableConfig("pnl");
+  return createTableConfig("transactions");
+}
+function getSampleValueForTableField(fieldKey: string) {
+  const sampleValues: Record<string, string> = {
+    transaction_date: "24-Apr-24",
+    transaction_description: "Units Allotment",
+    transaction_type: "Capital Call",
+    transaction_amount: "₹1,98,82,000",
+    units: "1,98,820",
+    nav: "₹100.00",
+
+    cashflow_date: "24-Apr-24",
+    cashflow_type: "Capital Call",
+    amount: "₹1,98,82,000",
+    remarks: "Investor cashflow",
+
+    opening_capital: "₹1,50,00,000",
+    capital_contribution: "₹50,00,000",
+    income_allocation: "₹8,44,514",
+    distribution: "₹5,91,981",
+    closing_capital: "₹1,82,40,000",
+
+    income_head: "Interest income",
+    gross_income: "₹8,44,514",
+    tds: "₹84,451",
+    net_income: "₹7,60,063",
+
+    distribution_date: "02-Jul-24",
+    gross_distribution: "₹5,91,981",
+    tax_withheld: "₹59,198",
+    net_distribution: "₹5,32,783",
+
+    unit_date: "24-Apr-24",
+    opening_units: "0",
+    units_added: "1,98,820",
+    units_redeemed: "0",
+    closing_units: "1,98,820",
+
+    company_name: "Portfolio Co A",
+    invested_amount: "₹50,00,000",
+    current_value: "₹82,00,000",
+    moic: "1.64x",
+    irr: "22.4%",
+
+    particular: "Interest / Fee Income",
+reference: "A",
+formula: "C = A + B",
+
+particulars: "Sample line item",
+  };
+
+  return sampleValues[fieldKey] || `{${fieldKey}}`;
+}
   function insertField(field: MergeField) {
     setStatusMessage(
       `{${field.code}} inserted into ${selectedBlock?.title ?? "selected block"}.`
@@ -852,13 +1159,14 @@ function openSavedTemplate(template: SavedTemplate) {
       title: "Imported capital summary",
       subtitle: "Commitment, called capital, NAV and uncalled capital",
     },
-    {
-      id: "import-transactions",
-      kind: "transactions",
-      title: "Imported transaction table",
-      subtitle: "Suggested source: Transactions",
-      repeatSource: "transactions",
-    },
+   {
+  id: "import-transactions",
+  kind: "transactions",
+  title: "Imported transaction table",
+  subtitle: "Suggested source: Transactions",
+  repeatSource: "transactions",
+  tableConfig: createTableConfig("transactions"),
+},
     {
       id: "import-financial",
       kind: "financial",
@@ -1448,106 +1756,160 @@ async function publishQueue() {
       );
     }
 
-    if (ribbonTab === "table") {
-      return (
-        <div className="ids-ribbon-grid">
-          <div className="ids-ribbon-group">
-            <button className="ids-soft-btn" type="button">
-              ↑ Row above
-            </button>
-            <button className="ids-soft-btn" type="button">
-              ↓ Row below
-            </button>
-            <button className="ids-soft-btn" type="button">
-              ← Col left
-            </button>
-            <button className="ids-soft-btn" type="button">
-              → Col right
-            </button>
-            <div className="ids-group-label">Rows & columns</div>
-          </div>
+   if (ribbonTab === "table") {
+  return (
+    <div className="ids-ribbon-grid">
+      <div className="ids-ribbon-group">
+        <button
+          className="ids-soft-btn"
+          onClick={() => {
+            const config = selectedBlock?.tableConfig || createTableConfig();
+            updateSelectedTableConfig({
+              repeatRows: !config.repeatRows,
+            });
+          }}
+          type="button"
+        >
+          {selectedBlock?.tableConfig?.repeatRows ? "Static Rows" : "Repeat Rows"}
+        </button>
 
-          <div className="ids-ribbon-group">
-            <button className="ids-soft-btn" type="button">
-              × Row
-            </button>
-            <button className="ids-soft-btn" type="button">
-              × Column
-            </button>
-            <div className="ids-group-label">Delete</div>
-          </div>
+        <button className="ids-soft-btn" onClick={addTableColumn} type="button">
+          + Add Column
+        </button>
 
-          <div className="ids-ribbon-group wide">
-            <select
-              className="ids-select"
-              value={selectedColumnSource}
-              onChange={(event) => setSelectedColumnSource(event.target.value)}
-            >
-              {columnSources.map((source) => (
-                <option key={source.id} value={source.id}>
-                  Repeats from {source.label}
-                </option>
-              ))}
-            </select>
-            <div className="ids-group-label">Repeat with data</div>
-          </div>
-
-          <div className="ids-ribbon-group">
-            <button className="ids-soft-btn disabled" type="button">
-              ⧉ Merge cells
-            </button>
-            <button className="ids-soft-btn" type="button">
-              ▤ Unmerge
-            </button>
-            <div className="ids-group-label">Merge</div>
-          </div>
-
-          <div className="ids-ribbon-group">
-            <select className="ids-select">
-              <option>All borders</option>
-              <option>Outer only</option>
-              <option>Inside only</option>
-              <option>Header rule</option>
-              <option>Subtotal rule</option>
-              <option>Double bottom</option>
-            </select>
-            <select className="ids-select">
-              <option>0.75 pt</option>
-              <option>1 pt</option>
-              <option>1.5 pt</option>
-            </select>
-            <div className="ids-group-label">Borders</div>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="ids-ribbon-grid">
-        <div className="ids-ribbon-group">
-          <select className="ids-select">
-            <option>Bar chart</option>
-            <option>Line chart</option>
-            <option>Waterfall</option>
-          </select>
-          <select className="ids-select">
-            <option>{`Series: {chart_series_1}`}</option>
-            <option>{`Series: {current_nav}`}</option>
-            <option>{`Series: {distributions}`}</option>
-          </select>
-          <div className="ids-group-label">Chart type & series</div>
-        </div>
-
-        <div className="ids-ribbon-group wide">
-          <div className="ids-mini-note">
-            Chart fields bind to calculated fields like XIRR, DPI, TVPI and NAV
-            movement.
-          </div>
-          <div className="ids-group-label">Chart fields</div>
-        </div>
+        <div className="ids-group-label">Rows & columns</div>
       </div>
-    );
-  }
+
+      <div className="ids-ribbon-group wide">
+        <select
+          className="ids-select"
+          value={selectedBlock?.tableConfig?.repeatSource || "transactions"}
+          onChange={(event) =>
+            changeTableRepeatSource(
+              event.target.value as TableBlockConfig["repeatSource"]
+            )
+          }
+        >
+          <option value="transactions">Repeats from Transactions</option>
+          <option value="pnl">P&L Line Items</option>
+          <option value="cashflows">Repeats from Cashflows</option>
+          <option value="capitalAccount">Repeats from Capital Account</option>
+          <option value="taxBreakup">Repeats from Tax Breakup</option>
+          <option value="distributionDetails">Repeats from Distribution Details</option>
+          <option value="unitMovements">Repeats from Unit Movements</option>
+          <option value="portfolioPerformance">Repeats from Portfolio Performance</option>
+          <option value="genericTable">Repeats from Generic Table</option>
+        </select>
+
+        <div className="ids-group-label">Repeat with data</div>
+      </div>
+
+      <div className="ids-ribbon-group">
+        <button
+  className={`ids-soft-btn ${
+    selectedBlock?.tableConfig?.borderPreset === "all" ? "active-tool" : ""
+  }`}
+  onClick={() => {
+    updateSelectedTableConfig({ borderPreset: "all" });
+    setStatusMessage("All borders applied to selected table.");
+  }}
+  type="button"
+>
+  All Borders
+</button>
+       <button
+  className={`ids-soft-btn ${
+    selectedBlock?.tableConfig?.borderPreset === "horizontal"
+      ? "active-tool"
+      : ""
+  }`}
+  onClick={() => {
+    updateSelectedTableConfig({ borderPreset: "horizontal" });
+    setStatusMessage("Horizontal borders applied to selected table.");
+  }}
+  type="button"
+>
+  Horizontal
+</button>
+
+      <button
+  className={`ids-soft-btn ${
+    selectedBlock?.tableConfig?.borderPreset === "none" ? "active-tool" : ""
+  }`}
+  onClick={() => {
+    updateSelectedTableConfig({ borderPreset: "none" });
+    setStatusMessage("Table borders removed.");
+  }}
+  type="button"
+>
+  No Borders
+</button>
+
+        <div className="ids-group-label">Borders</div>
+      </div>
+
+      <div className="ids-ribbon-group">
+       <button
+  className={`ids-soft-btn ${
+    selectedBlock?.tableConfig?.headerStyle === "gold" ? "active-tool" : ""
+  }`}
+  onClick={() => {
+    updateSelectedTableConfig({ headerStyle: "gold" });
+    setStatusMessage("Gold table header style applied.");
+  }}
+  type="button"
+>
+  Gold Header
+</button>
+
+    <button
+  className={`ids-soft-btn ${
+    selectedBlock?.tableConfig?.headerStyle === "minimal" ? "active-tool" : ""
+  }`}
+  onClick={() => {
+    updateSelectedTableConfig({ headerStyle: "minimal" });
+    setStatusMessage("Minimal table header style applied.");
+  }}
+  type="button"
+>
+  Minimal Header
+</button>
+
+        <div className="ids-group-label">Header style</div>
+      </div>
+    </div>
+  );
+}
+
+return (
+  <div className="ids-ribbon-grid">
+    <div className="ids-ribbon-group">
+      <select className="ids-select">
+        <option>Bar chart</option>
+        <option>Line chart</option>
+        <option>Waterfall</option>
+      </select>
+
+      <select className="ids-select">
+        <option>{`Series: {chart_series_1}`}</option>
+        <option>{`Series: {current_nav}`}</option>
+        <option>{`Series: {distributions}`}</option>
+      </select>
+
+      <div className="ids-group-label">Chart type & series</div>
+    </div>
+
+    <div className="ids-ribbon-group wide">
+      <div className="ids-mini-note">
+        Chart fields bind to calculated fields like XIRR, DPI, TVPI and NAV
+        movement.
+      </div>
+
+      <div className="ids-group-label">Chart fields</div>
+    </div>
+    </div>
+);
+}
 
   function renderTemplateBlock(block: TemplateBlock) {
     const isSelected = block.id === selectedBlockId;
@@ -1559,10 +1921,10 @@ async function publishQueue() {
         onClick={() => {
           setSelectedBlockId(block.id);
 
-          if (block.kind === "transactions" || block.kind === "financial") {
-            setRibbonTab("table");
-            setMergeMode("column");
-          } else if (block.kind === "chart") {
+         if (isConfigurableTableBlock(block)) {
+  setRibbonTab("table");
+  setMergeMode("column");
+} else if (block.kind === "chart") {
             setRibbonTab("chart");
             setMergeMode("calculated");
           } else {
@@ -1606,110 +1968,60 @@ async function publishQueue() {
           </div>
         )}
 
-        {block.kind === "summary" && (
-          <table className="ids-template-table">
-            <thead>
-              <tr>
-                <th colSpan={4}>Capital Account Summary</th>
-              </tr>
-              <tr>
-                <th>Commitment</th>
-                <th>Capital called</th>
-                <th>Uncalled capital</th>
-                <th>Current NAV</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{getInvestorValue(selectedInvestor, "commitment_amount")}</td>
-                <td>{getInvestorValue(selectedInvestor, "capital_called")}</td>
-                <td>{getInvestorValue(selectedInvestor, "uncalled_capital")}</td>
-                <td>{getInvestorValue(selectedInvestor, "current_nav")}</td>
-              </tr>
-            </tbody>
-          </table>
-        )}
+       
 
-        {block.kind === "transactions" && (
-          <table className="ids-template-table">
-            <thead>
-              <tr>
-                <th colSpan={3}>Transactions</th>
-              </tr>
-              <tr>
-                <th>Date</th>
-                <th>Description</th>
-                <th className="right">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>24-Apr-24</td>
-                <td>Units Allotment</td>
-                <td className="right">₹1,98,82,000</td>
-              </tr>
-              <tr>
-                <td>24-Apr-24</td>
-                <td>Setup Fees (One-time)</td>
-                <td className="right">₹1,18,000</td>
-              </tr>
-              <tr>
-                <td>02-Jul-24</td>
-                <td>Quarterly Income Distribution June 2024</td>
-                <td className="right">₹5,91,981</td>
-              </tr>
-              <tr>
-                <td colSpan={3}>
-                  <span className="ids-repeat-pill">
-                    ↻ repeats from {block.repeatSource ?? "Transactions"}
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        )}
+      
+        {isConfigurableTableBlock(block) && (
+  <table className="ids-template-table">
+    <thead>
+      <tr>
+        <th colSpan={block.tableConfig?.columns.length || 3}>
+          {getTableTitle(block)}
+        </th>
+      </tr>
 
-        {block.kind === "financial" && (
-          <table className="ids-template-table">
-            <thead>
-              <tr>
-                <th colSpan={3}>Financial Statement</th>
-              </tr>
-              <tr>
-                <th>Particular</th>
-                <th>Reference</th>
-                <th className="right">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Interest / Fee Income</td>
-                <td>A</td>
-                <td className="right">₹8,38,428</td>
-              </tr>
-              <tr>
-                <td>Short Term Capital Gain</td>
-                <td>B</td>
-                <td className="right">₹6,086</td>
-              </tr>
-              <tr className="bold-row">
-                <td>Gross Income</td>
-                <td>C = A + B</td>
-                <td className="right">₹8,44,514</td>
-              </tr>
-              <tr>
-                <td>Management Fee</td>
-                <td>D</td>
-                <td className="right">₹1,45,053</td>
-              </tr>
-              <tr className="bold-row">
-                <td>Net Income</td>
-                <td>H = C + G</td>
-                <td className="right">₹6,91,216</td>
-              </tr>
-            </tbody>
-          </table>
+      <tr>
+        {(block.tableConfig?.columns || getDefaultTableConfigForBlock(block).columns).map(
+          (column) => (
+            <th
+              className={column.align === "right" ? "right" : ""}
+              key={column.id}
+            >
+              {column.header}
+            </th>
+          )
         )}
+      </tr>
+    </thead>
+
+    <tbody>
+      {[0, 1, 2].map((rowIndex) => (
+        <tr key={`sample-row-${block.id}-${rowIndex}`}>
+          {(block.tableConfig?.columns || getDefaultTableConfigForBlock(block).columns).map(
+            (column) => (
+              <td
+                className={column.align === "right" ? "right" : ""}
+                key={`${block.id}-${rowIndex}-${column.id}`}
+              >
+                {getSampleValueForTableField(column.fieldKey)}
+              </td>
+            )
+          )}
+        </tr>
+      ))}
+
+      <tr>
+        <td colSpan={block.tableConfig?.columns.length || 3}>
+          <span className="ids-repeat-pill">
+            ↻ repeats from{" "}
+            {block.tableConfig?.repeatSource || block.repeatSource || "table"} ·{" "}
+            {block.tableConfig?.columns.length || 3} mapped columns
+          </span>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+)}
 
         {block.kind === "performance" && (
           <div className="ids-performance-grid">
@@ -1869,7 +2181,142 @@ async function publishQueue() {
             </div>
           </div>
         )}
+{isConfigurableTableBlock(selectedBlock) && (
+  <div className="ids-field-panel">
+    <div className="ids-panel-heading">
+      <div>
+        <p className="ids-eyebrow">Table Tools</p>
+        <h3>Table source and column mapping</h3>
+      </div>
+    </div>
 
+    <label className="ids-form-label">
+      Repeat source
+      <select
+        value={selectedBlock.tableConfig?.repeatSource || "transactions"}
+        onChange={(event) =>
+          changeTableRepeatSource(
+            event.target.value as TableBlockConfig["repeatSource"]
+          )
+        }
+      >
+        <option value="transactions">Transactions</option>
+        <option value="pnl">P&L Line Items</option>
+        <option value="cashflows">Cashflows</option>
+        <option value="capitalAccount">Capital Account</option>
+        <option value="taxBreakup">Tax Breakup</option>
+        <option value="distributionDetails">Distribution Details</option>
+        <option value="unitMovements">Unit Movements</option>
+        <option value="portfolioPerformance">Portfolio Performance</option>
+        <option value="genericTable">Generic Table</option>
+      </select>
+    </label>
+
+    <div className="ids-table-config-summary">
+      <span>
+        Rows:{" "}
+        {selectedBlock.tableConfig?.repeatRows
+          ? "Repeat with investor data"
+          : "Static rows"}
+      </span>
+      <span>
+        Borders: {selectedBlock.tableConfig?.borderPreset || "all"}
+      </span>
+      <span>
+        Header: {selectedBlock.tableConfig?.headerStyle || "gold"}
+      </span>
+    </div>
+
+    <div className="ids-column-config-list">
+      {(selectedBlock.tableConfig?.columns || createTableConfig().columns).map(
+        (column) => (
+          <div className="ids-column-config-card" key={column.id}>
+            <div className="ids-column-config-top">
+              <input
+                value={column.header}
+                onChange={(event) =>
+                  updateSelectedTableColumn(column.id, {
+                    header: event.target.value,
+                  })
+                }
+              />
+
+              <button
+                onClick={() => deleteTableColumn(column.id)}
+                type="button"
+              >
+                Delete
+              </button>
+            </div>
+
+            <label>
+              Field mapping
+              <select
+                value={column.fieldKey}
+                onChange={(event) => {
+                  const selectedField = tableFieldOptions[
+                    selectedBlock.tableConfig?.repeatSource || "transactions"
+                  ].find((field) => field.value === event.target.value);
+
+                  updateSelectedTableColumn(column.id, {
+                    fieldKey: event.target.value,
+                    format:
+                      (selectedField?.format as TableColumnConfig["format"]) ||
+                      column.format,
+                  });
+                }}
+              >
+                {tableFieldOptions[
+                  selectedBlock.tableConfig?.repeatSource || "transactions"
+                ].map((field) => (
+                  <option key={field.value} value={field.value}>
+                    {field.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="ids-column-config-grid">
+              <label>
+                Format
+                <select
+                  value={column.format}
+                  onChange={(event) =>
+                    updateSelectedTableColumn(column.id, {
+                      format: event.target.value as TableColumnConfig["format"],
+                    })
+                  }
+                >
+                  <option value="text">Text</option>
+                  <option value="date">Date</option>
+                  <option value="currency">Currency</option>
+                  <option value="number">Number</option>
+                  <option value="percentage">Percentage</option>
+                </select>
+              </label>
+
+              <label>
+                Align
+                <select
+                  value={column.align}
+                  onChange={(event) =>
+                    updateSelectedTableColumn(column.id, {
+                      align: event.target.value as TableColumnConfig["align"],
+                    })
+                  }
+                >
+                  <option value="left">Left</option>
+                  <option value="center">Center</option>
+                  <option value="right">Right</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        )
+      )}
+    </div>
+  </div>
+)}
         {mergeMode === "column" && (
           <div className="ids-panel-body">
             <p className="ids-muted">Table repeats from</p>
@@ -4009,6 +4456,93 @@ function renderPublish() {
           text-overflow: ellipsis;
           white-space: nowrap;
         }
+          .ids-table-config-summary {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+
+.ids-table-config-summary span {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.56);
+  color: #cbd5e1;
+  border-radius: 12px;
+  padding: 9px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ids-column-config-list {
+  display: grid;
+  gap: 12px;
+}
+
+.ids-column-config-card {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.42);
+  border-radius: 16px;
+  padding: 12px;
+}
+
+.ids-column-config-top {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.ids-column-config-card input,
+.ids-column-config-card select,
+.ids-form-label select {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(2, 6, 23, 0.65);
+  color: #f8fafc;
+  border-radius: 10px;
+  padding: 9px 10px;
+  font: inherit;
+}
+
+.ids-column-config-card label,
+.ids-form-label {
+  display: grid;
+  gap: 6px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ids-column-config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ids-column-config-top button {
+  border: 1px solid rgba(239, 68, 68, 0.32);
+  background: rgba(239, 68, 68, 0.12);
+  color: #fecaca;
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-weight: 900;
+  cursor: pointer;
+}
+  .ids-soft-btn.active-tool {
+  background: #b48314 !important;
+  color: #ffffff !important;
+  border-color: #b48314 !important;
+  box-shadow: 0 0 0 3px rgba(180, 131, 20, 0.18);
+}
+
+.ids-soft-btn:active,
+.ids-table-action-row button:active {
+  transform: translateY(1px);
+  opacity: 0.86;
+}
       `}</style>
     </main>
   );
