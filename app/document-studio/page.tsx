@@ -779,7 +779,7 @@ useEffect(() => {
 }, []);
 function normalizeSavedTemplateBlocks(value: unknown): TemplateBlock[] {
   if (!Array.isArray(value)) {
-    return initialBlocks;
+    return initialBlocks.map(ensureTableConfigForTemplateBlock);
   }
 
   const allowedKinds: BlockKind[] = [
@@ -797,16 +797,20 @@ function normalizeSavedTemplateBlocks(value: unknown): TemplateBlock[] {
   const cleanBlocks = value
     .map((item) => item as Partial<TemplateBlock>)
     .filter((item) => item.kind && allowedKinds.includes(item.kind))
-    .map((item, index) => ({
-  id: item.id || `saved-block-${index}`,
-  kind: item.kind as BlockKind,
-  title: item.title || "Saved template block",
-  subtitle: item.subtitle || "Loaded from saved template",
-  repeatSource: item.repeatSource,
-  tableConfig: item.tableConfig,
-}));
+    .map((item, index): TemplateBlock =>
+      ensureTableConfigForTemplateBlock({
+        id: item.id || `saved-block-${index}`,
+        kind: item.kind as BlockKind,
+        title: item.title || "Saved template block",
+        subtitle: item.subtitle || "Loaded from saved template",
+        repeatSource: item.repeatSource,
+        tableConfig: item.tableConfig,
+      })
+    );
 
-  return cleanBlocks.length > 0 ? cleanBlocks : initialBlocks;
+  return cleanBlocks.length > 0
+    ? cleanBlocks
+    : initialBlocks.map(ensureTableConfigForTemplateBlock);
 }
 
 function stringArrayFromUnknown(value: unknown) {
@@ -855,17 +859,19 @@ function getSavedTemplateImportResult(
 function openSavedTemplate(template: SavedTemplate) {
   const savedBlocks = normalizeSavedTemplateBlocks(template.blocks_json);
   const importInfo = getSavedTemplateImportResult(template);
+  const firstTableBlock = savedBlocks.find((block) =>
+    isConfigurableTableBlock(block)
+  );
 
   setActiveTemplateId(template.id);
   setTemplateName(template.template_name || "Untitled Template");
   setSelectedDocumentType(
     template.document_type || "Statement of Account (SOA)"
   );
+
   setBlocks(savedBlocks);
   setSelectedBlockId(
-    savedBlocks.find((block) => block.kind === "transactions")?.id ||
-      savedBlocks[0]?.id ||
-      "letterhead"
+    firstTableBlock?.id || savedBlocks[0]?.id || "letterhead"
   );
 
   setImportResult(importInfo);
@@ -882,15 +888,20 @@ function openSavedTemplate(template: SavedTemplate) {
   setPdfGenerationResult(null);
   setPublishResult(null);
 
-  setRibbonTab("insert");
-  setMergeMode(importInfo ? "import" : "cell");
+  if (firstTableBlock) {
+    setRibbonTab("table");
+    setMergeMode("column");
+  } else {
+    setRibbonTab("insert");
+    setMergeMode(importInfo ? "import" : "cell");
+  }
+
   setWorkspaceTab("builder");
 
   setStatusMessage(
-    `${template.template_name} opened from Template Library. You can edit, preview, batch generate and publish it.`
+    `${template.template_name} opened from Template Library. Table mappings, repeat source and column settings are ready for editing.`
   );
 }
-
 
 function updateSelectedBlock(updates: Partial<TemplateBlock>) {
   setBlocks((currentBlocks) =>
@@ -1099,6 +1110,49 @@ function getDefaultTableConfigForBlock(block: TemplateBlock) {
   if (block.kind === "financial") return createTableConfig("pnl");
   return createTableConfig("transactions");
 }
+function getDefaultRepeatSourceForBlock(block: TemplateBlock): TableBlockConfig["repeatSource"] {
+  if (block.kind === "summary") return "capitalAccount";
+  if (block.kind === "financial") return "pnl";
+  return "transactions";
+}
+
+function isValidTableRepeatSource(
+  value: unknown
+): value is TableBlockConfig["repeatSource"] {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(tableFieldOptions, value)
+  );
+}
+
+function ensureTableConfigForTemplateBlock(block: TemplateBlock): TemplateBlock {
+  if (!isConfigurableTableBlock(block)) {
+    return block;
+  }
+
+  const repeatSource = isValidTableRepeatSource(block.tableConfig?.repeatSource)
+    ? block.tableConfig.repeatSource
+    : isValidTableRepeatSource(block.repeatSource)
+    ? block.repeatSource
+    : getDefaultRepeatSourceForBlock(block);
+
+  const fallbackConfig = createTableConfig(repeatSource);
+  const existingColumns =
+    block.tableConfig?.columns && block.tableConfig.columns.length > 0
+      ? block.tableConfig.columns
+      : fallbackConfig.columns;
+
+  return {
+    ...block,
+    repeatSource,
+    tableConfig: {
+      ...fallbackConfig,
+      ...block.tableConfig,
+      repeatSource,
+      columns: existingColumns,
+    },
+  };
+}
 function getSampleValueForTableField(fieldKey: string) {
   const sampleValues: Record<string, string> = {
     transaction_date: "24-Apr-24",
@@ -1171,11 +1225,13 @@ particulars: "Sample line item",
       subtitle: "Investor name, folio and fund fields need review",
     },
     {
-      id: "import-summary",
-      kind: "summary",
-      title: "Imported capital summary",
-      subtitle: "Commitment, called capital, NAV and uncalled capital",
-    },
+  id: "import-summary",
+  kind: "summary",
+  title: "Imported capital summary",
+  subtitle: "Commitment, called capital, NAV and uncalled capital",
+  repeatSource: "capitalAccount",
+  tableConfig: createTableConfig("capitalAccount"),
+},
    {
   id: "import-transactions",
   kind: "transactions",
@@ -1184,13 +1240,14 @@ particulars: "Sample line item",
   repeatSource: "transactions",
   tableConfig: createTableConfig("transactions"),
 },
-    {
-      id: "import-financial",
-      kind: "financial",
-      title: "Imported financial statement",
-      subtitle: "Suggested source: P&L line items",
-      repeatSource: "pnl",
-    },
+   {
+  id: "import-financial",
+  kind: "financial",
+  title: "Imported financial statement",
+  subtitle: "Suggested source: P&L line items",
+  repeatSource: "pnl",
+  tableConfig: createTableConfig("pnl"),
+},
     {
       id: "import-signature",
       kind: "signature",
