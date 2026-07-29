@@ -70,6 +70,12 @@ type SavedTemplate = {
   template_status: string | null;
   source_type: string | null;
   import_confidence: number | null;
+  version_number?: number | null;
+  layout_json?: unknown;
+  blocks_json?: unknown;
+  field_mappings?: unknown;
+  calculated_fields?: unknown;
+  created_at?: string | null;
   updated_at: string | null;
 };
 
@@ -657,6 +663,118 @@ const [statusMessage, setStatusMessage] = useState(
 useEffect(() => {
   loadSavedTemplates();
 }, []);
+function normalizeSavedTemplateBlocks(value: unknown): TemplateBlock[] {
+  if (!Array.isArray(value)) {
+    return initialBlocks;
+  }
+
+  const allowedKinds: BlockKind[] = [
+    "letterhead",
+    "identity",
+    "summary",
+    "transactions",
+    "financial",
+    "performance",
+    "chart",
+    "notes",
+    "signature",
+  ];
+
+  const cleanBlocks = value
+    .map((item) => item as Partial<TemplateBlock>)
+    .filter((item) => item.kind && allowedKinds.includes(item.kind))
+    .map((item, index) => ({
+      id: item.id || `saved-block-${index}`,
+      kind: item.kind as BlockKind,
+      title: item.title || "Saved template block",
+      subtitle: item.subtitle || "Loaded from saved template",
+      repeatSource: item.repeatSource,
+    }));
+
+  return cleanBlocks.length > 0 ? cleanBlocks : initialBlocks;
+}
+
+function stringArrayFromUnknown(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as string[];
+  }
+
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function getSavedTemplateImportResult(
+  template: SavedTemplate
+): ImportTemplateResponse | null {
+  if (!template.field_mappings || typeof template.field_mappings !== "object") {
+    return null;
+  }
+
+  const mappings = template.field_mappings as Record<string, unknown>;
+  const importIntelligence = mappings.import_intelligence;
+
+  if (!importIntelligence || typeof importIntelligence !== "object") {
+    return null;
+  }
+
+  const importData = importIntelligence as Record<string, unknown>;
+
+  return {
+    detectedDocumentType:
+      typeof importData.detected_document_type === "string"
+        ? importData.detected_document_type
+        : template.document_type || undefined,
+    importConfidence:
+      typeof importData.import_confidence === "number"
+        ? importData.import_confidence
+        : template.import_confidence || undefined,
+    detectedFields: stringArrayFromUnknown(importData.detected_fields),
+    detectedSections: stringArrayFromUnknown(importData.detected_sections),
+    unmappedItems: stringArrayFromUnknown(importData.unmapped_items),
+    storage:
+      importData.storage && typeof importData.storage === "object"
+        ? (importData.storage as ImportTemplateResponse["storage"])
+        : undefined,
+  };
+}
+
+function openSavedTemplate(template: SavedTemplate) {
+  const savedBlocks = normalizeSavedTemplateBlocks(template.blocks_json);
+  const importInfo = getSavedTemplateImportResult(template);
+
+  setActiveTemplateId(template.id);
+  setTemplateName(template.template_name || "Untitled Template");
+  setSelectedDocumentType(
+    template.document_type || "Statement of Account (SOA)"
+  );
+  setBlocks(savedBlocks);
+  setSelectedBlockId(
+    savedBlocks.find((block) => block.kind === "transactions")?.id ||
+      savedBlocks[0]?.id ||
+      "letterhead"
+  );
+
+  setImportResult(importInfo);
+  setImportDone(
+    Boolean(
+      importInfo ||
+        template.source_type?.toLowerCase().includes("import") ||
+        Number(template.import_confidence || 0) > 0
+    )
+  );
+
+  setPreviewMergeData(null);
+  setBatchResult(null);
+  setPdfGenerationResult(null);
+  setPublishResult(null);
+
+  setRibbonTab("insert");
+  setMergeMode(importInfo ? "import" : "cell");
+  setWorkspaceTab("builder");
+
+  setStatusMessage(
+    `${template.template_name} opened from Template Library. You can edit, preview, batch generate and publish it.`
+  );
+}
 
   function addBlock(kind: BlockKind) {
     const id = `${kind}-${Date.now()}`;
@@ -856,13 +974,23 @@ async function importTemplateFile(event: ChangeEvent<HTMLInputElement>) {
         },
         blocks_json: blocks,
         field_mappings: {
-          cell_fields: cellFields.map((field) => field.code),
-          column_sources: columnSources.map((source) => ({
-            id: source.id,
-            label: source.label,
-            fields: source.fields.map((field) => field.code),
-          })),
-        },
+  cell_fields: cellFields.map((field) => field.code),
+  column_sources: columnSources.map((source) => ({
+    id: source.id,
+    label: source.label,
+    fields: source.fields.map((field) => field.code),
+  })),
+  import_intelligence: importResult
+    ? {
+        detected_document_type: importResult.detectedDocumentType,
+        import_confidence: importResult.importConfidence,
+        detected_fields: importResult.detectedFields ?? [],
+        detected_sections: importResult.detectedSections ?? [],
+        unmapped_items: importResult.unmappedItems ?? [],
+        storage: importResult.storage ?? null,
+      }
+    : null,
+},
         calculated_fields: calculatedFields,
       }),
     });
