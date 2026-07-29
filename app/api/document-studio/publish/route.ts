@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
       .from("document_studio_generated_documents")
       .select("*")
       .eq("batch_id", batchId)
-      .in("generation_status", ["Ready", "Generated"]);
+      .eq("generation_status", "Generated");
 
     if (generatedError) {
       return NextResponse.json(

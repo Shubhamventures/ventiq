@@ -111,7 +111,18 @@ type PublishResponse = {
   batch_id?: string;
   publishedDocuments?: number;
 };
-
+type PdfGenerationResponse = {
+  message?: string;
+  batch_id?: string;
+  generatedDocuments?: number;
+  failedDocuments?: number;
+  documents?: {
+    investor_code?: string;
+    investor_name?: string;
+    file_name?: string;
+    file_url?: string;
+  }[];
+};
 const investors: InvestorProfile[] = [
   {
     id: "aarav",
@@ -584,6 +595,8 @@ const [batchResult, setBatchResult] = useState<BatchGenerationResponse | null>(
 const [publishResult, setPublishResult] = useState<PublishResponse | null>(
   null
 );
+const [pdfGenerationResult, setPdfGenerationResult] =
+  useState<PdfGenerationResponse | null>(null);
 const [apiBusy, setApiBusy] = useState(false);
 const [statusMessage, setStatusMessage] = useState(
   "Template Builder ready. Insert blocks, map fields, preview and batch generate."
@@ -886,7 +899,53 @@ async function runBatch() {
     setApiBusy(false);
   }
 }
+async function generatePdfFiles() {
+  try {
+    const batchId = batchResult?.batch?.id;
 
+    if (!batchId) {
+      setStatusMessage("Prepare a batch first before generating PDF files.");
+      setWorkspaceTab("batch");
+      return;
+    }
+
+    setApiBusy(true);
+    setStatusMessage("Generating actual PDF files and uploading to storage...");
+
+    const response = await fetch("/api/document-studio/generate-pdfs", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        batch_id: batchId,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Unable to generate PDF files.");
+    }
+
+    setPdfGenerationResult(result);
+    setWorkspaceTab("batch");
+
+    setStatusMessage(
+      result.message ||
+        "PDF files generated and uploaded successfully."
+    );
+  } catch (error) {
+    setPdfGenerationResult(null);
+    setStatusMessage(
+      error instanceof Error
+        ? error.message
+        : "Unable to generate PDF files."
+    );
+  } finally {
+    setApiBusy(false);
+  }
+}
 async function publishQueue() {
   try {
     setWorkspaceTab("publish");
@@ -2026,8 +2085,8 @@ async function publishQueue() {
         <p className="ids-eyebrow">Batch Generation</p>
         <h2>Generate investor-wise PDFs from one template</h2>
         <p>
-          Select a template, choose investors, run generation, review exceptions
-          and publish final files to Investor Portal.
+          Prepare the queue, generate actual PDF files, then publish the final
+          documents to Investor Portal.
         </p>
       </div>
 
@@ -2052,15 +2111,25 @@ async function publishQueue() {
             onClick={runBatch}
             type="button"
           >
-            {apiBusy ? "Preparing Batch..." : "Prepare Batch From Migrated Data"}
+            {apiBusy ? "Preparing..." : "1. Prepare Batch"}
+          </button>
+
+          <button
+            className="ids-primary-btn"
+            disabled={apiBusy || !batch}
+            onClick={generatePdfFiles}
+            type="button"
+          >
+            {apiBusy ? "Generating..." : "2. Generate PDF Files"}
           </button>
 
           <button
             className="ids-secondary-btn"
+            disabled={apiBusy || !pdfGenerationResult}
             onClick={publishQueue}
             type="button"
           >
-            Open Publish Queue
+            3. Publish Queue
           </button>
         </div>
 
@@ -2078,43 +2147,73 @@ async function publishQueue() {
           </div>
         )}
 
-        {!batch && (
-          <div className="ids-explain" style={{ marginTop: 22 }}>
-            Batch is not prepared yet. Click “Prepare Batch From Migrated Data”
-            to create a generation queue from investor_master.
+        {pdfGenerationResult && (
+          <div className="ids-import-hero" style={{ marginTop: 22 }}>
+            <div>
+              <p className="ids-eyebrow">PDF Files Generated</p>
+              <h3>
+                {pdfGenerationResult.generatedDocuments} PDF file(s) generated
+              </h3>
+              <p>
+                Failed: {pdfGenerationResult.failedDocuments ?? 0}. Files are
+                uploaded to Supabase Storage and linked to the generation queue.
+              </p>
+            </div>
           </div>
         )}
 
-        <div className="ids-investor-list">
-          {investors.map((investor, index) => (
-            <div key={investor.id}>
-              <span>
-                <strong>{investor.name}</strong>
-                <small>
-                  {investor.code} · {investor.commitment}
-                </small>
-              </span>
-              <em className={index === 1 ? "review" : "ready"}>
-                {index === 1 ? "Needs review" : "Ready"}
-              </em>
+        {!batch && (
+          <div className="ids-explain" style={{ marginTop: 22 }}>
+            Batch is not prepared yet. Click “Prepare Batch” to create a
+            generation queue from investor_master.
+          </div>
+        )}
+
+        {pdfGenerationResult?.documents &&
+          pdfGenerationResult.documents.length > 0 && (
+            <div className="ids-investor-list">
+              {pdfGenerationResult.documents.slice(0, 10).map((document) => (
+                <div key={`${document.investor_code}-${document.file_name}`}>
+                  <span>
+                    <strong>{document.investor_name}</strong>
+                    <small>
+                      {document.investor_code} · {document.file_name}
+                    </small>
+                  </span>
+
+                  {document.file_url ? (
+                    <a
+                      className="ids-secondary-btn"
+                      href={document.file_url}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Open PDF
+                    </a>
+                  ) : (
+                    <em className="review">No URL</em>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
       </div>
     </div>
   );
 }
-
- function renderPublish() {
+function renderPublish() {
   const batch = batchResult?.batch;
+  const hasGeneratedPdfs =
+    Boolean(pdfGenerationResult?.generatedDocuments) &&
+    Number(pdfGenerationResult?.generatedDocuments) > 0;
 
   return (
     <div className="ids-simple-page">
       <div className="ids-studio-hero">
         <p className="ids-eyebrow">Publish Queue</p>
-        <h2>Push approved documents to Investor Portal</h2>
+        <h2>Push approved PDF files to Investor Portal</h2>
         <p>
-          Final generated documents are inserted into investor_documents and
+          Final generated PDF records are inserted into investor_documents and
           become visible inside the Investor Portal.
         </p>
       </div>
@@ -2126,6 +2225,13 @@ async function publishQueue() {
         </div>
       )}
 
+      {batch && !hasGeneratedPdfs && (
+        <div className="ids-explain" style={{ marginTop: 22 }}>
+          Batch is prepared, but PDF files are not generated yet. Go back to
+          Batch Generation and click “Generate PDF Files”.
+        </div>
+      )}
+
       {batch && (
         <>
           <div className="ids-import-hero" style={{ marginTop: 22 }}>
@@ -2133,15 +2239,16 @@ async function publishQueue() {
               <p className="ids-eyebrow">Current Batch</p>
               <h3>{batch.batch_name}</h3>
               <p>
-                Total investors: {batch.total_investors} · Ready:{" "}
-                {batch.ready_count} · Already published:{" "}
+                Total investors: {batch.total_investors} · Generated PDFs:{" "}
+                {pdfGenerationResult?.generatedDocuments ?? 0} · Already
+                published:{" "}
                 {publishResult?.publishedDocuments ?? batch.published_count ?? 0}
               </p>
             </div>
 
             <button
               className="ids-primary-btn"
-              disabled={apiBusy}
+              disabled={apiBusy || !hasGeneratedPdfs}
               onClick={publishQueue}
               type="button"
             >
@@ -2153,7 +2260,7 @@ async function publishQueue() {
             <div className="ids-import-hero" style={{ marginTop: 22 }}>
               <div>
                 <p className="ids-eyebrow">Published</p>
-                <h3>{publishResult.publishedDocuments} document records pushed</h3>
+                <h3>{publishResult.publishedDocuments} PDF records pushed</h3>
                 <p>
                   These records are now available in investor_documents and can
                   be surfaced inside the Investor Portal.
@@ -2167,16 +2274,21 @@ async function publishQueue() {
           )}
 
           <div className="ids-publish-grid">
-            {investors.map((investor) => (
-              <div className="ids-publish-card" key={investor.id}>
-                <strong>{investor.name}</strong>
-                <span>{investor.code}</span>
-                <p>{selectedDocumentType}</p>
-                <em>
-                  {publishResult ? "Published to Portal" : "Ready to publish"}
-                </em>
-              </div>
-            ))}
+            {(pdfGenerationResult?.documents ?? investors).map((item: any) => {
+              const investorName = item.investor_name || item.name;
+              const investorCode = item.investor_code || item.code;
+
+              return (
+                <div className="ids-publish-card" key={investorCode}>
+                  <strong>{investorName}</strong>
+                  <span>{investorCode}</span>
+                  <p>{selectedDocumentType}</p>
+                  <em>
+                    {publishResult ? "Published to Portal" : "Ready to publish"}
+                  </em>
+                </div>
+              );
+            })}
           </div>
         </>
       )}
