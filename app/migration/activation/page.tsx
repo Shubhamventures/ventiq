@@ -365,6 +365,12 @@ export default function DataActivationDashboardPage() {
 >
   Open Stakeholder Launch Center
 </a>
+<a
+  className="activation-secondary-button"
+  href="/document-studio"
+>
+  Open Document Studio
+</a>
             </div>
           </div>
 

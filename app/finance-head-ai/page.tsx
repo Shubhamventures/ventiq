@@ -1194,6 +1194,14 @@ const [
           financeMetrics.documentsNotStored > 0 ? "High" : "Clear",
       },
       {
+  title: "Generate investor documents",
+  value: `${financeMetrics.generatedDocuments} document records ready`,
+  href: "/document-studio",
+  priority:
+    financeMetrics.generatedDocuments > 0 ? "On track" : "Start",
+},
+      {
+        
         title: "Queue investor email dispatch",
         value: `${financeMetrics.queuedEmails} queued / ${financeMetrics.sentEmails} sent`,
         href: "/document-engine",
@@ -1335,6 +1343,12 @@ const [
                 <a className="monitor-btn monitor-btn-primary" href="/capital-call">
                   Open Capital Calls
                 </a>
+                <a
+  className="monitor-btn monitor-btn-primary"
+  href="/document-studio"
+>
+  Generate Investor Documents
+</a>
 
                 <a
                   className="monitor-btn monitor-btn-secondary"

@@ -535,6 +535,7 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
         <a href="/demo">Start Guided Demo</a>
         <a href="/migration/data-intake">Data Intake</a>
         <a href="/migration/pdf-intelligence">PDF Intelligence</a>
+        <a href="/document-studio">Document Studio</a>
         <a href="/migration/stakeholder-launch">Launch Dashboards</a>
         <a href="/investor-portal">Investor Portal</a>
       </div>
@@ -756,6 +757,24 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
 
                 <strong>Open Workspace →</strong>
               </a>
+              <a className="stakeholder-workspace-item" href="/document-studio">
+  <div className="workspace-tag">Document Studio</div>
+
+  <h3>Investor Document Generation</h3>
+
+  <p>
+    Import templates, generate SOA, capital call notices, distribution notices,
+    Form 64C, Form 64D and publish PDFs to the Investor Portal.
+  </p>
+
+  <div className="workspace-micro-list">
+    <span>Template import</span>
+    <span>Batch PDFs</span>
+    <span>Portal publishing</span>
+  </div>
+
+  <strong>Open Studio →</strong>
+</a>
 
               <a className="stakeholder-workspace-item" href="/finance-head-ai">
                 <div className="workspace-tag">Finance</div>
