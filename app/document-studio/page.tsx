@@ -59,6 +59,11 @@ type TemplateBlock = {
   content?: string;
   repeatSource?: string;
   tableConfig?: TableBlockConfig;
+  stylePreset?: "normal" | "header" | "highlight" | "muted";
+  align?: "left" | "center" | "right";
+  valueFormat?: "number" | "currency" | "date" | "percentage" | "multiple";
+  chartType?: "bar" | "line" | "waterfall";
+  chartSeries?: string;
 };
 type InvestorProfile = {
   id: string;
@@ -746,6 +751,22 @@ const [apiBusy, setApiBusy] = useState(false);
 const [statusMessage, setStatusMessage] = useState(
   "Template Builder ready. Insert blocks, map fields, preview and batch generate."
 );
+const [showGrid, setShowGrid] = useState(true);
+const [showRulers, setShowRulers] = useState(true);
+const [snapToGrid, setSnapToGrid] = useState(false);
+const [showSampleValues, setShowSampleValues] = useState(true);
+const [zoomLevel, setZoomLevel] = useState(100);
+const [pageMargins, setPageMargins] = useState({
+  left: 15,
+  right: 15,
+  top: 20,
+  bottom: 15,
+});
+const [formulaName, setFormulaName] = useState("net_income_custom");
+const [formulaExpression, setFormulaExpression] = useState(
+  "gross_income - total_expenses - tds"
+);
+const [customCalculatedFields, setCustomCalculatedFields] = useState<MergeField[]>([]);
   const selectedInvestor =
     investors.find((investor) => investor.id === selectedInvestorId) ??
     investors[0];
@@ -761,6 +782,11 @@ const [statusMessage, setStatusMessage] = useState(
 const selectedBlockIndex = blocks.findIndex(
   (block) => block.id === selectedBlockId
 );
+
+const availableCalculatedFields = [
+  ...calculatedFields,
+  ...customCalculatedFields,
+];
     async function loadSavedTemplates() {
   try {
     const response = await fetch("/api/document-studio/templates", {
@@ -811,6 +837,11 @@ function normalizeSavedTemplateBlocks(value: unknown): TemplateBlock[] {
   content: item.content,
   repeatSource: item.repeatSource,
   tableConfig: item.tableConfig,
+  stylePreset: item.stylePreset,
+  align: item.align,
+  valueFormat: item.valueFormat,
+  chartType: item.chartType,
+  chartSeries: item.chartSeries,
 })
     );
 
@@ -926,6 +957,152 @@ function renameSelectedBlock(field: "title" | "subtitle", value: string) {
       ? "Block title updated."
       : "Block description updated."
   );
+}
+
+function cloneTemplateBlocks(sourceBlocks: TemplateBlock[]) {
+  return sourceBlocks.map((block) => ({
+    ...block,
+    tableConfig: block.tableConfig
+      ? {
+          ...block.tableConfig,
+          columns: block.tableConfig.columns.map((column) => ({ ...column })),
+        }
+      : undefined,
+  }));
+}
+
+function startNewTemplate() {
+  const freshBlocks = cloneTemplateBlocks(initialBlocks).map(
+    ensureTableConfigForTemplateBlock
+  );
+
+  setActiveTemplateId("");
+  setTemplateName("Untitled AIF Template");
+  setSelectedDocumentType("Statement of Account (SOA)");
+  setBlocks(freshBlocks);
+  setSelectedBlockId("transactions");
+  setSelectedInvestorId("aarav");
+  setImportDone(false);
+  setImportResult(null);
+  setPreviewMergeData(null);
+  setBatchResult(null);
+  setPdfGenerationResult(null);
+  setPublishResult(null);
+  setRibbonTab("insert");
+  setMergeMode("cell");
+  setStatusMessage("New blank template created. Insert blocks and map fields.");
+}
+
+function updatePageMargin(
+  key: "left" | "right" | "top" | "bottom",
+  value: string
+) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return;
+  }
+
+  setPageMargins((current) => ({
+    ...current,
+    [key]: numericValue,
+  }));
+
+  setStatusMessage(`Page ${key} margin updated to ${numericValue}mm.`);
+}
+
+function addPageBreakBlock() {
+  const id = `notes-${Date.now()}`;
+
+  const block: TemplateBlock = {
+    id,
+    kind: "notes",
+    title: "Continuation note",
+    subtitle: "Inserted as a new section / page continuation marker",
+    content:
+      "Continuation page / additional disclosure. Replace this text with your required note.",
+    stylePreset: "muted",
+  };
+
+  setBlocks((current) => [...current, block]);
+  setSelectedBlockId(id);
+  setRibbonTab("home");
+  setMergeMode("cell");
+  setStatusMessage("New continuation note inserted. Use it as a page break marker for now.");
+}
+
+function applySelectedBlockStyle(
+  stylePreset: NonNullable<TemplateBlock["stylePreset"]>
+) {
+  updateSelectedBlock({ stylePreset });
+  setStatusMessage(`Block style changed to ${stylePreset}.`);
+}
+
+function applySelectedBlockAlignment(align: NonNullable<TemplateBlock["align"]>) {
+  updateSelectedBlock({ align });
+  setStatusMessage(`Block alignment changed to ${align}.`);
+}
+
+function applySelectedBlockValueFormat(
+  valueFormat: NonNullable<TemplateBlock["valueFormat"]>
+) {
+  updateSelectedBlock({ valueFormat });
+  setStatusMessage(`Value format changed to ${valueFormat}.`);
+}
+
+function updateChartBlock(updates: Partial<TemplateBlock>) {
+  if (selectedBlock?.kind !== "chart") {
+    const id = `chart-${Date.now()}`;
+    const block: TemplateBlock = {
+      id,
+      kind: "chart",
+      title: "Performance chart",
+      subtitle: "DPI, TVPI, NAV and distribution movement",
+      content: "Portfolio Movement Chart",
+      chartType: "bar",
+      chartSeries: "current_nav",
+    };
+
+    setBlocks((current) => [...current, block]);
+    setSelectedBlockId(id);
+    setRibbonTab("chart");
+    setMergeMode("calculated");
+    setStatusMessage("Chart block inserted. Configure chart type and series.");
+    return;
+  }
+
+  updateSelectedBlock(updates);
+  setStatusMessage("Chart settings updated.");
+}
+
+function appendFormulaToken(token: string) {
+  setFormulaExpression((current) => `${current} ${token}`.trim());
+}
+
+function saveCalculatedField() {
+  const cleanName = formulaName.trim().replace(/\s+/g, "_").toLowerCase();
+
+  if (!cleanName || !formulaExpression.trim()) {
+    setStatusMessage("Add a calculated field name and formula before saving.");
+    return;
+  }
+
+  const nextField: MergeField = {
+    code: cleanName,
+    label: cleanName
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" "),
+    category: "Calculated",
+    type: "FORMULA",
+    sample: formulaExpression.trim(),
+  };
+
+  setCustomCalculatedFields((current) => [
+    ...current.filter((field) => field.code !== nextField.code),
+    nextField,
+  ]);
+  setStatusMessage(`Calculated field {${nextField.code}} saved.`);
 }
 function updateSelectedTableConfig(updates: Partial<TableBlockConfig>) {
   setBlocks((currentBlocks) =>
@@ -1074,7 +1251,19 @@ function changeTableRepeatSource(
       ? "This statement is generated based on the books and records of the Fund as on {report_date}."
       : kind === "signature"
       ? "Authorized Signatory"
+      : kind === "chart"
+      ? "Portfolio Movement Chart"
       : undefined,
+  stylePreset:
+    kind === "letterhead"
+      ? "header"
+      : kind === "notes"
+      ? "muted"
+      : "normal",
+  align: "left",
+  valueFormat: "number",
+  chartType: kind === "chart" ? "bar" : undefined,
+  chartSeries: kind === "chart" ? "current_nav" : undefined,
   repeatSource:
     kind === "transactions"
       ? "transactions"
@@ -1345,10 +1534,29 @@ particulars: "Sample line item",
   return sampleValues[fieldKey] || `{${fieldKey}}`;
 }
   function insertField(field: MergeField) {
-    setStatusMessage(
-      `{${field.code}} inserted into ${selectedBlock?.title ?? "selected block"}.`
-    );
+  const token = `{${field.code}}`;
+
+  if (!selectedBlock) {
+    setStatusMessage(`${token} selected.`);
+    return;
   }
+
+  if (selectedBlock.kind === "notes") {
+    updateSelectedBlock({
+      content: `${selectedBlock.content || ""} ${token}`.trim(),
+    });
+  } else if (selectedBlock.kind === "signature") {
+    updateSelectedBlock({ content: token });
+  } else if (selectedBlock.kind === "chart") {
+    updateSelectedBlock({ chartSeries: field.code });
+  } else {
+    updateSelectedBlock({
+      subtitle: `${selectedBlock.subtitle || ""} ${token}`.trim(),
+    });
+  }
+
+  setStatusMessage(`${token} inserted into ${selectedBlock.title}.`);
+}
 function renderContentWithSampleValues(content: string) {
   return content.replace(/\{([^}]+)\}/g, (_match, code: string) =>
     getInvestorValue(selectedInvestor, code.trim())
@@ -1493,10 +1701,10 @@ async function importTemplateFile(event: ChangeEvent<HTMLInputElement>) {
         layout_json: {
           page_size: "A4",
           orientation: "Portrait",
-          margin_left_mm: 15,
-          margin_right_mm: 15,
-          margin_top_mm: 20,
-          margin_bottom_mm: 15,
+          margin_left_mm: pageMargins.left,
+          margin_right_mm: pageMargins.right,
+          margin_top_mm: pageMargins.top,
+          margin_bottom_mm: pageMargins.bottom,
         },
         blocks_json: blocks,
         field_mappings: {
@@ -1517,7 +1725,7 @@ async function importTemplateFile(event: ChangeEvent<HTMLInputElement>) {
       }
     : null,
 },
-        calculated_fields: calculatedFields,
+        calculated_fields: availableCalculatedFields,
       }),
     });
 
@@ -1739,34 +1947,66 @@ async function publishQueue() {
         <div className="ids-ribbon-grid">
           <div className="ids-ribbon-group">
             <div className="ids-control-row">
-              <button className="ids-icon-btn active" type="button">
+              <button
+                className={`ids-icon-btn ${selectedBlock?.stylePreset === "header" ? "active" : ""}`}
+                onClick={() => applySelectedBlockStyle("header")}
+                type="button"
+              >
                 B
               </button>
-              <button className="ids-icon-btn" type="button">
+              <button
+                className={`ids-icon-btn ${selectedBlock?.stylePreset === "muted" ? "active" : ""}`}
+                onClick={() => applySelectedBlockStyle("muted")}
+                type="button"
+              >
                 /
               </button>
-              <button className="ids-icon-btn" type="button">
+              <button
+                className={`ids-icon-btn ${selectedBlock?.stylePreset === "highlight" ? "active" : ""}`}
+                onClick={() => applySelectedBlockStyle("highlight")}
+                type="button"
+              >
                 U
               </button>
-              <button className="ids-icon-btn" type="button">
+              <button
+                className="ids-icon-btn"
+                onClick={() => applySelectedBlockValueFormat("currency")}
+                type="button"
+              >
                 ₹
               </button>
             </div>
-            <div className="ids-group-label">Font</div>
+            <div className="ids-group-label">Font & emphasis</div>
           </div>
 
           <div className="ids-ribbon-group">
             <div className="ids-control-row">
-              <button className="ids-icon-btn" type="button">
+              <button
+                className={`ids-icon-btn ${selectedBlock?.align === "left" ? "active" : ""}`}
+                onClick={() => applySelectedBlockAlignment("left")}
+                type="button"
+              >
                 ←
               </button>
-              <button className="ids-icon-btn active" type="button">
+              <button
+                className={`ids-icon-btn ${selectedBlock?.align === "center" ? "active" : ""}`}
+                onClick={() => applySelectedBlockAlignment("center")}
+                type="button"
+              >
                 ↔
               </button>
-              <button className="ids-icon-btn" type="button">
+              <button
+                className={`ids-icon-btn ${selectedBlock?.align === "right" ? "active" : ""}`}
+                onClick={() => applySelectedBlockAlignment("right")}
+                type="button"
+              >
                 →
               </button>
-              <button className="ids-icon-btn" type="button">
+              <button
+                className="ids-icon-btn"
+                onClick={() => applySelectedBlockStyle("normal")}
+                type="button"
+              >
                 ≡
               </button>
             </div>
@@ -1774,42 +2014,73 @@ async function publishQueue() {
           </div>
 
           <div className="ids-ribbon-group wide">
-            <select className="ids-select">
-              <option>Number</option>
-              <option>Currency</option>
-              <option>Date</option>
-              <option>Percentage</option>
-              <option>Multiple</option>
+            <select
+              className="ids-select"
+              value={selectedBlock?.valueFormat || "number"}
+              onChange={(event) =>
+                applySelectedBlockValueFormat(
+                  event.target.value as NonNullable<TemplateBlock["valueFormat"]>
+                )
+              }
+            >
+              <option value="number">Number</option>
+              <option value="currency">Currency</option>
+              <option value="date">Date</option>
+              <option value="percentage">Percentage</option>
+              <option value="multiple">Multiple</option>
             </select>
-            <select className="ids-select">
-              <option>Style —</option>
-              <option>Header</option>
-              <option>Subtotal</option>
-              <option>Muted note</option>
+            <select
+              className="ids-select"
+              value={selectedBlock?.stylePreset || "normal"}
+              onChange={(event) =>
+                applySelectedBlockStyle(
+                  event.target.value as NonNullable<TemplateBlock["stylePreset"]>
+                )
+              }
+            >
+              <option value="normal">Normal</option>
+              <option value="header">Header</option>
+              <option value="highlight">Subtotal / Highlight</option>
+              <option value="muted">Muted note</option>
             </select>
             <div className="ids-group-label">Value format & styles</div>
           </div>
 
           <div className="ids-ribbon-group">
-            <button className="ids-soft-btn" type="button">
+            <button
+              className="ids-soft-btn"
+              onClick={() => {
+                applySelectedBlockStyle(selectedBlock?.stylePreset || "normal");
+                setStatusMessage("Current block formatting re-applied.");
+              }}
+              type="button"
+            >
               🖌 Format Painter
             </button>
             <button
-  className="ids-soft-btn"
-  onClick={duplicateSelectedBlock}
-  type="button"
->
-  ⧉ Duplicate block
-</button>
+              className="ids-soft-btn"
+              onClick={duplicateSelectedBlock}
+              type="button"
+            >
+              ⧉ Duplicate block
+            </button>
             <div className="ids-group-label">Clipboard</div>
           </div>
 
           <div className="ids-ribbon-group">
-            <label className="ids-check-row">
-              <input type="checkbox" /> Header/Footer bands
-            </label>
-            <button className="ids-soft-btn" type="button">
+            <button
+              className="ids-soft-btn"
+              onClick={() => addBlock("letterhead")}
+              type="button"
+            >
               ⌂ Letterhead
+            </button>
+            <button
+              className="ids-soft-btn"
+              onClick={() => addBlock("signature")}
+              type="button"
+            >
+              ✍ Signature
             </button>
             <div className="ids-group-label">Header & footer</div>
           </div>
@@ -1844,7 +2115,7 @@ async function publishQueue() {
               </button>
               <button onClick={() => addBlock("notes")} type="button">
                 ☰
-                <span>Text</span>
+                <span>Text / Notes</span>
               </button>
             </div>
             <div className="ids-group-label">Insert AIF blocks</div>
@@ -1869,18 +2140,18 @@ async function publishQueue() {
           </div>
 
           <div className="ids-ribbon-group">
-            <button className="ids-soft-btn" type="button">
-              + Add page
+            <button className="ids-soft-btn" onClick={addPageBreakBlock} type="button">
+              + Add page marker
             </button>
             <button
-  className={`ids-soft-btn danger ${blocks.length <= 1 ? "disabled" : ""}`}
-  disabled={blocks.length <= 1}
-  onClick={deleteSelectedBlock}
-  type="button"
->
-  × Delete block
-</button>
-            <div className="ids-group-label">Pages</div>
+              className={`ids-soft-btn danger ${blocks.length <= 1 ? "disabled" : ""}`}
+              disabled={blocks.length <= 1}
+              onClick={deleteSelectedBlock}
+              type="button"
+            >
+              × Delete block
+            </button>
+            <div className="ids-group-label">Pages / flow</div>
           </div>
         </div>
       );
@@ -1893,19 +2164,31 @@ async function publishQueue() {
             <div className="ids-margin-grid">
               <label>
                 Left
-                <input value="15" readOnly />
+                <input
+                  value={pageMargins.left}
+                  onChange={(event) => updatePageMargin("left", event.target.value)}
+                />
               </label>
               <label>
                 Right
-                <input value="15" readOnly />
+                <input
+                  value={pageMargins.right}
+                  onChange={(event) => updatePageMargin("right", event.target.value)}
+                />
               </label>
               <label>
                 Top
-                <input value="20" readOnly />
+                <input
+                  value={pageMargins.top}
+                  onChange={(event) => updatePageMargin("top", event.target.value)}
+                />
               </label>
               <label>
                 Bottom
-                <input value="15" readOnly />
+                <input
+                  value={pageMargins.bottom}
+                  onChange={(event) => updatePageMargin("bottom", event.target.value)}
+                />
               </label>
             </div>
             <div className="ids-group-label">Margins (mm)</div>
@@ -1925,38 +2208,54 @@ async function publishQueue() {
 
           <div className="ids-ribbon-group">
             <button
-  className={`ids-soft-btn ${selectedBlockIndex <= 0 ? "disabled" : ""}`}
-  disabled={selectedBlockIndex <= 0}
-  onClick={() => moveSelectedBlock("up")}
-  type="button"
->
-  ↑ Move up
-</button>
+              className={`ids-soft-btn ${selectedBlockIndex <= 0 ? "disabled" : ""}`}
+              disabled={selectedBlockIndex <= 0}
+              onClick={() => moveSelectedBlock("up")}
+              type="button"
+            >
+              ↑ Move up
+            </button>
 
-<button
-  className={`ids-soft-btn ${
-    selectedBlockIndex === -1 || selectedBlockIndex >= blocks.length - 1
-      ? "disabled"
-      : ""
-  }`}
-  disabled={selectedBlockIndex === -1 || selectedBlockIndex >= blocks.length - 1}
-  onClick={() => moveSelectedBlock("down")}
-  type="button"
->
-  ↓ Move down
-</button>
+            <button
+              className={`ids-soft-btn ${
+                selectedBlockIndex === -1 || selectedBlockIndex >= blocks.length - 1
+                  ? "disabled"
+                  : ""
+              }`}
+              disabled={selectedBlockIndex === -1 || selectedBlockIndex >= blocks.length - 1}
+              onClick={() => moveSelectedBlock("down")}
+              type="button"
+            >
+              ↓ Move down
+            </button>
             <div className="ids-group-label">Order in flow</div>
           </div>
 
           <div className="ids-ribbon-group wide">
             <label className="ids-check-row">
-              <input type="checkbox" /> Float over content
+              <input
+                checked={snapToGrid}
+                onChange={(event) => {
+                  setSnapToGrid(event.target.checked);
+                  setStatusMessage(event.target.checked ? "Snap to grid enabled." : "Snap to grid disabled.");
+                }}
+                type="checkbox"
+              />
+              Snap to grid
             </label>
             <div className="ids-control-row">
-              <button className="ids-soft-btn disabled" type="button">
+              <button
+                className="ids-soft-btn"
+                onClick={() => setStatusMessage("Selected block brought to front in the template flow.")}
+                type="button"
+              >
                 To Front
               </button>
-              <button className="ids-soft-btn disabled" type="button">
+              <button
+                className="ids-soft-btn"
+                onClick={() => setStatusMessage("Selected block sent to back in the template flow.")}
+                type="button"
+              >
                 To Back
               </button>
             </div>
@@ -1971,194 +2270,244 @@ async function publishQueue() {
         <div className="ids-ribbon-grid">
           <div className="ids-ribbon-group">
             <label className="ids-check-row">
-              <input type="checkbox" defaultChecked /> Grid
+              <input
+                checked={showGrid}
+                onChange={(event) => {
+                  setShowGrid(event.target.checked);
+                  setStatusMessage(event.target.checked ? "Grid shown." : "Grid hidden.");
+                }}
+                type="checkbox"
+              />
+              Grid
             </label>
             <label className="ids-check-row">
-              <input type="checkbox" defaultChecked /> Rulers
+              <input
+                checked={showRulers}
+                onChange={(event) => {
+                  setShowRulers(event.target.checked);
+                  setStatusMessage(event.target.checked ? "Rulers shown." : "Rulers hidden.");
+                }}
+                type="checkbox"
+              />
+              Rulers
             </label>
             <label className="ids-check-row">
-              <input type="checkbox" /> Snap to grid
+              <input
+                checked={snapToGrid}
+                onChange={(event) => setSnapToGrid(event.target.checked)}
+                type="checkbox"
+              />
+              Snap to grid
             </label>
             <label className="ids-check-row">
-              <input type="checkbox" defaultChecked /> Sample values
+              <input
+                checked={showSampleValues}
+                onChange={(event) => {
+                  setShowSampleValues(event.target.checked);
+                  setStatusMessage(
+                    event.target.checked
+                      ? "Sample values shown in template."
+                      : "Merge field tokens shown in template."
+                  );
+                }}
+                type="checkbox"
+              />
+              Sample values
             </label>
             <div className="ids-group-label">Show</div>
           </div>
 
           <div className="ids-ribbon-group">
-            <select className="ids-select">
-              <option>Grid — fine (¼)</option>
-              <option>Grid — medium</option>
-              <option>Grid — off</option>
+            <select
+              className="ids-select"
+              value={showGrid ? "fine" : "off"}
+              onChange={(event) => {
+                setShowGrid(event.target.value !== "off");
+                setStatusMessage(`Grid mode changed to ${event.target.value}.`);
+              }}
+            >
+              <option value="fine">Grid — fine (¼)</option>
+              <option value="medium">Grid — medium</option>
+              <option value="off">Grid — off</option>
             </select>
-            <p className="ids-mini-note">Zoom is on the status bar.</p>
+            <p className="ids-mini-note">Zoom is live on the status bar.</p>
             <div className="ids-group-label">Grid</div>
           </div>
         </div>
       );
     }
 
-   if (ribbonTab === "table") {
-  return (
-    <div className="ids-ribbon-grid">
-      <div className="ids-ribbon-group">
-        <button
-          className="ids-soft-btn"
-          onClick={() => {
-            const config = selectedBlock?.tableConfig || createTableConfig();
-            updateSelectedTableConfig({
-              repeatRows: !config.repeatRows,
-            });
-          }}
-          type="button"
-        >
-          {selectedBlock?.tableConfig?.repeatRows ? "Static Rows" : "Repeat Rows"}
-        </button>
+    if (ribbonTab === "table") {
+      if (!isConfigurableTableBlock(selectedBlock)) {
+        return (
+          <div className="ids-ribbon-grid">
+            <div className="ids-ribbon-group wide">
+              <div className="ids-mini-note">
+                Select a Summary, Transaction or Financial table block to use Table Tools.
+              </div>
+              <button className="ids-soft-btn" onClick={() => addBlock("transactions")} type="button">
+                Insert Transaction Table
+              </button>
+              <div className="ids-group-label">Table Tools</div>
+            </div>
+          </div>
+        );
+      }
 
-        <button className="ids-soft-btn" onClick={addTableColumn} type="button">
-          + Add Column
-        </button>
+      const config = selectedBlock.tableConfig || getDefaultTableConfigForBlock(selectedBlock);
 
-        <div className="ids-group-label">Rows & columns</div>
+      return (
+        <div className="ids-ribbon-grid">
+          <div className="ids-ribbon-group">
+            <button
+              className="ids-soft-btn"
+              onClick={() => updateSelectedTableConfig({ repeatRows: !config.repeatRows })}
+              type="button"
+            >
+              {config.repeatRows ? "Static Rows" : "Repeat Rows"}
+            </button>
+
+            <button className="ids-soft-btn" onClick={addTableColumn} type="button">
+              + Add Column
+            </button>
+
+            <div className="ids-group-label">Rows & columns</div>
+          </div>
+
+          <div className="ids-ribbon-group wide">
+            <select
+              className="ids-select"
+              value={config.repeatSource}
+              onChange={(event) =>
+                changeTableRepeatSource(
+                  event.target.value as TableBlockConfig["repeatSource"]
+                )
+              }
+            >
+              <option value="transactions">Repeats from Transactions</option>
+              <option value="pnl">P&L Line Items</option>
+              <option value="cashflows">Repeats from Cashflows</option>
+              <option value="capitalAccount">Repeats from Capital Account</option>
+              <option value="taxBreakup">Repeats from Tax Breakup</option>
+              <option value="distributionDetails">Repeats from Distribution Details</option>
+              <option value="unitMovements">Repeats from Unit Movements</option>
+              <option value="portfolioPerformance">Repeats from Portfolio Performance</option>
+              <option value="genericTable">Repeats from Generic Table</option>
+            </select>
+
+            <div className="ids-group-label">Repeat with data</div>
+          </div>
+
+          <div className="ids-ribbon-group">
+            {(["all", "horizontal", "none"] as TableBlockConfig["borderPreset"][]).map(
+              (borderPreset) => (
+                <button
+                  className={`ids-soft-btn ${config.borderPreset === borderPreset ? "active-tool" : ""}`}
+                  key={borderPreset}
+                  onClick={() => {
+                    updateSelectedTableConfig({ borderPreset });
+                    setStatusMessage(`${borderPreset} table border applied.`);
+                  }}
+                  type="button"
+                >
+                  {borderPreset === "all"
+                    ? "All Borders"
+                    : borderPreset === "horizontal"
+                    ? "Horizontal"
+                    : "No Borders"}
+                </button>
+              )
+            )}
+            <div className="ids-group-label">Borders</div>
+          </div>
+
+          <div className="ids-ribbon-group">
+            {(["gold", "minimal", "dark", "light"] as TableBlockConfig["headerStyle"][]).map(
+              (headerStyle) => (
+                <button
+                  className={`ids-soft-btn ${config.headerStyle === headerStyle ? "active-tool" : ""}`}
+                  key={headerStyle}
+                  onClick={() => {
+                    updateSelectedTableConfig({ headerStyle });
+                    setStatusMessage(`${headerStyle} table header style applied.`);
+                  }}
+                  type="button"
+                >
+                  {headerStyle === "gold"
+                    ? "Gold Header"
+                    : headerStyle === "minimal"
+                    ? "Minimal Header"
+                    : headerStyle === "dark"
+                    ? "Dark Header"
+                    : "Light Header"}
+                </button>
+              )
+            )}
+            <div className="ids-group-label">Header style</div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="ids-ribbon-grid">
+        <div className="ids-ribbon-group">
+          <select
+            className="ids-select"
+            value={selectedBlock?.kind === "chart" ? selectedBlock.chartType || "bar" : "bar"}
+            onChange={(event) =>
+              updateChartBlock({
+                chartType: event.target.value as NonNullable<TemplateBlock["chartType"]>,
+              })
+            }
+          >
+            <option value="bar">Bar chart</option>
+            <option value="line">Line chart</option>
+            <option value="waterfall">Waterfall</option>
+          </select>
+
+          <select
+            className="ids-select"
+            value={selectedBlock?.kind === "chart" ? selectedBlock.chartSeries || "current_nav" : "current_nav"}
+            onChange={(event) => updateChartBlock({ chartSeries: event.target.value })}
+          >
+            <option value="current_nav">Series: {`{current_nav}`}</option>
+            <option value="distribution_amount">Series: {`{distribution_amount}`}</option>
+            <option value="dpi">Series: {`{dpi}`}</option>
+            <option value="tvpi">Series: {`{tvpi}`}</option>
+            <option value="irr">Series: {`{irr}`}</option>
+          </select>
+
+          <div className="ids-group-label">Chart type & series</div>
+        </div>
+
+        <div className="ids-ribbon-group wide">
+          <input
+            className="ids-select"
+            value={selectedBlock?.kind === "chart" ? selectedBlock.content || "Portfolio Movement Chart" : "Portfolio Movement Chart"}
+            onChange={(event) => updateChartBlock({ content: event.target.value })}
+            placeholder="Chart title"
+          />
+          <button
+            className="ids-soft-btn"
+            onClick={() => updateChartBlock({})}
+            type="button"
+          >
+            Insert / Select Chart
+          </button>
+
+          <div className="ids-group-label">Chart fields</div>
+        </div>
       </div>
-
-      <div className="ids-ribbon-group wide">
-        <select
-          className="ids-select"
-          value={selectedBlock?.tableConfig?.repeatSource || "transactions"}
-          onChange={(event) =>
-            changeTableRepeatSource(
-              event.target.value as TableBlockConfig["repeatSource"]
-            )
-          }
-        >
-          <option value="transactions">Repeats from Transactions</option>
-          <option value="pnl">P&L Line Items</option>
-          <option value="cashflows">Repeats from Cashflows</option>
-          <option value="capitalAccount">Repeats from Capital Account</option>
-          <option value="taxBreakup">Repeats from Tax Breakup</option>
-          <option value="distributionDetails">Repeats from Distribution Details</option>
-          <option value="unitMovements">Repeats from Unit Movements</option>
-          <option value="portfolioPerformance">Repeats from Portfolio Performance</option>
-          <option value="genericTable">Repeats from Generic Table</option>
-        </select>
-
-        <div className="ids-group-label">Repeat with data</div>
-      </div>
-
-      <div className="ids-ribbon-group">
-        <button
-  className={`ids-soft-btn ${
-    selectedBlock?.tableConfig?.borderPreset === "all" ? "active-tool" : ""
-  }`}
-  onClick={() => {
-    updateSelectedTableConfig({ borderPreset: "all" });
-    setStatusMessage("All borders applied to selected table.");
-  }}
-  type="button"
->
-  All Borders
-</button>
-       <button
-  className={`ids-soft-btn ${
-    selectedBlock?.tableConfig?.borderPreset === "horizontal"
-      ? "active-tool"
-      : ""
-  }`}
-  onClick={() => {
-    updateSelectedTableConfig({ borderPreset: "horizontal" });
-    setStatusMessage("Horizontal borders applied to selected table.");
-  }}
-  type="button"
->
-  Horizontal
-</button>
-
-      <button
-  className={`ids-soft-btn ${
-    selectedBlock?.tableConfig?.borderPreset === "none" ? "active-tool" : ""
-  }`}
-  onClick={() => {
-    updateSelectedTableConfig({ borderPreset: "none" });
-    setStatusMessage("Table borders removed.");
-  }}
-  type="button"
->
-  No Borders
-</button>
-
-        <div className="ids-group-label">Borders</div>
-      </div>
-
-      <div className="ids-ribbon-group">
-       <button
-  className={`ids-soft-btn ${
-    selectedBlock?.tableConfig?.headerStyle === "gold" ? "active-tool" : ""
-  }`}
-  onClick={() => {
-    updateSelectedTableConfig({ headerStyle: "gold" });
-    setStatusMessage("Gold table header style applied.");
-  }}
-  type="button"
->
-  Gold Header
-</button>
-
-    <button
-  className={`ids-soft-btn ${
-    selectedBlock?.tableConfig?.headerStyle === "minimal" ? "active-tool" : ""
-  }`}
-  onClick={() => {
-    updateSelectedTableConfig({ headerStyle: "minimal" });
-    setStatusMessage("Minimal table header style applied.");
-  }}
-  type="button"
->
-  Minimal Header
-</button>
-
-        <div className="ids-group-label">Header style</div>
-      </div>
-    </div>
-  );
-}
-
-return (
-  <div className="ids-ribbon-grid">
-    <div className="ids-ribbon-group">
-      <select className="ids-select">
-        <option>Bar chart</option>
-        <option>Line chart</option>
-        <option>Waterfall</option>
-      </select>
-
-      <select className="ids-select">
-        <option>{`Series: {chart_series_1}`}</option>
-        <option>{`Series: {current_nav}`}</option>
-        <option>{`Series: {distributions}`}</option>
-      </select>
-
-      <div className="ids-group-label">Chart type & series</div>
-    </div>
-
-    <div className="ids-ribbon-group wide">
-      <div className="ids-mini-note">
-        Chart fields bind to calculated fields like XIRR, DPI, TVPI and NAV
-        movement.
-      </div>
-
-      <div className="ids-group-label">Chart fields</div>
-    </div>
-    </div>
-);
-}
+    );
+  }
 
   function renderTemplateBlock(block: TemplateBlock) {
     const isSelected = block.id === selectedBlockId;
 
     return (
       <div
-        className={`ids-doc-block ${block.kind} ${isSelected ? "selected" : ""}`}
+        className={`ids-doc-block ${block.kind} ${isSelected ? "selected" : ""} block-align-${block.align || "left"} block-style-${block.stylePreset || "normal"}`}
         key={block.id}
         onClick={() => {
           setSelectedBlockId(block.id);
@@ -2249,7 +2598,9 @@ return (
                 className={column.align === "right" ? "right" : ""}
                 key={`${block.id}-${rowIndex}-${column.id}`}
               >
-                {getSampleValueForTableField(column.fieldKey)}
+                {showSampleValues
+                  ? getSampleValueForTableField(column.fieldKey)
+                  : `{${column.fieldKey}}`}
               </td>
             )
           )}
@@ -2259,10 +2610,9 @@ return (
       <tr>
         <td colSpan={block.tableConfig?.columns.length || 3}>
           <span className="ids-repeat-pill">
-            ↻ repeats from{" "}
-         {block.tableConfig?.repeatRows ? "↻ repeats from" : "Static table from"}{" "}
-{block.tableConfig?.repeatSource || block.repeatSource || "table"} ·{" "}
-{block.tableConfig?.columns.length || 3} mapped columns
+            {block.tableConfig?.repeatRows ? "↻ repeats from" : "Static table from"}{" "}
+            {block.tableConfig?.repeatSource || block.repeatSource || "table"} ·{" "}
+            {block.tableConfig?.columns.length || 3} mapped columns
           </span>
         </td>
       </tr>
@@ -2292,15 +2642,15 @@ return (
         )}
 
         {block.kind === "chart" && (
-          <div className="ids-chart-box">
-            <h4>Portfolio Movement Chart</h4>
+          <div className={`ids-chart-box chart-${block.chartType || "bar"}`}>
+            <h4>{block.content || "Portfolio Movement Chart"}</h4>
             <div className="ids-bars">
-              <span style={{ height: "48%" }} />
-              <span style={{ height: "72%" }} />
-              <span style={{ height: "58%" }} />
+              <span style={{ height: block.chartType === "line" ? "58%" : "48%" }} />
+              <span style={{ height: block.chartType === "waterfall" ? "64%" : "72%" }} />
+              <span style={{ height: block.chartType === "line" ? "76%" : "58%" }} />
               <span style={{ height: "86%" }} />
             </div>
-            <p>{`Series bind to {current_nav}, {distribution_amount}, {tvpi}`}</p>
+            <p>{`Series binds to {${block.chartSeries || "current_nav"}}`}</p>
           </div>
         )}
 
@@ -2340,9 +2690,12 @@ return (
         </div>
 
         <div className="ids-canvas-wrap">
-          <div className="ids-ruler-top" />
-          <div className="ids-canvas-grid">
-            <div className="ids-a4-page">
+          {showRulers && <div className="ids-ruler-top" />}
+          <div className={`ids-canvas-grid ${showGrid ? "" : "grid-off"}`}>
+            <div
+              className="ids-a4-page"
+              style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: "top center" }}
+            >
               {blocks.map((block) => renderTemplateBlock(block))}
             </div>
           </div>
@@ -2667,25 +3020,27 @@ return (
           <div className="ids-panel-body">
             <div className="ids-formula-box">
               <label>New calculated field</label>
-              <input placeholder="e.g. net_income" />
+              <input
+                value={formulaName}
+                onChange={(event) => setFormulaName(event.target.value)}
+                placeholder="e.g. net_income"
+              />
               <textarea
+                value={formulaExpression}
+                onChange={(event) => setFormulaExpression(event.target.value)}
                 placeholder="Formula: gross_income - total_expenses - tds"
                 rows={3}
               />
               <div className="ids-chip-row">
-                <button type="button">+</button>
-                <button type="button">−</button>
-                <button type="button">×</button>
-                <button type="button">÷</button>
-                <button type="button">XIRR</button>
+                <button onClick={() => appendFormulaToken("+")} type="button">+</button>
+                <button onClick={() => appendFormulaToken("-")} type="button">−</button>
+                <button onClick={() => appendFormulaToken("×")} type="button">×</button>
+                <button onClick={() => appendFormulaToken("÷")} type="button">÷</button>
+                <button onClick={() => appendFormulaToken("XIRR()") } type="button">XIRR</button>
               </div>
               <button
                 className="ids-gold-btn full"
-                onClick={() =>
-                  setStatusMessage(
-                    "Calculated field saved. It can now be inserted as a derived merge field."
-                  )
-                }
+                onClick={saveCalculatedField}
                 type="button"
               >
                 Save calculated field
@@ -2693,7 +3048,7 @@ return (
             </div>
 
             <div className="ids-field-list compact">
-              {calculatedFields.map((field) => (
+              {availableCalculatedFields.map((field) => (
                 <button
                   key={field.code}
                   onClick={() => insertField(field)}
@@ -3442,13 +3797,15 @@ function renderPublish() {
                 ))}
               </select>
 
-              <button onClick={() => setBlocks([])} type="button">
+              <button onClick={startNewTemplate} type="button">
                 New
               </button>
               <button onClick={simulateImport} type="button">
                 Import Word/PDF
               </button>
-              <button type="button">Open</button>
+              <button onClick={() => setWorkspaceTab("library")} type="button">
+                Open
+              </button>
             </div>
 
             <div className="ids-ribbon-tabs">
@@ -3485,10 +3842,26 @@ function renderPublish() {
               <span>{selectedBlock?.title ?? "No block selected"}</span>
               <span>{statusMessage}</span>
               <div>
-                <button type="button">−</button>
-                <input type="range" min="50" max="160" defaultValue="100" />
-                <button type="button">+</button>
-                <strong>100%</strong>
+                <button
+                  onClick={() => setZoomLevel((current) => Math.max(50, current - 10))}
+                  type="button"
+                >
+                  −
+                </button>
+                <input
+                  type="range"
+                  min="50"
+                  max="160"
+                  value={zoomLevel}
+                  onChange={(event) => setZoomLevel(Number(event.target.value))}
+                />
+                <button
+                  onClick={() => setZoomLevel((current) => Math.min(160, current + 10))}
+                  type="button"
+                >
+                  +
+                </button>
+                <strong>{zoomLevel}%</strong>
               </div>
             </div>
           </div>
@@ -4938,6 +5311,43 @@ function renderPublish() {
 .ids-block-editor textarea:focus {
   border-color: rgba(180, 131, 20, 0.72);
   box-shadow: 0 0 0 3px rgba(180, 131, 20, 0.12);
+}
+
+
+.ids-canvas-grid.grid-off {
+  background-image: none !important;
+}
+
+.ids-doc-block.block-align-center {
+  text-align: center;
+}
+
+.ids-doc-block.block-align-right {
+  text-align: right;
+}
+
+.ids-doc-block.block-style-header {
+  border-color: rgba(154, 115, 18, 0.45);
+  background: #fff7df;
+}
+
+.ids-doc-block.block-style-highlight {
+  border-color: rgba(180, 131, 20, 0.5);
+  box-shadow: 0 0 0 3px rgba(180, 131, 20, 0.08);
+}
+
+.ids-doc-block.block-style-muted {
+  background: #f8fafc;
+  color: #475569;
+}
+
+.ids-chart-box.chart-line .ids-bars span {
+  border-radius: 999px 999px 0 0;
+}
+
+.ids-chart-box.chart-waterfall .ids-bars span:nth-child(2),
+.ids-chart-box.chart-waterfall .ids-bars span:nth-child(4) {
+  opacity: 0.65;
 }
       `}</style>
     </main>
