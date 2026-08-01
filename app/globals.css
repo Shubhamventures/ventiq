@@ -10898,4 +10898,70 @@ button.secondary-action:disabled {
   .stakeholder-grid {
     grid-template-columns: 1fr;
   }
+}.portal-document-kit-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.portal-document-kit-card {
+  text-align: left;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.58);
+  color: #e5e7eb;
+  border-radius: 18px;
+  padding: 14px;
+  min-height: 150px;
+  cursor: pointer;
+  transition: border-color 0.18s ease, transform 0.18s ease, background 0.18s ease;
+}
+
+.portal-document-kit-card:hover,
+.portal-document-kit-card.active {
+  transform: translateY(-2px);
+  border-color: rgba(251, 191, 36, 0.72);
+  background: rgba(30, 41, 59, 0.88);
+}
+
+.portal-document-kit-card span {
+  display: block;
+  color: #fbbf24;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.portal-document-kit-card strong {
+  display: block;
+  margin-top: 10px;
+  font-size: 28px;
+  color: #ffffff;
+}
+
+.portal-document-kit-card p {
+  margin: 8px 0 0;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.portal-document-kit-card em {
+  display: inline-block;
+  margin-top: 10px;
+  color: #86efac;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+@media (max-width: 1300px) {
+  .portal-document-kit-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .portal-document-kit-grid {
+    grid-template-columns: 1fr;
+  }
 }

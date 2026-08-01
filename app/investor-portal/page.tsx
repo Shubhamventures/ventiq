@@ -329,13 +329,108 @@ function investorMatchesText(
       (incomingName && investorName && incomingName === investorName)
   );
 }
+const investorDocumentKits = [
+  {
+    label: "Statement of Account",
+    description: "Quarterly or periodic investor SOA generated from Document Studio.",
+  },
+  {
+    label: "Capital Call Notice",
+    description: "Drawdown / capital call communication and payment notice.",
+  },
+  {
+    label: "Distribution Notice",
+    description: "Investor payout, gross distribution, tax withheld and net distribution.",
+  },
+  {
+    label: "Unit Allotment Letter",
+    description: "Post-drawdown unit allotment confirmation.",
+  },
+  {
+    label: "Unit Statement",
+    description: "Opening units, additions, redemptions and closing units.",
+  },
+  {
+    label: "Form 64C",
+    description: "Investor-wise AIF income and tax reporting document.",
+  },
+  {
+    label: "Form 64D",
+    description: "Fund-level AIF tax reporting support document.",
+  },
+  {
+    label: "Advance Tax Data Points",
+    description: "Investor tax estimation and advance tax support schedule.",
+  },
+  {
+    label: "Annual Income Report",
+    description: "Year-end investor income, capital account and tax report.",
+  },
+  {
+    label: "Drawdown Reminder",
+    description: "Reminder for pending capital call / drawdown payment.",
+  },
+];
+
+function getInvestorDocumentGroup(documentRecord: InvestorDocument) {
+  const text = `${getDocumentType(documentRecord)} ${getDocumentTitle(
+    documentRecord
+  )}`.toLowerCase();
+
+  if (text.includes("64c")) return "Form 64C";
+  if (text.includes("64d")) return "Form 64D";
+  if (text.includes("advance tax")) return "Advance Tax Data Points";
+
+  if (text.includes("annual income") || text.includes("annual report")) {
+    return "Annual Income Report";
+  }
+
+  if (text.includes("unit allotment") || text.includes("allotment")) {
+    return "Unit Allotment Letter";
+  }
+
+  if (text.includes("unit statement") || text.includes("unit movement")) {
+    return "Unit Statement";
+  }
+
+  if (text.includes("distribution")) return "Distribution Notice";
+
+  if (
+    text.includes("capital call") ||
+    text.includes("drawdown notice") ||
+    text.includes("drawdown communication")
+  ) {
+    return "Capital Call Notice";
+  }
+
+  if (text.includes("drawdown reminder") || text.includes("reminder")) {
+    return "Drawdown Reminder";
+  }
+
+  if (
+    text.includes("soa") ||
+    text.includes("statement of account") ||
+    text.includes("investor statement") ||
+    text.includes("statement")
+  ) {
+    return "Statement of Account";
+  }
+
+  if (text.includes("tax")) return "Advance Tax Data Points";
+
+  return "Other Documents";
+}
+
 function documentMatchesExpectedType(
   documentRecord: InvestorDocument,
   expectedType: string
 ) {
+  const groupedType = getInvestorDocumentGroup(documentRecord);
   const target = expectedType.toLowerCase();
   const type = getDocumentType(documentRecord).toLowerCase();
   const name = getDocumentTitle(documentRecord).toLowerCase();
+
+  if (groupedType === expectedType) return true;
 
   if (target.includes("capital")) {
     return type.includes("capital") || name.includes("capital");
@@ -345,7 +440,7 @@ function documentMatchesExpectedType(
     return type.includes("distribution") || name.includes("distribution");
   }
 
-  if (target.includes("soa")) {
+  if (target.includes("statement") || target.includes("soa")) {
     return (
       type.includes("soa") ||
       name.includes("soa") ||
@@ -354,8 +449,12 @@ function documentMatchesExpectedType(
     );
   }
 
-  if (target.includes("irr")) {
-    return type.includes("irr") || name.includes("irr");
+  if (target.includes("64c")) {
+    return type.includes("64c") || name.includes("64c");
+  }
+
+  if (target.includes("64d")) {
+    return type.includes("64d") || name.includes("64d");
   }
 
   if (target.includes("tax")) {
@@ -369,13 +468,24 @@ function documentMatchesExpectedType(
     );
   }
 
-  if (target.includes("quarterly")) {
-    return (
-      type.includes("quarterly") ||
-      name.includes("quarterly") ||
-      type.includes("report") ||
-      name.includes("report")
-    );
+  if (target.includes("unit allotment")) {
+    return name.includes("allotment") || type.includes("allotment");
+  }
+
+  if (target.includes("unit statement")) {
+    return name.includes("unit") || type.includes("unit");
+  }
+
+  if (target.includes("annual income")) {
+    return name.includes("annual") || type.includes("annual");
+  }
+
+  if (target.includes("advance tax")) {
+    return name.includes("advance tax") || type.includes("advance tax");
+  }
+
+  if (target.includes("drawdown reminder")) {
+    return name.includes("reminder") || type.includes("reminder");
   }
 
   return type.includes(target) || name.includes(target);
@@ -856,14 +966,7 @@ const displayedManagementFee = financialPosition
       );
     });
 
-    const expectedDocumentTypes = [
-      "Capital Call Notice",
-      "Distribution Notice",
-      "Statement of Account",
-      "IRR Statement",
-      "Tax Certificate",
-      "Quarterly Report",
-    ];
+    const expectedDocumentTypes = investorDocumentKits.map((kit) => kit.label);
 
     const missingDocumentTypes = expectedDocumentTypes.filter(
       (expectedType) =>
@@ -972,22 +1075,28 @@ const displayedManagementFee = financialPosition
     dataRoomEngagementEvents,
   ]);
 
-  const filteredDocuments = useMemo(() => {
-    if (documentTypeFilter === "All documents") return documents;
+ const filteredDocuments = useMemo(() => {
+  if (documentTypeFilter === "All documents") return documents;
 
-    return documents.filter(
-      (documentRecord) => getDocumentType(documentRecord) === documentTypeFilter
-    );
-  }, [documentTypeFilter, documents]);
+  return documents.filter(
+    (documentRecord) => getInvestorDocumentGroup(documentRecord) === documentTypeFilter
+  );
+}, [documentTypeFilter, documents]);
 
-  const documentTypeOptions = useMemo(() => {
-    return [
-      "All documents",
-      ...Array.from(
-        new Set(documents.map((documentRecord) => getDocumentType(documentRecord)))
-      ),
-    ];
-  }, [documents]);
+ const documentTypeOptions = useMemo(() => {
+  const standardGroups = investorDocumentKits.map((kit) => kit.label);
+
+  const actualGroups = Array.from(
+    new Set(documents.map((documentRecord) => getInvestorDocumentGroup(documentRecord)))
+  ).filter((group) => group && group !== "Other Documents");
+
+  return [
+    "All documents",
+    ...standardGroups,
+    ...actualGroups.filter((group) => !standardGroups.includes(group)),
+    "Other Documents",
+  ];
+}, [documents]);
 
   const investorActivityEvents = useMemo(() => {
     const events: PortalActivityEvent[] = [];
@@ -1506,7 +1615,31 @@ const displayedManagementFee = financialPosition
                       ))}
                     </select>
                   </div>
+<div className="portal-document-kit-grid">
+  {investorDocumentKits.map((kit) => {
+    const kitDocuments = documents.filter(
+      (documentRecord) => getInvestorDocumentGroup(documentRecord) === kit.label
+    );
 
+    const storedKitDocuments = kitDocuments.filter(hasStoredPdf);
+
+    return (
+      <button
+        className={`portal-document-kit-card ${
+          documentTypeFilter === kit.label ? "active" : ""
+        }`}
+        key={kit.label}
+        onClick={() => setDocumentTypeFilter(kit.label)}
+        type="button"
+      >
+        <span>{getDocumentIcon(kit.label)} {kit.label}</span>
+        <strong>{kitDocuments.length}</strong>
+        <p>{kit.description}</p>
+        <em>{storedKitDocuments.length} PDF ready</em>
+      </button>
+    );
+  })}
+</div>
                   {documents.length === 0 && (
                     <div className="explain-box">
                       No investor documents found yet. Publish investor PDFs from
