@@ -914,7 +914,17 @@ function updateSelectedBlock(updates: Partial<TemplateBlock>) {
     )
   );
 }
+function renameSelectedBlock(field: "title" | "subtitle", value: string) {
+  updateSelectedBlock({
+    [field]: value,
+  });
 
+  setStatusMessage(
+    field === "title"
+      ? "Block title updated."
+      : "Block description updated."
+  );
+}
 function updateSelectedTableConfig(updates: Partial<TableBlockConfig>) {
   setBlocks((currentBlocks) =>
     currentBlocks.map((block) => {
@@ -2338,10 +2348,35 @@ return (
         </div>
 
         <div className="ids-selected-context">
-          <p>Selected block</p>
-          <strong>{selectedBlock?.title ?? "No selection"}</strong>
-          <span>{selectedBlock?.subtitle ?? "Select a block to configure."}</span>
-        </div>
+  <p>Selected block</p>
+  <strong>{selectedBlock?.title ?? "No selection"}</strong>
+  <span>{selectedBlock?.subtitle ?? "Select a block to configure."}</span>
+</div>
+
+<div className="ids-block-editor">
+  <label>
+    Block title
+    <input
+      value={selectedBlock?.title ?? ""}
+      onChange={(event) =>
+        renameSelectedBlock("title", event.target.value)
+      }
+      placeholder="Enter block title"
+    />
+  </label>
+
+  <label>
+    Block description
+    <textarea
+      value={selectedBlock?.subtitle ?? ""}
+      onChange={(event) =>
+        renameSelectedBlock("subtitle", event.target.value)
+      }
+      placeholder="Enter block description"
+      rows={3}
+    />
+  </label>
+</div>
 
         <div className="ids-merge-tabs">
           <button
@@ -4821,6 +4856,47 @@ function renderPublish() {
 .ids-soft-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+  .ids-block-editor {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 16px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.44);
+}
+
+.ids-block-editor label {
+  display: grid;
+  gap: 6px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ids-block-editor input,
+.ids-block-editor textarea {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.72);
+  color: #f8fafc;
+  padding: 9px 10px;
+  font-size: 12px;
+  outline: none;
+}
+
+.ids-block-editor textarea {
+  resize: vertical;
+}
+
+.ids-block-editor input:focus,
+.ids-block-editor textarea:focus {
+  border-color: rgba(180, 131, 20, 0.72);
+  box-shadow: 0 0 0 3px rgba(180, 131, 20, 0.12);
 }
       `}</style>
     </main>
