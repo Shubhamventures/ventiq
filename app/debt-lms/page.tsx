@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
-
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+type DataRow = Record<string, unknown>;
 type LoanStatus = "Performing" | "Due Soon" | "Overdue" | "Default Watch";
 type CovenantStatus = "Compliant" | "Pending" | "Breached" | "Waived";
 type NoticeStatus = "Draft" | "Queued" | "Sent" | "Failed";
@@ -82,8 +83,73 @@ type BankMatchRow = {
   matchStatus: "Matched" | "Partial Match" | "Unmatched";
   action: string;
 };
-
-const loans: DebtLoan[] = [
+type NewLoanForm = {
+  borrowerName: string;
+  borrowerEmail: string;
+  financeContactName: string;
+  financeContactEmail: string;
+  escalationContactName: string;
+  escalationContactEmail: string;
+  fundName: string;
+  instrumentType: string;
+  facilityReference: string;
+  sanctionAmount: string;
+  disbursedAmount: string;
+  sanctionDate: string;
+  disbursementDate: string;
+  firstDrawdownDate: string;
+  tenureMonths: string;
+  couponRate: string;
+  interestFrequency: string;
+  principalFrequency: string;
+  moratoriumMonths: string;
+  moratoriumStartBasis: string;
+  repaymentStartDate: string;
+  maturityDate: string;
+  processingFee: string;
+  commitmentFee: string;
+  exitFee: string;
+  prepaymentFee: string;
+  penalInterestRate: string;
+  securityDetails: string;
+  chargeDetails: string;
+  trusteeDetails: string;
+  bankAccountDetails: string;
+};
+const emptyLoanForm: NewLoanForm = {
+  borrowerName: "",
+  borrowerEmail: "",
+  financeContactName: "",
+  financeContactEmail: "",
+  escalationContactName: "",
+  escalationContactEmail: "",
+  fundName: "",
+  instrumentType: "NCD",
+  facilityReference: "",
+  sanctionAmount: "",
+  disbursedAmount: "",
+  sanctionDate: "",
+  disbursementDate: "",
+  firstDrawdownDate: "",
+  tenureMonths: "",
+  couponRate: "",
+  interestFrequency: "Monthly",
+  principalFrequency: "Monthly",
+  moratoriumMonths: "",
+  moratoriumStartBasis: "Disbursement Date",
+  repaymentStartDate: "",
+  maturityDate: "",
+  processingFee: "",
+  commitmentFee: "",
+  exitFee: "",
+  prepaymentFee: "",
+  penalInterestRate: "",
+  securityDetails: "",
+  chargeDetails: "",
+  trusteeDetails: "",
+  bankAccountDetails: "",
+};
+const sampleLoans: DebtLoan[] = [
   {
     id: "loan-001",
     borrowerName: "Alpha Fintech Pvt Ltd",
@@ -186,7 +252,7 @@ const loans: DebtLoan[] = [
   },
 ];
 
-const repaymentRows: RepaymentRow[] = [
+const sampleRepaymentRows: RepaymentRow[] = [
   {
     id: "repay-001",
     loanId: "loan-001",
@@ -253,7 +319,7 @@ const repaymentRows: RepaymentRow[] = [
   },
 ];
 
-const covenantRows: CovenantRow[] = [
+const sampleCovenantRows: CovenantRow[] = [
   {
     id: "cov-001",
     loanId: "loan-001",
@@ -300,7 +366,7 @@ const covenantRows: CovenantRow[] = [
   },
 ];
 
-const noticeRows: NoticeRow[] = [
+const sampleNoticeRows: NoticeRow[] = [
   {
     id: "notice-001",
     borrowerName: "Alpha Fintech Pvt Ltd",
@@ -333,7 +399,7 @@ const noticeRows: NoticeRow[] = [
   },
 ];
 
-const bankMatches: BankMatchRow[] = [
+const sampleBankMatches: BankMatchRow[] = [
   {
     id: "bank-001",
     borrowerName: "Nova Health Systems",
@@ -388,11 +454,470 @@ function formatDate(value: string) {
 function statusClass(value: string) {
   return value.toLowerCase().replace(/\s+/g, "-");
 }
+function getString(row: DataRow, keys: string[], fallback = "") {
+  for (const key of keys) {
+    const value = row[key];
+
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+
+  return fallback;
+}
+
+function getNumber(row: DataRow, keys: string[], fallback = 0) {
+  for (const key of keys) {
+    const value = row[key];
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (
+      typeof value === "string" &&
+      value.trim() &&
+      !Number.isNaN(Number(value))
+    ) {
+      return Number(value);
+    }
+  }
+
+  return fallback;
+}
+
+function getDateString(row: DataRow, keys: string[], fallback: string) {
+  for (const key of keys) {
+    const value = row[key];
+
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+
+  return fallback;
+}
+
+function normalizeLoanStatus(value: string): LoanStatus {
+  const status = value.toLowerCase();
+
+  if (status.includes("default")) return "Default Watch";
+  if (status.includes("overdue")) return "Overdue";
+  if (status.includes("due")) return "Due Soon";
+
+  return "Performing";
+}
+
+function normalizeCollectionStatus(value: string): CollectionStatus {
+  const status = value.toLowerCase();
+
+  if (status.includes("received") || status.includes("paid")) return "Received";
+  if (status.includes("partial")) return "Partial";
+  if (status.includes("overdue") || status.includes("default")) return "Overdue";
+
+  return "Pending";
+}
+
+function normalizeCovenantStatus(value: string): CovenantStatus {
+  const status = value.toLowerCase();
+
+  if (status.includes("breach")) return "Breached";
+  if (status.includes("waive")) return "Waived";
+  if (status.includes("compliant") || status.includes("done")) return "Compliant";
+
+  return "Pending";
+}
+
+function normalizeNoticeStatus(value: string): NoticeStatus {
+  const status = value.toLowerCase();
+
+  if (status.includes("sent")) return "Sent";
+  if (status.includes("queue")) return "Queued";
+  if (status.includes("fail")) return "Failed";
+
+  return "Draft";
+}
+
+function normalizeMatchStatus(value: string): BankMatchRow["matchStatus"] {
+  const status = value.toLowerCase();
+
+  if (status.includes("partial")) return "Partial Match";
+  if (status.includes("match") && !status.includes("unmatched")) return "Matched";
+
+  return "Unmatched";
+}
+
+function mapLoan(row: DataRow): DebtLoan {
+  return {
+    id: getString(row, ["id"], crypto.randomUUID()),
+    borrowerName: getString(row, ["borrower_name"], "Borrower"),
+    fundName: getString(row, ["fund_name"], "Debt Fund"),
+    instrument: getString(row, ["instrument_type"], "Loan"),
+    sanctionAmount: getNumber(row, ["sanction_amount"]),
+    disbursedAmount: getNumber(row, ["disbursed_amount"]),
+    disbursementDate: getDateString(row, ["disbursement_date"], "2026-01-01"),
+    tenureMonths: getNumber(row, ["tenure_months"]),
+    couponRate: getNumber(row, ["coupon_rate"]),
+    interestFrequency: getString(row, ["interest_frequency"], "Monthly"),
+    principalFrequency: getString(
+      row,
+      ["principal_frequency", "principal_repayment_type"],
+      "Monthly"
+    ),
+    moratoriumMonths: getNumber(row, ["moratorium_months"]),
+    moratoriumStart: getString(row, ["moratorium_start_basis"], "Disbursement Date"),
+    repaymentStartDate: getDateString(row, ["repayment_start_date"], "2026-01-01"),
+    maturityDate: getDateString(row, ["maturity_date"], "2026-12-31"),
+    processingFee: getNumber(row, ["processing_fee"]),
+    exitFee: getNumber(row, ["exit_fee"]),
+    penalRate: getNumber(row, ["penal_interest_rate"]),
+    security: getString(row, ["security_details", "charge_details"], "Security pending"),
+    status: normalizeLoanStatus(
+      getString(row, ["risk_status", "loan_status"], "Performing")
+    ),
+    nextDueDate: getDateString(row, ["next_due_date", "maturity_date"], "2026-12-31"),
+    nextDueAmount: getNumber(row, ["next_due_amount"]),
+    overdueAmount: getNumber(row, ["overdue_amount"]),
+  };
+}
+
+function mapRepayment(row: DataRow): RepaymentRow {
+  const totalDue = getNumber(row, ["total_due"]);
+  const receivedAmount = getNumber(row, ["amount_received"]);
+  const pendingAmount =
+    getNumber(row, ["pending_amount"]) || Math.max(totalDue - receivedAmount, 0);
+
+  return {
+    id: getString(row, ["id"], crypto.randomUUID()),
+    loanId: getString(row, ["loan_id"], ""),
+    borrowerName: getString(row, ["borrower_name"], "Borrower"),
+    dueDate: getDateString(row, ["due_date"], "2026-01-01"),
+    openingPrincipal: getNumber(row, ["opening_principal"]),
+    principalDue: getNumber(row, ["principal_due"]),
+    interestDue: getNumber(row, ["interest_due"]),
+    feesDue: getNumber(row, ["fees_due"]),
+    penaltyDue: getNumber(row, ["penalty_due"]),
+    totalDue,
+    receivedAmount,
+    pendingAmount,
+    status: normalizeCollectionStatus(getString(row, ["collection_status"], "Pending")),
+    daysPastDue: getNumber(row, ["days_past_due"]),
+  };
+}
+
+function mapCovenant(row: DataRow): CovenantRow {
+  return {
+    id: getString(row, ["id"], crypto.randomUUID()),
+    loanId: getString(row, ["loan_id"], ""),
+    borrowerName: getString(row, ["borrower_name"], "Borrower"),
+    covenant: getString(row, ["covenant_name"], "Covenant"),
+    type: getString(row, ["covenant_type"], "Reporting"),
+    frequency: getString(row, ["frequency"], "Monthly"),
+    dueDate: getDateString(row, ["due_date"], "2026-01-01"),
+    status: normalizeCovenantStatus(getString(row, ["covenant_status"], "Pending")),
+    evidence: getString(row, ["evidence_required", "evidence_storage_path"], "Pending"),
+  };
+}
+
+function mapNotice(row: DataRow): NoticeRow {
+  return {
+    id: getString(row, ["id"], crypto.randomUUID()),
+    borrowerName: getString(row, ["borrower_name"], "Borrower"),
+    noticeType: getString(row, ["notice_type"], "Repayment reminder"),
+    dueDate: getDateString(row, ["due_date"], "2026-01-01"),
+    amount: getNumber(row, ["total_due", "penalty_due", "principal_due"]),
+    emailTo: getString(row, ["recipient_email"], "finance@borrower.com"),
+    status: normalizeNoticeStatus(getString(row, ["notice_status"], "Draft")),
+    linkedDocument: getString(row, ["pdf_file_name"], "Notice PDF"),
+  };
+}
+
+function mapBankMatch(row: DataRow): BankMatchRow {
+  return {
+    id: getString(row, ["id"], crypto.randomUUID()),
+    borrowerName: getString(row, ["borrower_name"], "Borrower"),
+    expectedAmount: getNumber(row, ["expected_amount"]),
+    receivedAmount: getNumber(row, ["received_amount"]),
+    bankNarration: getString(row, ["bank_narration"], "No narration"),
+    matchStatus: normalizeMatchStatus(getString(row, ["match_status"], "Unmatched")),
+    action: getString(row, ["action_required"], "Review match"),
+  };
+}
 
 export default function DebtLMSPage() {
-  const [selectedLoanId, setSelectedLoanId] = useState(loans[0].id);
-  const selectedLoan = loans.find((loan) => loan.id === selectedLoanId) ?? loans[0];
+  const [loans, setLoans] = useState<DebtLoan[]>(sampleLoans);
+  const [repaymentRows, setRepaymentRows] =
+    useState<RepaymentRow[]>(sampleRepaymentRows);
+  const [covenantRows, setCovenantRows] =
+    useState<CovenantRow[]>(sampleCovenantRows);
+  const [noticeRows, setNoticeRows] = useState<NoticeRow[]>(sampleNoticeRows);
+  const [bankMatches, setBankMatches] =
+    useState<BankMatchRow[]>(sampleBankMatches);
 
+   const [selectedLoanId, setSelectedLoanId] = useState(sampleLoans[0].id);
+  const [loading, setLoading] = useState(true);
+  const [dataMessage, setDataMessage] = useState(
+    "Loading Debt LMS workspace..."
+  );
+
+  const [isAddLoanOpen, setIsAddLoanOpen] = useState(false);
+  const [loanForm, setLoanForm] = useState<NewLoanForm>(emptyLoanForm);
+  const [isSavingLoan, setIsSavingLoan] = useState(false);
+  const [loanFormMessage, setLoanFormMessage] = useState("");
+  const [loanFormError, setLoanFormError] = useState("");
+
+  useEffect(() => {
+    async function loadDebtLmsData() {
+      if (!isSupabaseConfigured || !supabase) {
+        setDataMessage("Using sample Debt LMS data. Supabase is not configured.");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+
+        const db = supabase as any;
+
+        const [
+          loansResult,
+          repaymentResult,
+          covenantsResult,
+          noticesResult,
+          bankMatchesResult,
+        ] = await Promise.all([
+          db
+            .from("debt_lms_loans")
+            .select("*")
+            .order("created_at", { ascending: false }),
+
+          db
+            .from("debt_lms_repayment_schedule")
+            .select("*")
+            .order("due_date", { ascending: true }),
+
+          db
+            .from("debt_lms_covenants")
+            .select("*")
+            .order("due_date", { ascending: true }),
+
+          db
+            .from("debt_lms_notices")
+            .select("*")
+            .order("created_at", { ascending: false }),
+
+          db
+            .from("debt_lms_bank_matches")
+            .select("*")
+            .order("created_at", { ascending: false }),
+        ]);
+
+        if (loansResult.error) throw new Error(loansResult.error.message);
+        if (repaymentResult.error) throw new Error(repaymentResult.error.message);
+        if (covenantsResult.error) throw new Error(covenantsResult.error.message);
+        if (noticesResult.error) throw new Error(noticesResult.error.message);
+        if (bankMatchesResult.error) {
+          throw new Error(bankMatchesResult.error.message);
+        }
+
+        const nextLoans =
+          loansResult.data && loansResult.data.length > 0
+            ? (loansResult.data as DataRow[]).map(mapLoan)
+            : sampleLoans;
+
+        const nextRepayments =
+          repaymentResult.data && repaymentResult.data.length > 0
+            ? (repaymentResult.data as DataRow[]).map(mapRepayment)
+            : sampleRepaymentRows;
+
+        const nextCovenants =
+          covenantsResult.data && covenantsResult.data.length > 0
+            ? (covenantsResult.data as DataRow[]).map(mapCovenant)
+            : sampleCovenantRows;
+
+        const nextNotices =
+          noticesResult.data && noticesResult.data.length > 0
+            ? (noticesResult.data as DataRow[]).map(mapNotice)
+            : sampleNoticeRows;
+
+        const nextBankMatches =
+          bankMatchesResult.data && bankMatchesResult.data.length > 0
+            ? (bankMatchesResult.data as DataRow[]).map(mapBankMatch)
+            : sampleBankMatches;
+
+        setLoans(nextLoans);
+        setRepaymentRows(nextRepayments);
+        setCovenantRows(nextCovenants);
+        setNoticeRows(nextNotices);
+        setBankMatches(nextBankMatches);
+        setSelectedLoanId(nextLoans[0]?.id || sampleLoans[0].id);
+
+        setDataMessage(
+          loansResult.data && loansResult.data.length > 0
+            ? "Connected to Debt LMS Supabase records."
+            : "Debt LMS tables are ready. Showing sample data until loans are added."
+        );
+      } catch (error) {
+        setDataMessage(
+          error instanceof Error
+            ? `Debt LMS database issue: ${error.message}`
+            : "Unable to load Debt LMS data. Showing sample data."
+        );
+
+        setLoans(sampleLoans);
+        setRepaymentRows(sampleRepaymentRows);
+        setCovenantRows(sampleCovenantRows);
+        setNoticeRows(sampleNoticeRows);
+        setBankMatches(sampleBankMatches);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadDebtLmsData();
+  }, []);
+  function updateLoanForm(field: keyof NewLoanForm, value: string) {
+    setLoanForm((currentForm) => ({
+      ...currentForm,
+      [field]: value,
+    }));
+  }
+
+  function closeAddLoanModal() {
+    setIsAddLoanOpen(false);
+    setLoanForm(emptyLoanForm);
+    setLoanFormMessage("");
+    setLoanFormError("");
+  }
+
+  async function submitNewLoan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setLoanFormMessage("");
+    setLoanFormError("");
+
+    if (!loanForm.borrowerName.trim()) {
+      setLoanFormError("Borrower name is required.");
+      return;
+    }
+
+    if (!loanForm.fundName.trim()) {
+      setLoanFormError("Fund name is required.");
+      return;
+    }
+
+    setIsSavingLoan(true);
+
+    const payload = {
+      borrower_name: loanForm.borrowerName.trim(),
+      borrower_email: loanForm.borrowerEmail.trim(),
+      finance_contact_name: loanForm.financeContactName.trim(),
+      finance_contact_email: loanForm.financeContactEmail.trim(),
+      escalation_contact_name: loanForm.escalationContactName.trim(),
+      escalation_contact_email: loanForm.escalationContactEmail.trim(),
+
+      fund_name: loanForm.fundName.trim(),
+      instrument_type: loanForm.instrumentType,
+      facility_reference: loanForm.facilityReference.trim(),
+
+      sanction_amount: Number(loanForm.sanctionAmount || 0),
+      disbursed_amount: Number(loanForm.disbursedAmount || 0),
+
+      sanction_date: loanForm.sanctionDate || null,
+      disbursement_date: loanForm.disbursementDate || null,
+      first_drawdown_date: loanForm.firstDrawdownDate || null,
+      tenure_months: Number(loanForm.tenureMonths || 0),
+      coupon_rate: Number(loanForm.couponRate || 0),
+
+      interest_frequency: loanForm.interestFrequency,
+      principal_frequency: loanForm.principalFrequency,
+      principal_repayment_type: loanForm.principalFrequency,
+
+      moratorium_months: Number(loanForm.moratoriumMonths || 0),
+      moratorium_start_basis: loanForm.moratoriumStartBasis,
+      repayment_start_date: loanForm.repaymentStartDate || null,
+      maturity_date: loanForm.maturityDate || null,
+
+      processing_fee: Number(loanForm.processingFee || 0),
+      commitment_fee: Number(loanForm.commitmentFee || 0),
+      exit_fee: Number(loanForm.exitFee || 0),
+      prepayment_fee: Number(loanForm.prepaymentFee || 0),
+      penal_interest_rate: Number(loanForm.penalInterestRate || 0),
+
+      security_details: loanForm.securityDetails.trim(),
+      charge_details: loanForm.chargeDetails.trim(),
+      trustee_details: loanForm.trusteeDetails.trim(),
+      bank_account_details: loanForm.bankAccountDetails.trim(),
+
+      loan_status: "Active",
+      risk_status: "On Track",
+      source_type: "Manual",
+    };
+
+    try {
+      if (!isSupabaseConfigured || !supabase) {
+        const localLoan: DebtLoan = {
+          id: crypto.randomUUID(),
+          borrowerName: payload.borrower_name,
+          fundName: payload.fund_name,
+          instrument: payload.instrument_type,
+          sanctionAmount: payload.sanction_amount,
+          disbursedAmount: payload.disbursed_amount,
+          disbursementDate: payload.disbursement_date || "2026-01-01",
+          tenureMonths: payload.tenure_months,
+          couponRate: payload.coupon_rate,
+          interestFrequency: payload.interest_frequency,
+          principalFrequency: payload.principal_frequency,
+          moratoriumMonths: payload.moratorium_months,
+          moratoriumStart: payload.moratorium_start_basis,
+          repaymentStartDate: payload.repayment_start_date || "2026-01-01",
+          maturityDate: payload.maturity_date || "2026-12-31",
+          processingFee: payload.processing_fee,
+          exitFee: payload.exit_fee,
+          penalRate: payload.penal_interest_rate,
+          security: payload.security_details || "Security pending",
+          status: "Performing",
+          nextDueDate: payload.repayment_start_date || "2026-12-31",
+          nextDueAmount: 0,
+          overdueAmount: 0,
+        };
+
+        setLoans((currentLoans) => [localLoan, ...currentLoans]);
+        setSelectedLoanId(localLoan.id);
+        setDataMessage("New loan added locally. Supabase is not configured.");
+        closeAddLoanModal();
+        return;
+      }
+
+      const db = supabase as any;
+
+      const { data, error } = await db
+        .from("debt_lms_loans")
+        .insert(payload)
+        .select("*")
+        .single();
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const savedLoan = mapLoan(data as DataRow);
+
+      setLoans((currentLoans) => [savedLoan, ...currentLoans]);
+      setSelectedLoanId(savedLoan.id);
+      setDataMessage("New debt loan saved to Supabase.");
+      setLoanFormMessage("Loan saved successfully.");
+      closeAddLoanModal();
+    } catch (error) {
+      setLoanFormError(
+        error instanceof Error ? error.message : "Unable to save new loan."
+      );
+    } finally {
+      setIsSavingLoan(false);
+    }
+  }
+  const selectedLoan =
+    loans.find((loan) => loan.id === selectedLoanId) ?? loans[0] ?? sampleLoans[0];
   const summary = useMemo(() => {
     const totalSanctioned = loans.reduce((sum, loan) => sum + loan.sanctionAmount, 0);
     const totalDisbursed = loans.reduce((sum, loan) => sum + loan.disbursedAmount, 0);
@@ -417,7 +942,7 @@ export default function DebtLMSPage() {
       defaultWatch,
       breachedCovenants,
     };
-  }, []);
+  }, [loans, repaymentRows, covenantRows]);
 
   const selectedSchedule = repaymentRows.filter((row) => row.loanId === selectedLoan.id);
   const selectedCovenants = covenantRows.filter((row) => row.loanId === selectedLoan.id);
@@ -816,7 +1341,117 @@ export default function DebtLMSPage() {
           font-weight: 900;
           text-decoration: none;
         }
+        .loan-modal-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 60;
+          background: rgba(2, 6, 23, 0.78);
+          backdrop-filter: blur(10px);
+          display: flex;
+          justify-content: center;
+          align-items: flex-start;
+          padding: 28px;
+          overflow-y: auto;
+        }
 
+        .loan-modal {
+          width: min(1040px, 100%);
+          border: 1px solid rgba(245, 200, 91, 0.28);
+          background: #08111f;
+          border-radius: 28px;
+          padding: 24px;
+          box-shadow: 0 28px 90px rgba(0, 0, 0, 0.46);
+        }
+
+        .loan-modal-header {
+          display: flex;
+          justify-content: space-between;
+          gap: 18px;
+          align-items: flex-start;
+          margin-bottom: 20px;
+        }
+
+        .loan-modal-header h2 {
+          margin: 0;
+          font-size: 30px;
+          letter-spacing: -0.04em;
+        }
+
+        .loan-modal-header p {
+          margin: 8px 0 0;
+          color: #9db3d7;
+          line-height: 1.55;
+        }
+
+        .loan-form-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 14px;
+        }
+
+        .loan-form-field {
+          display: grid;
+          gap: 7px;
+        }
+
+        .loan-form-field.full {
+          grid-column: 1 / -1;
+        }
+
+        .loan-form-field label {
+          color: #c7d7f4;
+          font-size: 12px;
+          font-weight: 900;
+        }
+
+        .loan-form-field input,
+        .loan-form-field select,
+        .loan-form-field textarea {
+          width: 100%;
+          border: 1px solid rgba(147, 197, 253, 0.18);
+          background: rgba(15, 23, 42, 0.82);
+          color: #ffffff;
+          border-radius: 14px;
+          padding: 11px 12px;
+          font: inherit;
+          outline: none;
+        }
+
+        .loan-form-field textarea {
+          min-height: 82px;
+          resize: vertical;
+        }
+
+        .loan-form-section-title {
+          grid-column: 1 / -1;
+          margin-top: 8px;
+          color: #f5c85b;
+          font-size: 13px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        .loan-form-actions {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin-top: 22px;
+        }
+
+        .loan-form-message {
+          color: #bbf7d0;
+          font-size: 13px;
+          font-weight: 800;
+        }
+
+        .loan-form-error {
+          color: #fecaca;
+          font-size: 13px;
+          font-weight: 800;
+        }
         @media (max-width: 980px) {
           .debt-header,
           .panel-header {
@@ -849,9 +1484,13 @@ export default function DebtLMSPage() {
           </div>
 
           <div className="debt-header-actions">
-            <button className="debt-primary" type="button">
-              Add New Loan
-            </button>
+            <button
+  className="debt-primary"
+  onClick={() => setIsAddLoanOpen(true)}
+  type="button"
+>
+  Add New Loan
+</button>
 
             <button className="debt-secondary" type="button">
               Upload Term Sheet
@@ -867,10 +1506,427 @@ export default function DebtLMSPage() {
           </div>
         </div>
 
-        <div className="debt-ribbon">
-          Complete debt fund flow · Term sheet intelligence → repayment schedule
-          → notices → email dispatch → bank matching → penalty/default tracking
+                <div className="debt-ribbon">
+          {loading
+            ? "Loading Debt LMS workspace..."
+            : dataMessage}{" "}
+          · Term sheet intelligence → repayment schedule → notices → email
+          dispatch → bank matching → penalty/default tracking
         </div>
+                {isAddLoanOpen && (
+          <div className="loan-modal-backdrop">
+            <form className="loan-modal" onSubmit={submitNewLoan}>
+              <div className="loan-modal-header">
+                <div>
+                  <h2>Add New Debt Loan</h2>
+                  <p>
+                    Capture borrower, facility, repayment, moratorium, fee,
+                    penalty, security and contact details. Repayment schedule
+                    generation comes in the next phase.
+                  </p>
+                </div>
+
+                <button
+                  className="debt-secondary"
+                  onClick={closeAddLoanModal}
+                  type="button"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="loan-form-grid">
+                <div className="loan-form-section-title">Borrower details</div>
+
+                <div className="loan-form-field">
+                  <label>Borrower Name *</label>
+                  <input
+                    required
+                    value={loanForm.borrowerName}
+                    onChange={(event) =>
+                      updateLoanForm("borrowerName", event.target.value)
+                    }
+                    placeholder="Alpha Fintech Pvt Ltd"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Borrower Email</label>
+                  <input
+                    type="email"
+                    value={loanForm.borrowerEmail}
+                    onChange={(event) =>
+                      updateLoanForm("borrowerEmail", event.target.value)
+                    }
+                    placeholder="finance@borrower.com"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Fund Name *</label>
+                  <input
+                    required
+                    value={loanForm.fundName}
+                    onChange={(event) =>
+                      updateLoanForm("fundName", event.target.value)
+                    }
+                    placeholder="Venture Debt Fund I"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Finance Contact Name</label>
+                  <input
+                    value={loanForm.financeContactName}
+                    onChange={(event) =>
+                      updateLoanForm("financeContactName", event.target.value)
+                    }
+                    placeholder="CFO / Finance Manager"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Finance Contact Email</label>
+                  <input
+                    type="email"
+                    value={loanForm.financeContactEmail}
+                    onChange={(event) =>
+                      updateLoanForm("financeContactEmail", event.target.value)
+                    }
+                    placeholder="cfo@borrower.com"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Escalation Contact Email</label>
+                  <input
+                    type="email"
+                    value={loanForm.escalationContactEmail}
+                    onChange={(event) =>
+                      updateLoanForm("escalationContactEmail", event.target.value)
+                    }
+                    placeholder="founder@borrower.com"
+                  />
+                </div>
+
+                <div className="loan-form-section-title">Facility terms</div>
+
+                <div className="loan-form-field">
+                  <label>Instrument Type</label>
+                  <select
+                    value={loanForm.instrumentType}
+                    onChange={(event) =>
+                      updateLoanForm("instrumentType", event.target.value)
+                    }
+                  >
+                    <option>NCD</option>
+                    <option>CCD</option>
+                    <option>Venture Debt Loan</option>
+                    <option>Secured Loan</option>
+                    <option>Debenture</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Facility Reference</label>
+                  <input
+                    value={loanForm.facilityReference}
+                    onChange={(event) =>
+                      updateLoanForm("facilityReference", event.target.value)
+                    }
+                    placeholder="TS/VD/2026/001"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Sanction Amount</label>
+                  <input
+                    type="number"
+                    value={loanForm.sanctionAmount}
+                    onChange={(event) =>
+                      updateLoanForm("sanctionAmount", event.target.value)
+                    }
+                    placeholder="100000000"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Disbursed Amount</label>
+                  <input
+                    type="number"
+                    value={loanForm.disbursedAmount}
+                    onChange={(event) =>
+                      updateLoanForm("disbursedAmount", event.target.value)
+                    }
+                    placeholder="100000000"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Coupon Rate %</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={loanForm.couponRate}
+                    onChange={(event) =>
+                      updateLoanForm("couponRate", event.target.value)
+                    }
+                    placeholder="15.5"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Tenure Months</label>
+                  <input
+                    type="number"
+                    value={loanForm.tenureMonths}
+                    onChange={(event) =>
+                      updateLoanForm("tenureMonths", event.target.value)
+                    }
+                    placeholder="36"
+                  />
+                </div>
+
+                <div className="loan-form-section-title">Dates and moratorium</div>
+
+                <div className="loan-form-field">
+                  <label>Sanction Date</label>
+                  <input
+                    type="date"
+                    value={loanForm.sanctionDate}
+                    onChange={(event) =>
+                      updateLoanForm("sanctionDate", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Disbursement Date</label>
+                  <input
+                    type="date"
+                    value={loanForm.disbursementDate}
+                    onChange={(event) =>
+                      updateLoanForm("disbursementDate", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>First Drawdown Date</label>
+                  <input
+                    type="date"
+                    value={loanForm.firstDrawdownDate}
+                    onChange={(event) =>
+                      updateLoanForm("firstDrawdownDate", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Moratorium Months</label>
+                  <input
+                    type="number"
+                    value={loanForm.moratoriumMonths}
+                    onChange={(event) =>
+                      updateLoanForm("moratoriumMonths", event.target.value)
+                    }
+                    placeholder="6"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Moratorium Starts From</label>
+                  <select
+                    value={loanForm.moratoriumStartBasis}
+                    onChange={(event) =>
+                      updateLoanForm("moratoriumStartBasis", event.target.value)
+                    }
+                  >
+                    <option>Sanction Date</option>
+                    <option>Disbursement Date</option>
+                    <option>First Drawdown Date</option>
+                    <option>Custom Date</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Repayment Start Date</label>
+                  <input
+                    type="date"
+                    value={loanForm.repaymentStartDate}
+                    onChange={(event) =>
+                      updateLoanForm("repaymentStartDate", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Maturity Date</label>
+                  <input
+                    type="date"
+                    value={loanForm.maturityDate}
+                    onChange={(event) =>
+                      updateLoanForm("maturityDate", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Interest Frequency</label>
+                  <select
+                    value={loanForm.interestFrequency}
+                    onChange={(event) =>
+                      updateLoanForm("interestFrequency", event.target.value)
+                    }
+                  >
+                    <option>Monthly</option>
+                    <option>Quarterly</option>
+                    <option>Semi Annual</option>
+                    <option>Annual</option>
+                    <option>Bullet</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Principal Frequency</label>
+                  <select
+                    value={loanForm.principalFrequency}
+                    onChange={(event) =>
+                      updateLoanForm("principalFrequency", event.target.value)
+                    }
+                  >
+                    <option>Monthly</option>
+                    <option>Quarterly</option>
+                    <option>Semi Annual</option>
+                    <option>Annual</option>
+                    <option>Bullet</option>
+                    <option>Custom</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-section-title">Fees, penalty and security</div>
+
+                <div className="loan-form-field">
+                  <label>Processing Fee</label>
+                  <input
+                    type="number"
+                    value={loanForm.processingFee}
+                    onChange={(event) =>
+                      updateLoanForm("processingFee", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Commitment Fee</label>
+                  <input
+                    type="number"
+                    value={loanForm.commitmentFee}
+                    onChange={(event) =>
+                      updateLoanForm("commitmentFee", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Exit Fee</label>
+                  <input
+                    type="number"
+                    value={loanForm.exitFee}
+                    onChange={(event) =>
+                      updateLoanForm("exitFee", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Prepayment Fee</label>
+                  <input
+                    type="number"
+                    value={loanForm.prepaymentFee}
+                    onChange={(event) =>
+                      updateLoanForm("prepaymentFee", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Penal Interest Rate %</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={loanForm.penalInterestRate}
+                    onChange={(event) =>
+                      updateLoanForm("penalInterestRate", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Security Details</label>
+                  <textarea
+                    value={loanForm.securityDetails}
+                    onChange={(event) =>
+                      updateLoanForm("securityDetails", event.target.value)
+                    }
+                    placeholder="First ranking charge on receivables, escrow control, pledge, hypothecation etc."
+                  />
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Charge Details</label>
+                  <textarea
+                    value={loanForm.chargeDetails}
+                    onChange={(event) =>
+                      updateLoanForm("chargeDetails", event.target.value)
+                    }
+                    placeholder="ROC charge, charge holder, security cover, trustee documents etc."
+                  />
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Bank Account Details</label>
+                  <textarea
+                    value={loanForm.bankAccountDetails}
+                    onChange={(event) =>
+                      updateLoanForm("bankAccountDetails", event.target.value)
+                    }
+                    placeholder="Account name, bank, IFSC, collection account, escrow account etc."
+                  />
+                </div>
+              </div>
+
+              <div className="loan-form-actions">
+                <div>
+                  {loanFormMessage && (
+                    <div className="loan-form-message">{loanFormMessage}</div>
+                  )}
+                  {loanFormError && (
+                    <div className="loan-form-error">{loanFormError}</div>
+                  )}
+                </div>
+
+                <div className="debt-header-actions">
+                  <button
+                    className="debt-secondary"
+                    onClick={closeAddLoanModal}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    className="debt-primary"
+                    disabled={isSavingLoan}
+                    type="submit"
+                  >
+                    {isSavingLoan ? "Saving..." : "Save Loan"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        )}
 
         <div className="debt-summary-grid">
           <div className="debt-stat-card">
