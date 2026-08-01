@@ -3,17 +3,9 @@
 import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type WorkspaceTab =
-  | "library"
-  | "builder"
-  | "preview"
-  | "batch"
-  | "publish";
-
+type WorkspaceTab = "start" | "library" | "builder" | "preview" | "batch" | "publish";
 type RibbonTab = "home" | "insert" | "layout" | "view" | "table" | "chart";
-
 type MergeMode = "cell" | "column" | "calculated" | "import";
-
 type BlockKind =
   | "letterhead"
   | "identity"
@@ -51,20 +43,34 @@ type TableBlockConfig = {
   columns: TableColumnConfig[];
 };
 
+type BlockStyle = {
+  fontFamily: "inter" | "serif" | "mono";
+  fontSize: "small" | "normal" | "large";
+  align: "left" | "center" | "right";
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  numberFormat: "plain" | "currency" | "number" | "percentage" | "date";
+};
+
+type ChartConfig = {
+  chartType: "bar" | "line" | "waterfall" | "donut";
+  series: "current_nav" | "distribution_amount" | "tvpi" | "irr";
+  title: string;
+};
+
 type TemplateBlock = {
   id: string;
   kind: BlockKind;
   title: string;
   subtitle: string;
   content?: string;
-  repeatSource?: string;
+  repeatSource?: TableBlockConfig["repeatSource"];
   tableConfig?: TableBlockConfig;
-  stylePreset?: "normal" | "header" | "highlight" | "muted";
-  align?: "left" | "center" | "right";
-  valueFormat?: "number" | "currency" | "date" | "percentage" | "multiple";
-  chartType?: "bar" | "line" | "waterfall";
-  chartSeries?: string;
+  style?: BlockStyle;
+  chartConfig?: ChartConfig;
 };
+
 type InvestorProfile = {
   id: string;
   name: string;
@@ -90,11 +96,12 @@ type MergeField = {
 };
 
 type ColumnSource = {
-  id: string;
+  id: TableBlockConfig["repeatSource"];
   label: string;
   description: string;
   fields: MergeField[];
 };
+
 type SavedTemplate = {
   id: string;
   template_name: string;
@@ -145,11 +152,13 @@ type BatchGenerationResponse = {
   };
   queuedDocuments?: number;
 };
+
 type PublishResponse = {
   message?: string;
   batch_id?: string;
   publishedDocuments?: number;
 };
+
 type PdfGenerationResponse = {
   message?: string;
   batch_id?: string;
@@ -162,6 +171,7 @@ type PdfGenerationResponse = {
     file_url?: string;
   }[];
 };
+
 type ImportTemplateResponse = {
   message?: string;
   detectedDocumentType?: string;
@@ -182,6 +192,18 @@ type ImportTemplateResponse = {
     detected_document_type?: string;
   };
 };
+
+type PageSettings = {
+  marginLeft: number;
+  marginRight: number;
+  marginTop: number;
+  marginBottom: number;
+  showGrid: boolean;
+  showRulers: boolean;
+  showSampleValues: boolean;
+  zoom: number;
+};
+
 const investors: InvestorProfile[] = [
   {
     id: "aarav",
@@ -229,7 +251,8 @@ const investors: InvestorProfile[] = [
     distribution: "₹1,10,50,000",
   },
 ];
-const tableFieldOptions = {
+
+const tableFieldOptions: Record<TableBlockConfig["repeatSource"], { label: string; value: string; format: TableColumnConfig["format"] }[]> = {
   transactions: [
     { label: "Date", value: "transaction_date", format: "date" },
     { label: "Description", value: "transaction_description", format: "text" },
@@ -287,7 +310,28 @@ const tableFieldOptions = {
     { label: "Particulars", value: "particulars", format: "text" },
     { label: "Amount", value: "amount", format: "currency" },
   ],
-} as const;
+};
+
+const baseStyle: BlockStyle = {
+  fontFamily: "inter",
+  fontSize: "normal",
+  align: "left",
+  bold: false,
+  italic: false,
+  underline: false,
+  numberFormat: "plain",
+};
+
+const basePageSettings: PageSettings = {
+  marginLeft: 15,
+  marginRight: 15,
+  marginTop: 20,
+  marginBottom: 15,
+  showGrid: true,
+  showRulers: true,
+  showSampleValues: true,
+  zoom: 100,
+};
 
 function createTableConfig(
   repeatSource: TableBlockConfig["repeatSource"] = "transactions"
@@ -304,7 +348,7 @@ function createTableConfig(
       header: field.label,
       fieldKey: field.value,
       width: index === 1 ? 42 : 19,
-      format: field.format as TableColumnConfig["format"],
+      format: field.format,
       align:
         field.format === "currency" ||
         field.format === "number" ||
@@ -314,170 +358,99 @@ function createTableConfig(
     })),
   };
 }
-const initialBlocks: TemplateBlock[] = [
-  {
-    id: "letterhead",
-    kind: "letterhead",
-    title: "Letterhead",
-    subtitle: "Fund logo, address and statement period",
-  },
-  {
-    id: "identity",
-    kind: "identity",
-    title: "Investor identity block",
-    subtitle: "Investor name, folio, PAN and address",
-  },
-  {
-  id: "summary",
-  kind: "summary",
-  title: "Capital account summary",
-  subtitle: "Commitment, called capital, NAV and uncalled capital",
-  repeatSource: "capitalAccount",
-  tableConfig: createTableConfig("capitalAccount"),
-},
-  {
-  id: "transactions",
-  kind: "transactions",
-  title: "Transaction table",
-  subtitle: "Capital calls, distributions, unit movements and investor activity",
-  repeatSource: "transactions",
-  tableConfig: createTableConfig("transactions"),
-},
-  {
-  id: "financial",
-  kind: "financial",
-  title: "Financial statement",
-  subtitle: "Income, expenses, net income and payout",
-  repeatSource: "pnl",
-  tableConfig: createTableConfig("pnl"),
-},
-  {
-    id: "performance",
-    kind: "performance",
-    title: "Performance metrics",
-    subtitle: "DPI, TVPI, IRR and distribution metrics",
-  },
-  {
-    id: "signature",
-    kind: "signature",
-    title: "Signature block",
-    subtitle: "Authorized signatory and generation date",
-  },
+
+function createBlock(kind: BlockKind): TemplateBlock {
+  const timestamp = Date.now();
+  const id = `${kind}-${timestamp}`;
+
+  const titles: Record<BlockKind, string> = {
+    letterhead: "Letterhead",
+    identity: "Investor identity block",
+    summary: "Capital account summary",
+    transactions: "Transaction table",
+    financial: "Financial statement",
+    performance: "Metrics table",
+    chart: "Performance chart",
+    notes: "Notes",
+    signature: "Signature block",
+  };
+
+  const subtitles: Record<BlockKind, string> = {
+    letterhead: "Fund logo, address and statement period",
+    identity: "Investor name, folio, PAN and address",
+    summary: "Commitment, called capital, NAV and uncalled capital",
+    transactions: "Capital calls, distributions, unit movements and investor activity",
+    financial: "Income, expenses, net income and payout",
+    performance: "DPI, TVPI, IRR and distribution metrics",
+    chart: "Portfolio movement, returns and distribution visualisation",
+    notes: "Narrative note, disclaimer or management commentary",
+    signature: "Authorized signatory and generation date",
+  };
+
+  const repeatSource =
+    kind === "summary"
+      ? "capitalAccount"
+      : kind === "transactions"
+      ? "transactions"
+      : kind === "financial"
+      ? "pnl"
+      : undefined;
+
+  return {
+    id,
+    kind,
+    title: titles[kind],
+    subtitle: subtitles[kind],
+    content:
+      kind === "notes"
+        ? "This statement is generated based on the books and records of the Fund as on {report_date}."
+        : kind === "signature"
+        ? "Authorized Signatory"
+        : kind === "letterhead"
+        ? "Registered AIF | GIFT City"
+        : undefined,
+    repeatSource,
+    tableConfig: repeatSource ? createTableConfig(repeatSource) : undefined,
+    style: { ...baseStyle },
+    chartConfig:
+      kind === "chart"
+        ? {
+            chartType: "bar",
+            series: "current_nav",
+            title: "Portfolio Movement Chart",
+          }
+        : undefined,
+  };
+}
+
+const starterBlocks: TemplateBlock[] = [
+  createBlock("letterhead"),
+  createBlock("identity"),
+  createBlock("summary"),
+  createBlock("transactions"),
+  createBlock("financial"),
+  createBlock("performance"),
+  createBlock("notes"),
+  createBlock("signature"),
 ];
 
 const cellFields: MergeField[] = [
-  {
-    code: "investor_name",
-    label: "Investor name",
-    category: "Investor Info",
-    type: "TEXT",
-    sample: "Aarav Menon",
-  },
-  {
-    code: "investor_code",
-    label: "Investor / folio code",
-    category: "Investor Info",
-    type: "TEXT",
-    sample: "AUR-10001",
-  },
-  {
-    code: "investor_type",
-    label: "Investor type",
-    category: "Investor Info",
-    type: "TEXT",
-    sample: "Individual",
-  },
-  {
-    code: "fund_name",
-    label: "Fund name",
-    category: "Fund",
-    type: "TEXT",
-    sample: "VENTIQ Capital Fund I",
-  },
-  {
-    code: "fund_address",
-    label: "Fund registered address",
-    category: "Fund",
-    type: "TEXT",
-    sample: "GIFT City, Gandhinagar",
-  },
-  {
-    code: "statement_period",
-    label: "Statement period",
-    category: "Fund",
-    type: "TEXT",
-    sample: "Q1 FY 2025-26",
-  },
-  {
-    code: "report_date",
-    label: "Reporting / as-of date",
-    category: "Fund",
-    type: "DATE",
-    sample: "30-Jun-2025",
-  },
-  {
-    code: "commitment_amount",
-    label: "Commitment amount",
-    category: "Capital Account",
-    type: "MONEY",
-    sample: "₹2,50,00,000",
-  },
-  {
-    code: "capital_called",
-    label: "Capital called",
-    category: "Capital Account",
-    type: "MONEY",
-    sample: "₹1,50,00,000",
-  },
-  {
-    code: "uncalled_capital",
-    label: "Uncalled capital",
-    category: "Capital Account",
-    type: "MONEY",
-    sample: "₹1,00,00,000",
-  },
-  {
-    code: "current_nav",
-    label: "Current NAV",
-    category: "Capital Account",
-    type: "MONEY",
-    sample: "₹1,82,40,000",
-  },
-  {
-    code: "distribution_amount",
-    label: "Distribution amount",
-    category: "P&L",
-    type: "MONEY",
-    sample: "₹42,00,000",
-  },
-  {
-    code: "dpi",
-    label: "DPI",
-    category: "Performance",
-    type: "NUMBER",
-    sample: "0.28x",
-  },
-  {
-    code: "tvpi",
-    label: "TVPI",
-    category: "Performance",
-    type: "NUMBER",
-    sample: "1.49x",
-  },
-  {
-    code: "irr",
-    label: "Investor IRR",
-    category: "Performance",
-    type: "PERCENT",
-    sample: "18.7%",
-  },
-  {
-    code: "generated_on",
-    label: "Statement generated on",
-    category: "Calculated",
-    type: "DATE",
-    sample: "28-Jul-2026",
-  },
+  { code: "investor_name", label: "Investor name", category: "Investor Info", type: "TEXT", sample: "Aarav Menon" },
+  { code: "investor_code", label: "Investor / folio code", category: "Investor Info", type: "TEXT", sample: "AUR-10001" },
+  { code: "investor_type", label: "Investor type", category: "Investor Info", type: "TEXT", sample: "Individual" },
+  { code: "fund_name", label: "Fund name", category: "Fund", type: "TEXT", sample: "VENTIQ Capital Fund I" },
+  { code: "fund_address", label: "Fund registered address", category: "Fund", type: "TEXT", sample: "GIFT City, Gandhinagar" },
+  { code: "statement_period", label: "Statement period", category: "Fund", type: "TEXT", sample: "Q1 FY 2025-26" },
+  { code: "report_date", label: "Reporting / as-of date", category: "Fund", type: "DATE", sample: "30-Jun-2025" },
+  { code: "commitment_amount", label: "Commitment amount", category: "Capital Account", type: "MONEY", sample: "₹2,50,00,000" },
+  { code: "capital_called", label: "Capital called", category: "Capital Account", type: "MONEY", sample: "₹1,50,00,000" },
+  { code: "uncalled_capital", label: "Uncalled capital", category: "Capital Account", type: "MONEY", sample: "₹1,00,00,000" },
+  { code: "current_nav", label: "Current NAV", category: "Capital Account", type: "MONEY", sample: "₹1,82,40,000" },
+  { code: "distribution_amount", label: "Distribution amount", category: "P&L", type: "MONEY", sample: "₹42,00,000" },
+  { code: "dpi", label: "DPI", category: "Performance", type: "NUMBER", sample: "0.28x" },
+  { code: "tvpi", label: "TVPI", category: "Performance", type: "NUMBER", sample: "1.49x" },
+  { code: "irr", label: "Investor IRR", category: "Performance", type: "PERCENT", sample: "18.7%" },
+  { code: "generated_on", label: "Statement generated on", category: "Calculated", type: "DATE", sample: "28-Jul-2026" },
 ];
 
 const columnSources: ColumnSource[] = [
@@ -486,48 +459,12 @@ const columnSources: ColumnSource[] = [
     label: "Transactions",
     description: "Investor cashflows and account movement lines",
     fields: [
-      {
-        code: "transaction_date",
-        label: "Date",
-        category: "Transactions",
-        type: "DATE",
-        sample: "24-Apr-24",
-      },
-      {
-        code: "transaction_description",
-        label: "Description",
-        category: "Transactions",
-        type: "TEXT",
-        sample: "Units Allotment",
-      },
-      {
-        code: "transaction_amount",
-        label: "Amount",
-        category: "Transactions",
-        type: "MONEY",
-        sample: "₹1,98,82,000",
-      },
-      {
-        code: "transaction_units",
-        label: "Units",
-        category: "Transactions",
-        type: "NUMBER",
-        sample: "1,98,820",
-      },
-      {
-        code: "transaction_nav",
-        label: "NAV",
-        category: "Transactions",
-        type: "MONEY",
-        sample: "₹100.00",
-      },
-      {
-        code: "transaction_type",
-        label: "Type",
-        category: "Transactions",
-        type: "TEXT",
-        sample: "Capital Call",
-      },
+      { code: "transaction_date", label: "Date", category: "Transactions", type: "DATE", sample: "24-Apr-24" },
+      { code: "transaction_description", label: "Description", category: "Transactions", type: "TEXT", sample: "Units Allotment" },
+      { code: "transaction_type", label: "Type", category: "Transactions", type: "TEXT", sample: "Capital Call" },
+      { code: "transaction_amount", label: "Amount", category: "Transactions", type: "MONEY", sample: "₹1,98,82,000" },
+      { code: "units", label: "Units", category: "Transactions", type: "NUMBER", sample: "1,98,820" },
+      { code: "nav", label: "NAV", category: "Transactions", type: "MONEY", sample: "₹100.00" },
     ],
   },
   {
@@ -535,34 +472,10 @@ const columnSources: ColumnSource[] = [
     label: "P&L line items",
     description: "Income, expenses, taxes and payout schedule",
     fields: [
-      {
-        code: "particular",
-        label: "Particular",
-        category: "P&L",
-        type: "TEXT",
-        sample: "Interest / Fee Income",
-      },
-      {
-        code: "reference",
-        label: "Reference",
-        category: "P&L",
-        type: "TEXT",
-        sample: "A",
-      },
-      {
-        code: "amount",
-        label: "Amount",
-        category: "P&L",
-        type: "MONEY",
-        sample: "₹8,38,428",
-      },
-      {
-        code: "formula",
-        label: "Formula",
-        category: "P&L",
-        type: "TEXT",
-        sample: "C = A + B",
-      },
+      { code: "particular", label: "Particular", category: "P&L", type: "TEXT", sample: "Interest / Fee Income" },
+      { code: "reference", label: "Reference", category: "P&L", type: "TEXT", sample: "A" },
+      { code: "amount", label: "Amount", category: "P&L", type: "MONEY", sample: "₹8,38,428" },
+      { code: "formula", label: "Formula", category: "P&L", type: "TEXT", sample: "C = A + B" },
     ],
   },
   {
@@ -570,116 +483,79 @@ const columnSources: ColumnSource[] = [
     label: "Capital Account",
     description: "Commitment, drawdown, distribution and NAV movement",
     fields: [
-      {
-        code: "capital_particular",
-        label: "Particular",
-        category: "Capital Account",
-        type: "TEXT",
-        sample: "Opening capital account",
-      },
-      {
-        code: "capital_amount",
-        label: "Amount",
-        category: "Capital Account",
-        type: "MONEY",
-        sample: "₹1,50,00,000",
-      },
-      {
-        code: "capital_units",
-        label: "Units",
-        category: "Capital Account",
-        type: "NUMBER",
-        sample: "1,50,000",
-      },
+      { code: "opening_capital", label: "Opening Capital", category: "Capital Account", type: "MONEY", sample: "₹1,50,00,000" },
+      { code: "capital_contribution", label: "Capital Contribution", category: "Capital Account", type: "MONEY", sample: "₹50,00,000" },
+      { code: "income_allocation", label: "Income Allocation", category: "Capital Account", type: "MONEY", sample: "₹8,44,514" },
+      { code: "distribution", label: "Distribution", category: "Capital Account", type: "MONEY", sample: "₹5,91,981" },
+      { code: "closing_capital", label: "Closing Capital", category: "Capital Account", type: "MONEY", sample: "₹1,82,40,000" },
     ],
   },
   {
-    id: "tax",
+    id: "taxBreakup",
     label: "Tax breakup",
     description: "Form 64C / 64D and advance tax related values",
     fields: [
-      {
-        code: "tax_nature",
-        label: "Nature of income",
-        category: "Tax",
-        type: "TEXT",
-        sample: "Interest income",
-      },
-      {
-        code: "tax_amount",
-        label: "Amount",
-        category: "Tax",
-        type: "MONEY",
-        sample: "₹69,122",
-      },
-      {
-        code: "tds_amount",
-        label: "TDS",
-        category: "Tax",
-        type: "MONEY",
-        sample: "₹6,912",
-      },
+      { code: "income_head", label: "Income Head", category: "Tax", type: "TEXT", sample: "Interest income" },
+      { code: "gross_income", label: "Gross Income", category: "Tax", type: "MONEY", sample: "₹8,44,514" },
+      { code: "tds", label: "TDS", category: "Tax", type: "MONEY", sample: "₹84,451" },
+      { code: "net_income", label: "Net Income", category: "Tax", type: "MONEY", sample: "₹7,60,063" },
+    ],
+  },
+  {
+    id: "distributionDetails",
+    label: "Distribution Details",
+    description: "Distribution notice and payout lines",
+    fields: [
+      { code: "distribution_date", label: "Distribution Date", category: "Distribution", type: "DATE", sample: "02-Jul-24" },
+      { code: "gross_distribution", label: "Gross Distribution", category: "Distribution", type: "MONEY", sample: "₹5,91,981" },
+      { code: "tax_withheld", label: "Tax Withheld", category: "Distribution", type: "MONEY", sample: "₹59,198" },
+      { code: "net_distribution", label: "Net Distribution", category: "Distribution", type: "MONEY", sample: "₹5,32,783" },
+    ],
+  },
+  {
+    id: "unitMovements",
+    label: "Unit Movements",
+    description: "Unit allotment and redemption schedule",
+    fields: [
+      { code: "unit_date", label: "Date", category: "Units", type: "DATE", sample: "24-Apr-24" },
+      { code: "opening_units", label: "Opening Units", category: "Units", type: "NUMBER", sample: "0" },
+      { code: "units_added", label: "Units Added", category: "Units", type: "NUMBER", sample: "1,98,820" },
+      { code: "units_redeemed", label: "Units Redeemed", category: "Units", type: "NUMBER", sample: "0" },
+      { code: "closing_units", label: "Closing Units", category: "Units", type: "NUMBER", sample: "1,98,820" },
+    ],
+  },
+  {
+    id: "portfolioPerformance",
+    label: "Portfolio Performance",
+    description: "Portfolio company and valuation movement",
+    fields: [
+      { code: "company_name", label: "Company", category: "Portfolio", type: "TEXT", sample: "Portfolio Co A" },
+      { code: "invested_amount", label: "Invested Amount", category: "Portfolio", type: "MONEY", sample: "₹50,00,000" },
+      { code: "current_value", label: "Current Value", category: "Portfolio", type: "MONEY", sample: "₹82,00,000" },
+      { code: "moic", label: "MOIC", category: "Portfolio", type: "NUMBER", sample: "1.64x" },
+      { code: "irr", label: "IRR", category: "Portfolio", type: "PERCENT", sample: "22.4%" },
+    ],
+  },
+  {
+    id: "genericTable",
+    label: "Generic Table",
+    description: "Flexible two-column table",
+    fields: [
+      { code: "particulars", label: "Particulars", category: "Generic", type: "TEXT", sample: "Sample line item" },
+      { code: "amount", label: "Amount", category: "Generic", type: "MONEY", sample: "₹1,00,000" },
     ],
   },
 ];
 
-const calculatedFields: MergeField[] = [
-  {
-    code: "gross_income",
-    label: "Gross income",
-    category: "Calculated",
-    type: "FORMULA",
-    sample: "Interest income + STCG",
-  },
-  {
-    code: "total_expenses",
-    label: "Total expenses",
-    category: "Calculated",
-    type: "FORMULA",
-    sample: "Management fee + Operating expenses + Stamp duty",
-  },
-  {
-    code: "net_income",
-    label: "Net income",
-    category: "Calculated",
-    type: "FORMULA",
-    sample: "Gross income - Total expenses",
-  },
-  {
-    code: "net_income_payout",
-    label: "Net income payout",
-    category: "Calculated",
-    type: "FORMULA",
-    sample: "Net income - TDS",
-  },
-  {
-    code: "uncalled_capital_calc",
-    label: "Uncalled capital",
-    category: "Calculated",
-    type: "FORMULA",
-    sample: "Commitment - Capital called",
-  },
-  {
-    code: "xirr",
-    label: "Investor XIRR",
-    category: "Calculated",
-    type: "XIRR",
-    sample: "Investor-wise cashflow return",
-  },
-  {
-    code: "dpi_calc",
-    label: "DPI",
-    category: "Calculated",
-    type: "FORMULA",
-    sample: "Distributions / Paid-in capital",
-  },
-  {
-    code: "tvpi_calc",
-    label: "TVPI",
-    category: "Calculated",
-    type: "FORMULA",
-    sample: "(NAV + Distributions) / Paid-in capital",
-  },
+const baseCalculatedFields: MergeField[] = [
+  { code: "gross_income", label: "Gross income", category: "Calculated", type: "FORMULA", sample: "Interest income + STCG" },
+  { code: "total_expenses", label: "Total expenses", category: "Calculated", type: "FORMULA", sample: "Management fee + Operating expenses + Stamp duty" },
+  { code: "net_income", label: "Net income", category: "Calculated", type: "FORMULA", sample: "Gross income - Total expenses" },
+  { code: "net_income_payout", label: "Net income payout", category: "Calculated", type: "FORMULA", sample: "Net income - TDS" },
+  { code: "uncalled_capital_calc", label: "Uncalled capital", category: "Calculated", type: "FORMULA", sample: "Commitment - Capital called" },
+  { code: "xirr", label: "Investor XIRR", category: "Calculated", type: "XIRR", sample: "Investor-wise cashflow return" },
+  { code: "dpi_calc", label: "DPI", category: "Calculated", type: "FORMULA", sample: "Distributions / Paid-in capital" },
+  { code: "tvpi_calc", label: "TVPI", category: "Calculated", type: "FORMULA", sample: "(NAV + Distributions) / Paid-in capital" },
 ];
 
 const documentTypes = [
@@ -718,100 +594,118 @@ function getInvestorValue(investor: InvestorProfile, code: string) {
   return values[code] ?? `{${code}}`;
 }
 
-export default function DocumentStudioPage() {
-  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("builder");
-  const [ribbonTab, setRibbonTab] = useState<RibbonTab>("insert");
-  const [mergeMode, setMergeMode] = useState<MergeMode>("cell");
-  const [templateName, setTemplateName] = useState("AIF Statement Template");
-  const [selectedInvestorId, setSelectedInvestorId] = useState("aarav");
-  const [selectedDocumentType, setSelectedDocumentType] = useState(
-    "Statement of Account (SOA)"
-  );
-  const [blocks, setBlocks] = useState<TemplateBlock[]>(initialBlocks);
-  const [selectedBlockId, setSelectedBlockId] = useState("transactions");
-  const [selectedColumnSource, setSelectedColumnSource] =
-    useState("transactions");
-  const [importDone, setImportDone] = useState(false);
-const [activeTemplateId, setActiveTemplateId] = useState("");
-const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([]);
-const [previewMergeData, setPreviewMergeData] =
-  useState<PreviewMergeResponse | null>(null);
-const [batchResult, setBatchResult] = useState<BatchGenerationResponse | null>(
-  null
-);
-const [publishResult, setPublishResult] = useState<PublishResponse | null>(
-  null
-);
-const [pdfGenerationResult, setPdfGenerationResult] =
-  useState<PdfGenerationResponse | null>(null);
-const [importResult, setImportResult] =
-  useState<ImportTemplateResponse | null>(null);
-const fileInputRef = useRef<HTMLInputElement | null>(null);
-const [apiBusy, setApiBusy] = useState(false);
-const [statusMessage, setStatusMessage] = useState(
-  "Template Builder ready. Insert blocks, map fields, preview and batch generate."
-);
-const [showGrid, setShowGrid] = useState(true);
-const [showRulers, setShowRulers] = useState(true);
-const [snapToGrid, setSnapToGrid] = useState(false);
-const [showSampleValues, setShowSampleValues] = useState(true);
-const [zoomLevel, setZoomLevel] = useState(100);
-const [pageMargins, setPageMargins] = useState({
-  left: 15,
-  right: 15,
-  top: 20,
-  bottom: 15,
-});
-const [formulaName, setFormulaName] = useState("net_income_custom");
-const [formulaExpression, setFormulaExpression] = useState(
-  "gross_income - total_expenses - tds"
-);
-const [customCalculatedFields, setCustomCalculatedFields] = useState<MergeField[]>([]);
-  const selectedInvestor =
-    investors.find((investor) => investor.id === selectedInvestorId) ??
-    investors[0];
-
-  const selectedBlock = useMemo(() => {
-    return blocks.find((block) => block.id === selectedBlockId) ?? blocks[0];
-  }, [blocks, selectedBlockId]);
-
-  const activeColumnSource =
-  columnSources.find((source) => source.id === selectedColumnSource) ??
-  columnSources[0];
-
-const selectedBlockIndex = blocks.findIndex(
-  (block) => block.id === selectedBlockId
-);
-
-const availableCalculatedFields = [
-  ...calculatedFields,
-  ...customCalculatedFields,
-];
-    async function loadSavedTemplates() {
-  try {
-    const response = await fetch("/api/document-studio/templates", {
-      cache: "no-store",
-    });
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(result.error || "Unable to load templates.");
-    }
-
-    setSavedTemplates(result.templates ?? []);
-  } catch (error) {
-    console.warn("Unable to load saved document templates:", error);
-  }
+function getDefaultRepeatSourceForBlock(block: TemplateBlock): TableBlockConfig["repeatSource"] {
+  if (block.kind === "summary") return "capitalAccount";
+  if (block.kind === "financial") return "pnl";
+  return "transactions";
 }
 
-useEffect(() => {
-  loadSavedTemplates();
-}, []);
-function normalizeSavedTemplateBlocks(value: unknown): TemplateBlock[] {
-  if (!Array.isArray(value)) {
-    return initialBlocks.map(ensureTableConfigForTemplateBlock);
+function isValidTableRepeatSource(value: unknown): value is TableBlockConfig["repeatSource"] {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(tableFieldOptions, value);
+}
+
+function isConfigurableTableBlock(block?: TemplateBlock | null) {
+  return block?.kind === "summary" || block?.kind === "transactions" || block?.kind === "financial";
+}
+
+function getTableTitle(block: TemplateBlock) {
+  const source = block.tableConfig?.repeatSource || block.repeatSource;
+
+  if (source === "capitalAccount") return "Capital Account";
+  if (source === "pnl") return "Financial Statement";
+  if (source === "cashflows") return "Cashflows";
+  if (source === "taxBreakup") return "Tax Breakup";
+  if (source === "distributionDetails") return "Distribution Details";
+  if (source === "unitMovements") return "Unit Movements";
+  if (source === "portfolioPerformance") return "Portfolio Performance";
+  if (source === "genericTable") return "Additional Schedule";
+  return "Transactions";
+}
+
+function ensureTableConfigForTemplateBlock(block: TemplateBlock): TemplateBlock {
+  const withStyle = {
+    ...block,
+    style: { ...baseStyle, ...block.style },
+  };
+
+  if (!isConfigurableTableBlock(withStyle)) {
+    return withStyle;
   }
+
+  const repeatSource = isValidTableRepeatSource(withStyle.tableConfig?.repeatSource)
+    ? withStyle.tableConfig.repeatSource
+    : isValidTableRepeatSource(withStyle.repeatSource)
+    ? withStyle.repeatSource
+    : getDefaultRepeatSourceForBlock(withStyle);
+
+  const fallbackConfig = createTableConfig(repeatSource);
+  const existingColumns =
+    withStyle.tableConfig?.columns && withStyle.tableConfig.columns.length > 0
+      ? withStyle.tableConfig.columns
+      : fallbackConfig.columns;
+
+  return {
+    ...withStyle,
+    repeatSource,
+    tableConfig: {
+      ...fallbackConfig,
+      ...withStyle.tableConfig,
+      repeatSource,
+      columns: existingColumns,
+    },
+  };
+}
+
+function getSampleValueForTableField(fieldKey: string) {
+  const sampleValues: Record<string, string> = {
+    transaction_date: "24-Apr-24",
+    transaction_description: "Units Allotment",
+    transaction_type: "Capital Call",
+    transaction_amount: "₹1,98,82,000",
+    units: "1,98,820",
+    nav: "₹100.00",
+    cashflow_date: "24-Apr-24",
+    cashflow_type: "Capital Call",
+    amount: "₹1,98,82,000",
+    remarks: "Investor cashflow",
+    opening_capital: "₹1,50,00,000",
+    capital_contribution: "₹50,00,000",
+    income_allocation: "₹8,44,514",
+    distribution: "₹5,91,981",
+    closing_capital: "₹1,82,40,000",
+    income_head: "Interest income",
+    gross_income: "₹8,44,514",
+    tds: "₹84,451",
+    net_income: "₹7,60,063",
+    distribution_date: "02-Jul-24",
+    gross_distribution: "₹5,91,981",
+    tax_withheld: "₹59,198",
+    net_distribution: "₹5,32,783",
+    unit_date: "24-Apr-24",
+    opening_units: "0",
+    units_added: "1,98,820",
+    units_redeemed: "0",
+    closing_units: "1,98,820",
+    company_name: "Portfolio Co A",
+    invested_amount: "₹50,00,000",
+    current_value: "₹82,00,000",
+    moic: "1.64x",
+    particular: "Interest / Fee Income",
+    reference: "A",
+    formula: "C = A + B",
+    particulars: "Sample line item",
+  };
+
+  return sampleValues[fieldKey] || `{${fieldKey}}`;
+}
+
+function stringArrayFromUnknown(value: unknown) {
+  if (!Array.isArray(value)) return [] as string[];
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function normalizeSavedTemplateBlocks(value: unknown): TemplateBlock[] {
+  if (!Array.isArray(value)) return starterBlocks.map(ensureTableConfigForTemplateBlock);
 
   const allowedKinds: BlockKind[] = [
     "letterhead",
@@ -830,1259 +724,843 @@ function normalizeSavedTemplateBlocks(value: unknown): TemplateBlock[] {
     .filter((item) => item.kind && allowedKinds.includes(item.kind))
     .map((item, index): TemplateBlock =>
       ensureTableConfigForTemplateBlock({
-  id: item.id || `saved-block-${index}`,
-  kind: item.kind as BlockKind,
-  title: item.title || "Saved template block",
-  subtitle: item.subtitle || "Loaded from saved template",
-  content: item.content,
-  repeatSource: item.repeatSource,
-  tableConfig: item.tableConfig,
-  stylePreset: item.stylePreset,
-  align: item.align,
-  valueFormat: item.valueFormat,
-  chartType: item.chartType,
-  chartSeries: item.chartSeries,
-})
+        id: item.id || `saved-block-${index}`,
+        kind: item.kind as BlockKind,
+        title: item.title || "Saved template block",
+        subtitle: item.subtitle || "Loaded from saved template",
+        content: item.content,
+        repeatSource: item.repeatSource,
+        tableConfig: item.tableConfig,
+        style: item.style,
+        chartConfig: item.chartConfig,
+      })
     );
 
-  return cleanBlocks.length > 0
-    ? cleanBlocks
-    : initialBlocks.map(ensureTableConfigForTemplateBlock);
+  return cleanBlocks.length > 0 ? cleanBlocks : starterBlocks.map(ensureTableConfigForTemplateBlock);
 }
 
-function stringArrayFromUnknown(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [] as string[];
+export default function DocumentStudioPage() {
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("start");
+  const [ribbonTab, setRibbonTab] = useState<RibbonTab>("insert");
+  const [mergeMode, setMergeMode] = useState<MergeMode>("cell");
+  const [templateName, setTemplateName] = useState("AIF Statement Template");
+  const [selectedInvestorId, setSelectedInvestorId] = useState("aarav");
+  const [selectedDocumentType, setSelectedDocumentType] = useState("Statement of Account (SOA)");
+  const [blocks, setBlocks] = useState<TemplateBlock[]>(starterBlocks.map(ensureTableConfigForTemplateBlock));
+  const [selectedBlockId, setSelectedBlockId] = useState(starterBlocks[2]?.id || "");
+  const [selectedColumnSource, setSelectedColumnSource] = useState<TableBlockConfig["repeatSource"]>("transactions");
+  const [selectedColumnId, setSelectedColumnId] = useState("");
+  const [importDone, setImportDone] = useState(false);
+  const [activeTemplateId, setActiveTemplateId] = useState("");
+  const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([]);
+  const [previewMergeData, setPreviewMergeData] = useState<PreviewMergeResponse | null>(null);
+  const [batchResult, setBatchResult] = useState<BatchGenerationResponse | null>(null);
+  const [publishResult, setPublishResult] = useState<PublishResponse | null>(null);
+  const [pdfGenerationResult, setPdfGenerationResult] = useState<PdfGenerationResponse | null>(null);
+  const [importResult, setImportResult] = useState<ImportTemplateResponse | null>(null);
+  const [apiBusy, setApiBusy] = useState(false);
+  const [pageSettings, setPageSettings] = useState<PageSettings>(basePageSettings);
+  const [calculatedFields, setCalculatedFields] = useState<MergeField[]>(baseCalculatedFields);
+  const [newCalculatedCode, setNewCalculatedCode] = useState("net_income_custom");
+  const [newCalculatedFormula, setNewCalculatedFormula] = useState("gross_income - total_expenses - tds");
+  const [statusMessage, setStatusMessage] = useState(
+    "Choose how you want to prepare the investor document template."
+  );
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const selectedInvestor = investors.find((investor) => investor.id === selectedInvestorId) ?? investors[0];
+
+  const selectedBlock = useMemo(() => {
+    return blocks.find((block) => block.id === selectedBlockId) ?? blocks[0] ?? null;
+  }, [blocks, selectedBlockId]);
+
+  const selectedBlockIndex = selectedBlock ? blocks.findIndex((block) => block.id === selectedBlock.id) : -1;
+
+  const activeColumnSource =
+    columnSources.find((source) => source.id === selectedColumnSource) ?? columnSources[0];
+
+  const selectedTableConfig = isConfigurableTableBlock(selectedBlock)
+    ? selectedBlock.tableConfig || createTableConfig(getDefaultRepeatSourceForBlock(selectedBlock))
+    : null;
+
+  const selectedColumn = selectedTableConfig?.columns.find((column) => column.id === selectedColumnId) || null;
+
+  useEffect(() => {
+    loadSavedTemplates();
+  }, []);
+
+  async function loadSavedTemplates() {
+    try {
+      const response = await fetch("/api/document-studio/templates", { cache: "no-store" });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.error || "Unable to load templates.");
+      setSavedTemplates(result.templates ?? []);
+    } catch (error) {
+      console.warn("Unable to load saved document templates:", error);
+    }
   }
 
-  return value.filter((item): item is string => typeof item === "string");
-}
-
-function getSavedTemplateImportResult(
-  template: SavedTemplate
-): ImportTemplateResponse | null {
-  if (!template.field_mappings || typeof template.field_mappings !== "object") {
-    return null;
+  function resetRuntimeResults() {
+    setPreviewMergeData(null);
+    setBatchResult(null);
+    setPdfGenerationResult(null);
+    setPublishResult(null);
   }
 
-  const mappings = template.field_mappings as Record<string, unknown>;
-  const importIntelligence = mappings.import_intelligence;
+  function startNewTemplate(blank = true) {
+    const nextBlocks = blank
+      ? [createBlock("letterhead"), createBlock("identity")].map(ensureTableConfigForTemplateBlock)
+      : starterBlocks.map((block) => ensureTableConfigForTemplateBlock({ ...block, id: `${block.kind}-${Date.now()}-${Math.random()}` }));
 
-  if (!importIntelligence || typeof importIntelligence !== "object") {
-    return null;
+    setActiveTemplateId("");
+    setTemplateName(blank ? "Untitled AIF Template" : "AIF Statement Template");
+    setSelectedDocumentType("Statement of Account (SOA)");
+    setBlocks(nextBlocks);
+    setSelectedBlockId(nextBlocks[0]?.id || "");
+    setSelectedColumnId("");
+    setImportDone(false);
+    setImportResult(null);
+    resetRuntimeResults();
+    setRibbonTab("insert");
+    setMergeMode("cell");
+    setWorkspaceTab("builder");
+    setStatusMessage(blank ? "New blank template created. Use Insert tools to add sections." : "Existing VENTIQ starter template loaded.");
   }
 
-  const importData = importIntelligence as Record<string, unknown>;
+  function openSavedTemplate(template: SavedTemplate) {
+    const savedBlocks = normalizeSavedTemplateBlocks(template.blocks_json);
+    const importInfo = getSavedTemplateImportResult(template);
 
-  return {
-    detectedDocumentType:
-      typeof importData.detected_document_type === "string"
-        ? importData.detected_document_type
-        : template.document_type || undefined,
-    importConfidence:
-      typeof importData.import_confidence === "number"
-        ? importData.import_confidence
-        : template.import_confidence || undefined,
-    detectedFields: stringArrayFromUnknown(importData.detected_fields),
-    detectedSections: stringArrayFromUnknown(importData.detected_sections),
-    unmappedItems: stringArrayFromUnknown(importData.unmapped_items),
-    storage:
-      importData.storage && typeof importData.storage === "object"
-        ? (importData.storage as ImportTemplateResponse["storage"])
-        : undefined,
-  };
-}
-
-function openSavedTemplate(template: SavedTemplate) {
-  const savedBlocks = normalizeSavedTemplateBlocks(template.blocks_json);
-  const importInfo = getSavedTemplateImportResult(template);
-  const firstTableBlock = savedBlocks.find((block) =>
-    isConfigurableTableBlock(block)
-  );
-
-  setActiveTemplateId(template.id);
-  setTemplateName(template.template_name || "Untitled Template");
-  setSelectedDocumentType(
-    template.document_type || "Statement of Account (SOA)"
-  );
-
-  setBlocks(savedBlocks);
-  setSelectedBlockId(
-    firstTableBlock?.id || savedBlocks[0]?.id || "letterhead"
-  );
-
-  setImportResult(importInfo);
-  setImportDone(
-    Boolean(
-      importInfo ||
-        template.source_type?.toLowerCase().includes("import") ||
-        Number(template.import_confidence || 0) > 0
-    )
-  );
-
-  setPreviewMergeData(null);
-  setBatchResult(null);
-  setPdfGenerationResult(null);
-  setPublishResult(null);
-
-  if (firstTableBlock) {
-    setRibbonTab("table");
-    setMergeMode("column");
-  } else {
+    setActiveTemplateId(template.id);
+    setTemplateName(template.template_name || "Untitled Template");
+    setSelectedDocumentType(template.document_type || "Statement of Account (SOA)");
+    setBlocks(savedBlocks);
+    setSelectedBlockId(savedBlocks[0]?.id || "");
+    setSelectedColumnId("");
+    setImportResult(importInfo);
+    setImportDone(Boolean(importInfo || template.source_type?.toLowerCase().includes("import") || Number(template.import_confidence || 0) > 0));
+    resetRuntimeResults();
     setRibbonTab("insert");
     setMergeMode(importInfo ? "import" : "cell");
-  }
-
-  setWorkspaceTab("builder");
-
-  setStatusMessage(
-    `${template.template_name} opened from Template Library. Table mappings, repeat source and column settings are ready for editing.`
-  );
-}
-
-function updateSelectedBlock(updates: Partial<TemplateBlock>) {
-  setBlocks((currentBlocks) =>
-    currentBlocks.map((block) =>
-      block.id === selectedBlockId ? { ...block, ...updates } : block
-    )
-  );
-}
-function renameSelectedBlock(field: "title" | "subtitle", value: string) {
-  updateSelectedBlock({
-    [field]: value,
-  });
-
-  setStatusMessage(
-    field === "title"
-      ? "Block title updated."
-      : "Block description updated."
-  );
-}
-
-function cloneTemplateBlocks(sourceBlocks: TemplateBlock[]) {
-  return sourceBlocks.map((block) => ({
-    ...block,
-    tableConfig: block.tableConfig
-      ? {
-          ...block.tableConfig,
-          columns: block.tableConfig.columns.map((column) => ({ ...column })),
-        }
-      : undefined,
-  }));
-}
-
-function startNewTemplate() {
-  const freshBlocks = cloneTemplateBlocks(initialBlocks).map(
-    ensureTableConfigForTemplateBlock
-  );
-
-  setActiveTemplateId("");
-  setTemplateName("Untitled AIF Template");
-  setSelectedDocumentType("Statement of Account (SOA)");
-  setBlocks(freshBlocks);
-  setSelectedBlockId("transactions");
-  setSelectedInvestorId("aarav");
-  setImportDone(false);
-  setImportResult(null);
-  setPreviewMergeData(null);
-  setBatchResult(null);
-  setPdfGenerationResult(null);
-  setPublishResult(null);
-  setRibbonTab("insert");
-  setMergeMode("cell");
-  setStatusMessage("New blank template created. Insert blocks and map fields.");
-}
-
-function updatePageMargin(
-  key: "left" | "right" | "top" | "bottom",
-  value: string
-) {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) {
-    return;
-  }
-
-  setPageMargins((current) => ({
-    ...current,
-    [key]: numericValue,
-  }));
-
-  setStatusMessage(`Page ${key} margin updated to ${numericValue}mm.`);
-}
-
-function addPageBreakBlock() {
-  const id = `notes-${Date.now()}`;
-
-  const block: TemplateBlock = {
-    id,
-    kind: "notes",
-    title: "Continuation note",
-    subtitle: "Inserted as a new section / page continuation marker",
-    content:
-      "Continuation page / additional disclosure. Replace this text with your required note.",
-    stylePreset: "muted",
-  };
-
-  setBlocks((current) => [...current, block]);
-  setSelectedBlockId(id);
-  setRibbonTab("home");
-  setMergeMode("cell");
-  setStatusMessage("New continuation note inserted. Use it as a page break marker for now.");
-}
-
-function applySelectedBlockStyle(
-  stylePreset: NonNullable<TemplateBlock["stylePreset"]>
-) {
-  updateSelectedBlock({ stylePreset });
-  setStatusMessage(`Block style changed to ${stylePreset}.`);
-}
-
-function applySelectedBlockAlignment(align: NonNullable<TemplateBlock["align"]>) {
-  updateSelectedBlock({ align });
-  setStatusMessage(`Block alignment changed to ${align}.`);
-}
-
-function applySelectedBlockValueFormat(
-  valueFormat: NonNullable<TemplateBlock["valueFormat"]>
-) {
-  updateSelectedBlock({ valueFormat });
-  setStatusMessage(`Value format changed to ${valueFormat}.`);
-}
-
-function updateChartBlock(updates: Partial<TemplateBlock>) {
-  if (selectedBlock?.kind !== "chart") {
-    const id = `chart-${Date.now()}`;
-    const block: TemplateBlock = {
-      id,
-      kind: "chart",
-      title: "Performance chart",
-      subtitle: "DPI, TVPI, NAV and distribution movement",
-      content: "Portfolio Movement Chart",
-      chartType: "bar",
-      chartSeries: "current_nav",
-    };
-
-    setBlocks((current) => [...current, block]);
-    setSelectedBlockId(id);
-    setRibbonTab("chart");
-    setMergeMode("calculated");
-    setStatusMessage("Chart block inserted. Configure chart type and series.");
-    return;
-  }
-
-  updateSelectedBlock(updates);
-  setStatusMessage("Chart settings updated.");
-}
-
-function appendFormulaToken(token: string) {
-  setFormulaExpression((current) => `${current} ${token}`.trim());
-}
-
-function saveCalculatedField() {
-  const cleanName = formulaName.trim().replace(/\s+/g, "_").toLowerCase();
-
-  if (!cleanName || !formulaExpression.trim()) {
-    setStatusMessage("Add a calculated field name and formula before saving.");
-    return;
-  }
-
-  const nextField: MergeField = {
-    code: cleanName,
-    label: cleanName
-      .split("_")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" "),
-    category: "Calculated",
-    type: "FORMULA",
-    sample: formulaExpression.trim(),
-  };
-
-  setCustomCalculatedFields((current) => [
-    ...current.filter((field) => field.code !== nextField.code),
-    nextField,
-  ]);
-  setStatusMessage(`Calculated field {${nextField.code}} saved.`);
-}
-function updateSelectedTableConfig(updates: Partial<TableBlockConfig>) {
-  setBlocks((currentBlocks) =>
-    currentBlocks.map((block) => {
-      if (block.id !== selectedBlockId) {
-        return block;
-      }
-
-      const existingConfig =
-        block.tableConfig || createTableConfig("transactions");
-
-      return {
-        ...block,
-        tableConfig: {
-          ...existingConfig,
-          ...updates,
-        },
-        repeatSource: updates.repeatSource || block.repeatSource,
-      };
-    })
-  );
-}
-
-function updateSelectedTableColumn(
-  columnId: string,
-  updates: Partial<TableColumnConfig>
-) {
-  setBlocks((currentBlocks) =>
-    currentBlocks.map((block) => {
-      if (block.id !== selectedBlockId || !block.tableConfig) {
-        return block;
-      }
-
-      return {
-        ...block,
-        tableConfig: {
-          ...block.tableConfig,
-          columns: block.tableConfig.columns.map((column) =>
-            column.id === columnId ? { ...column, ...updates } : column
-          ),
-        },
-      };
-    })
-  );
-}
-
-function addTableColumn() {
-  const tableConfig = selectedBlock?.tableConfig || createTableConfig();
-  const sourceFields = tableFieldOptions[tableConfig.repeatSource];
-
-  const alreadyUsedFields = new Set(
-    tableConfig.columns.map((column) => column.fieldKey)
-  );
-
-  const nextAvailableField =
-    sourceFields.find((field) => !alreadyUsedFields.has(field.value)) ||
-    sourceFields[sourceFields.length - 1];
-
-  const nextColumnNumber = tableConfig.columns.length + 1;
-
-  const nextColumn: TableColumnConfig = {
-    id: `column-${Date.now()}`,
-    header: nextAvailableField?.label || `Column ${nextColumnNumber}`,
-    fieldKey: nextAvailableField?.value || "particulars",
-    width: 20,
-    format:
-      (nextAvailableField?.format as TableColumnConfig["format"]) || "text",
-    align:
-      nextAvailableField?.format === "currency" ||
-      nextAvailableField?.format === "number" ||
-      nextAvailableField?.format === "percentage"
-        ? "right"
-        : "left",
-  };
-
-  updateSelectedTableConfig({
-    columns: [...tableConfig.columns, nextColumn],
-  });
-
-  setRibbonTab("table");
-  setMergeMode("column");
-  setStatusMessage(
-    `${nextColumn.header} column added to ${
-      selectedBlock?.title || "table"
-    }. Total mapped columns: ${nextColumnNumber}.`
-  );
-}
-
-function deleteTableColumn(columnId: string) {
-  const tableConfig = selectedBlock?.tableConfig;
-
-  if (!tableConfig || tableConfig.columns.length <= 1) {
-    setStatusMessage("At least one table column is required.");
-    return;
-  }
-
-  updateSelectedTableConfig({
-    columns: tableConfig.columns.filter((column) => column.id !== columnId),
-  });
-}
-
-function changeTableRepeatSource(
-  repeatSource: TableBlockConfig["repeatSource"]
-) {
-  const nextConfig = createTableConfig(repeatSource);
-
-  updateSelectedTableConfig(nextConfig);
-  updateSelectedBlock({
-    repeatSource,
-    subtitle: `Repeating table mapped to ${repeatSource}`,
-  });
-
-  setRibbonTab("table");
-  setMergeMode("column");
-  setStatusMessage(
-    `Table source changed to ${repeatSource}. Columns have been remapped automatically.`
-  );
-}
-  function addBlock(kind: BlockKind) {
-    const id = `${kind}-${Date.now()}`;
-
-    const titles: Record<BlockKind, string> = {
-      letterhead: "Letterhead",
-      identity: "Investor identity block",
-      summary: "Capital account summary",
-      transactions: "Transaction table",
-      financial: "Financial statement",
-      performance: "Performance metrics",
-      chart: "Performance chart",
-      notes: "Notes",
-      signature: "Signature block",
-    };
-
-  const block: TemplateBlock = {
-  id,
-  kind,
-  title: titles[kind],
-  subtitle:
-    kind === "transactions"
-      ? "Repeats from Transactions"
-      : kind === "financial"
-      ? "Repeats from P&L line items"
-      : "Inserted from VENTIQ block library",
-  content:
-    kind === "notes"
-      ? "This statement is generated based on the books and records of the Fund as on {report_date}."
-      : kind === "signature"
-      ? "Authorized Signatory"
-      : kind === "chart"
-      ? "Portfolio Movement Chart"
-      : undefined,
-  stylePreset:
-    kind === "letterhead"
-      ? "header"
-      : kind === "notes"
-      ? "muted"
-      : "normal",
-  align: "left",
-  valueFormat: "number",
-  chartType: kind === "chart" ? "bar" : undefined,
-  chartSeries: kind === "chart" ? "current_nav" : undefined,
-  repeatSource:
-    kind === "transactions"
-      ? "transactions"
-      : kind === "financial"
-      ? "pnl"
-      : undefined,
-  tableConfig:
-  kind === "summary"
-    ? createTableConfig("capitalAccount")
-    : kind === "transactions"
-    ? createTableConfig("transactions")
-    : kind === "financial"
-    ? createTableConfig("pnl")
-    : undefined,
-};
-    setBlocks((current) => [...current, block]);
-    setSelectedBlockId(id);
-    setStatusMessage(`${titles[kind]} inserted into the template.`);
     setWorkspaceTab("builder");
-
-   if (isConfigurableTableBlock(block)) {
-  setRibbonTab("table");
-  setMergeMode("column");
-} else if (kind === "chart") {
-  setRibbonTab("chart");
-  setMergeMode("calculated");
-} else {
-  setRibbonTab("home");
-  setMergeMode("cell");
-}
+    setStatusMessage(`${template.template_name} opened. You can edit, save and preview this template.`);
   }
 
+  function getSavedTemplateImportResult(template: SavedTemplate): ImportTemplateResponse | null {
+    if (!template.field_mappings || typeof template.field_mappings !== "object") return null;
+    const mappings = template.field_mappings as Record<string, unknown>;
+    const importIntelligence = mappings.import_intelligence;
+    if (!importIntelligence || typeof importIntelligence !== "object") return null;
+    const importData = importIntelligence as Record<string, unknown>;
 
-function moveSelectedBlock(direction: "up" | "down") {
-  setBlocks((currentBlocks) => {
-    const currentIndex = currentBlocks.findIndex(
-      (block) => block.id === selectedBlockId
+    return {
+      detectedDocumentType:
+        typeof importData.detected_document_type === "string"
+          ? importData.detected_document_type
+          : template.document_type || undefined,
+      importConfidence:
+        typeof importData.import_confidence === "number" ? importData.import_confidence : template.import_confidence || undefined,
+      detectedFields: stringArrayFromUnknown(importData.detected_fields),
+      detectedSections: stringArrayFromUnknown(importData.detected_sections),
+      unmappedItems: stringArrayFromUnknown(importData.unmapped_items),
+      storage:
+        importData.storage && typeof importData.storage === "object"
+          ? (importData.storage as ImportTemplateResponse["storage"])
+          : undefined,
+    };
+  }
+
+  function updateSelectedBlock(updates: Partial<TemplateBlock>) {
+    if (!selectedBlock) return;
+
+    setBlocks((currentBlocks) =>
+      currentBlocks.map((block) => (block.id === selectedBlock.id ? { ...block, ...updates } : block))
     );
-
-    if (currentIndex === -1) {
-      return currentBlocks;
-    }
-
-    const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-
-    if (nextIndex < 0 || nextIndex >= currentBlocks.length) {
-      setStatusMessage(
-        direction === "up"
-          ? "Selected block is already at the top."
-          : "Selected block is already at the bottom."
-      );
-      return currentBlocks;
-    }
-
-    const nextBlocks = [...currentBlocks];
-    const selected = nextBlocks[currentIndex];
-
-    nextBlocks[currentIndex] = nextBlocks[nextIndex];
-    nextBlocks[nextIndex] = selected;
-
-    setStatusMessage(
-      `${selected.title} moved ${direction === "up" ? "up" : "down"}.`
-    );
-
-    return nextBlocks;
-  });
-}
-
-function duplicateSelectedBlock() {
-  if (!selectedBlock) {
-    return;
   }
 
-  const timestamp = Date.now();
-
-  const duplicatedBlock: TemplateBlock = {
-    ...selectedBlock,
-    id: `${selectedBlock.kind}-${timestamp}`,
-    title: `${selectedBlock.title} Copy`,
-    tableConfig: selectedBlock.tableConfig
-      ? {
-          ...selectedBlock.tableConfig,
-          columns: selectedBlock.tableConfig.columns.map((column, index) => ({
-            ...column,
-            id: `${column.id}-copy-${timestamp}-${index}`,
-          })),
-        }
-      : undefined,
-  };
-
-  setBlocks((currentBlocks) => {
-    const currentIndex = currentBlocks.findIndex(
-      (block) => block.id === selectedBlockId
-    );
-
-    if (currentIndex === -1) {
-      return [...currentBlocks, duplicatedBlock];
-    }
-
-    const nextBlocks = [...currentBlocks];
-    nextBlocks.splice(currentIndex + 1, 0, duplicatedBlock);
-    return nextBlocks;
-  });
-
-  setSelectedBlockId(duplicatedBlock.id);
-
-  if (isConfigurableTableBlock(duplicatedBlock)) {
-    setRibbonTab("table");
-    setMergeMode("column");
+  function updateSelectedBlockStyle(updates: Partial<BlockStyle>) {
+    if (!selectedBlock) return;
+    updateSelectedBlock({ style: { ...baseStyle, ...selectedBlock.style, ...updates } });
+    setStatusMessage("Selected block formatting updated.");
   }
 
-  setStatusMessage(`${selectedBlock.title} duplicated with its mappings.`);
-}
-
-function deleteSelectedBlock() {
-  if (blocks.length <= 1) {
-    setStatusMessage("At least one template block is required.");
-    return;
+  function updatePageSettings(updates: Partial<PageSettings>) {
+    setPageSettings((current) => ({ ...current, ...updates }));
+    setStatusMessage("Page layout/view setting updated.");
   }
 
-  const deletedTitle = selectedBlock?.title || "Selected block";
-
-  setBlocks((currentBlocks) => {
-    const currentIndex = currentBlocks.findIndex(
-      (block) => block.id === selectedBlockId
-    );
-
-    const nextBlocks = currentBlocks.filter(
-      (block) => block.id !== selectedBlockId
-    );
-
-    const nextSelectedBlock =
-      nextBlocks[Math.max(0, currentIndex - 1)] || nextBlocks[0];
-
-    setSelectedBlockId(nextSelectedBlock.id);
-
-    if (isConfigurableTableBlock(nextSelectedBlock)) {
-      setRibbonTab("table");
-      setMergeMode("column");
-    } else {
-      setRibbonTab("home");
-      setMergeMode("cell");
-    }
-
-    return nextBlocks;
-  });
-
-  setStatusMessage(`${deletedTitle} deleted from the template.`);
-}
-  function isConfigurableTableBlock(block?: TemplateBlock) {
-  return (
-    block?.kind === "summary" ||
-    block?.kind === "transactions" ||
-    block?.kind === "financial"
-  );
-}
-
-function getTableTitle(block: TemplateBlock) {
-  const source = block.tableConfig?.repeatSource || block.repeatSource;
-
-  if (source === "capitalAccount") return "Capital Account";
-  if (source === "pnl") return "Financial Statement";
-  if (source === "cashflows") return "Cashflows";
-  if (source === "taxBreakup") return "Tax Breakup";
-  if (source === "distributionDetails") return "Distribution Details";
-  if (source === "unitMovements") return "Unit Movements";
-  if (source === "portfolioPerformance") return "Portfolio Performance";
-  return "Transactions";
-}
-
-function getDefaultTableConfigForBlock(block: TemplateBlock) {
-  if (block.kind === "summary") return createTableConfig("capitalAccount");
-  if (block.kind === "financial") return createTableConfig("pnl");
-  return createTableConfig("transactions");
-}
-function getDefaultRepeatSourceForBlock(block: TemplateBlock): TableBlockConfig["repeatSource"] {
-  if (block.kind === "summary") return "capitalAccount";
-  if (block.kind === "financial") return "pnl";
-  return "transactions";
-}
-
-function isValidTableRepeatSource(
-  value: unknown
-): value is TableBlockConfig["repeatSource"] {
-  return (
-    typeof value === "string" &&
-    Object.prototype.hasOwnProperty.call(tableFieldOptions, value)
-  );
-}
-
-function ensureTableConfigForTemplateBlock(block: TemplateBlock): TemplateBlock {
-  if (!isConfigurableTableBlock(block)) {
-    return block;
-  }
-
-  const repeatSource = isValidTableRepeatSource(block.tableConfig?.repeatSource)
-    ? block.tableConfig.repeatSource
-    : isValidTableRepeatSource(block.repeatSource)
-    ? block.repeatSource
-    : getDefaultRepeatSourceForBlock(block);
-
-  const fallbackConfig = createTableConfig(repeatSource);
-  const existingColumns =
-    block.tableConfig?.columns && block.tableConfig.columns.length > 0
-      ? block.tableConfig.columns
-      : fallbackConfig.columns;
-
-  return {
-    ...block,
-    repeatSource,
-    tableConfig: {
-      ...fallbackConfig,
-      ...block.tableConfig,
-      repeatSource,
-      columns: existingColumns,
-    },
-  };
-}
-function getSampleValueForTableField(fieldKey: string) {
-  const sampleValues: Record<string, string> = {
-    transaction_date: "24-Apr-24",
-    transaction_description: "Units Allotment",
-    transaction_type: "Capital Call",
-    transaction_amount: "₹1,98,82,000",
-    units: "1,98,820",
-    nav: "₹100.00",
-
-    cashflow_date: "24-Apr-24",
-    cashflow_type: "Capital Call",
-    amount: "₹1,98,82,000",
-    remarks: "Investor cashflow",
-
-    opening_capital: "₹1,50,00,000",
-    capital_contribution: "₹50,00,000",
-    income_allocation: "₹8,44,514",
-    distribution: "₹5,91,981",
-    closing_capital: "₹1,82,40,000",
-
-    income_head: "Interest income",
-    gross_income: "₹8,44,514",
-    tds: "₹84,451",
-    net_income: "₹7,60,063",
-
-    distribution_date: "02-Jul-24",
-    gross_distribution: "₹5,91,981",
-    tax_withheld: "₹59,198",
-    net_distribution: "₹5,32,783",
-
-    unit_date: "24-Apr-24",
-    opening_units: "0",
-    units_added: "1,98,820",
-    units_redeemed: "0",
-    closing_units: "1,98,820",
-
-    company_name: "Portfolio Co A",
-    invested_amount: "₹50,00,000",
-    current_value: "₹82,00,000",
-    moic: "1.64x",
-    irr: "22.4%",
-
-    particular: "Interest / Fee Income",
-reference: "A",
-formula: "C = A + B",
-
-particulars: "Sample line item",
-  };
-
-  return sampleValues[fieldKey] || `{${fieldKey}}`;
-}
-  function insertField(field: MergeField) {
-  const token = `{${field.code}}`;
-
-  if (!selectedBlock) {
-    setStatusMessage(`${token} selected.`);
-    return;
-  }
-
-  if (selectedBlock.kind === "notes") {
-    updateSelectedBlock({
-      content: `${selectedBlock.content || ""} ${token}`.trim(),
-    });
-  } else if (selectedBlock.kind === "signature") {
-    updateSelectedBlock({ content: token });
-  } else if (selectedBlock.kind === "chart") {
-    updateSelectedBlock({ chartSeries: field.code });
-  } else {
-    updateSelectedBlock({
-      subtitle: `${selectedBlock.subtitle || ""} ${token}`.trim(),
-    });
-  }
-
-  setStatusMessage(`${token} inserted into ${selectedBlock.title}.`);
-}
-function renderContentWithSampleValues(content: string) {
-  return content.replace(/\{([^}]+)\}/g, (_match, code: string) =>
-    getInvestorValue(selectedInvestor, code.trim())
-  );
-}
-  function fallbackImportedBlocks(): TemplateBlock[] {
-  return [
-    {
-      id: "import-letterhead",
-      kind: "letterhead",
-      title: "Imported letterhead",
-      subtitle: "Detected from uploaded Word/PDF",
-    },
-    {
-      id: "import-identity",
-      kind: "identity",
-      title: "Imported investor identity",
-      subtitle: "Investor name, folio and fund fields need review",
-    },
-    {
-  id: "import-summary",
-  kind: "summary",
-  title: "Imported capital summary",
-  subtitle: "Commitment, called capital, NAV and uncalled capital",
-  repeatSource: "capitalAccount",
-  tableConfig: createTableConfig("capitalAccount"),
-},
-   {
-  id: "import-transactions",
-  kind: "transactions",
-  title: "Imported transaction table",
-  subtitle: "Suggested source: Transactions",
-  repeatSource: "transactions",
-  tableConfig: createTableConfig("transactions"),
-},
-   {
-  id: "import-financial",
-  kind: "financial",
-  title: "Imported financial statement",
-  subtitle: "Suggested source: P&L line items",
-  repeatSource: "pnl",
-  tableConfig: createTableConfig("pnl"),
-},
-    {
-      id: "import-signature",
-      kind: "signature",
-      title: "Imported signature block",
-      subtitle: "Authorized signatory section",
-    },
-  ];
-}
-
-function applyImportedTemplate(result: ImportTemplateResponse, fileName: string) {
-  const suggestedBlocks =
-    result.suggestedBlocks && result.suggestedBlocks.length > 0
-      ? result.suggestedBlocks
-      : fallbackImportedBlocks();
-
-  setImportDone(true);
-  setImportResult(result);
-  setBlocks(suggestedBlocks);
-  setSelectedBlockId(
-    suggestedBlocks.find((block) => block.kind === "transactions")?.id ||
-      suggestedBlocks[0]?.id ||
-      "import-letterhead"
-  );
-  setSelectedDocumentType(
-    result.detectedDocumentType || "Statement of Account (SOA)"
-  );
-  setTemplateName(fileName.replace(/\.[^.]+$/, " Smart Template"));
-  setWorkspaceTab("builder");
-  setRibbonTab("insert");
-  setMergeMode("import");
-  setStatusMessage(
-    result.message ||
-      "Template imported. Review detected blocks, unmapped fields and merge mappings."
-  );
-}
-
-function simulateImport() {
-  fileInputRef.current?.click();
-}
-
-async function importTemplateFile(event: ChangeEvent<HTMLInputElement>) {
-  try {
-    const file = event.target.files?.[0];
-
-    if (!file) {
+  function updateSelectedTableConfig(updates: Partial<TableBlockConfig>) {
+    if (!selectedBlock || !isConfigurableTableBlock(selectedBlock)) {
+      setStatusMessage("Select a table block first.");
       return;
     }
 
-    setApiBusy(true);
-    setStatusMessage("Uploading and analyzing existing template...");
+    setBlocks((currentBlocks) =>
+      currentBlocks.map((block) => {
+        if (block.id !== selectedBlock.id) return block;
+        const existingConfig = block.tableConfig || createTableConfig(getDefaultRepeatSourceForBlock(block));
+        return {
+          ...block,
+          repeatSource: updates.repeatSource || existingConfig.repeatSource,
+          tableConfig: {
+            ...existingConfig,
+            ...updates,
+          },
+        };
+      })
+    );
+  }
 
-    const formData = new FormData();
-    formData.append("file", file);
+  function updateSelectedTableColumn(columnId: string, updates: Partial<TableColumnConfig>) {
+    if (!selectedBlock || !isConfigurableTableBlock(selectedBlock)) return;
 
-    const response = await fetch("/api/document-studio/import-template", {
-      method: "POST",
-      body: formData,
-    });
+    setBlocks((currentBlocks) =>
+      currentBlocks.map((block) => {
+        if (block.id !== selectedBlock.id || !block.tableConfig) return block;
+        return {
+          ...block,
+          tableConfig: {
+            ...block.tableConfig,
+            columns: block.tableConfig.columns.map((column) =>
+              column.id === columnId ? { ...column, ...updates } : column
+            ),
+          },
+        };
+      })
+    );
+  }
 
-    const result = await response.json();
+  function addBlock(kind: BlockKind) {
+    const block = ensureTableConfigForTemplateBlock(createBlock(kind));
+    setBlocks((current) => [...current, block]);
+    setSelectedBlockId(block.id);
+    setSelectedColumnId(block.tableConfig?.columns[0]?.id || "");
+    setWorkspaceTab("builder");
+    setStatusMessage(`${block.title} inserted. Insert tab remains active so you can add more sections.`);
+  }
 
-    if (!response.ok) {
-      throw new Error(result.error || "Unable to import template.");
+  function deleteSelectedBlock() {
+    if (!selectedBlock) return;
+    if (blocks.length <= 1) {
+      setStatusMessage("At least one template block is required.");
+      return;
     }
 
-    applyImportedTemplate(result, file.name);
-  } catch (error) {
-    setStatusMessage(
-      error instanceof Error
-        ? error.message
-        : "Unable to import Word/PDF template."
-    );
-  } finally {
-    setApiBusy(false);
+    const deletedTitle = selectedBlock.title;
+    const currentIndex = selectedBlockIndex;
+    const nextBlocks = blocks.filter((block) => block.id !== selectedBlock.id);
+    setBlocks(nextBlocks);
+    setSelectedBlockId(nextBlocks[Math.max(0, currentIndex - 1)]?.id || nextBlocks[0]?.id || "");
+    setSelectedColumnId("");
+    setStatusMessage(`${deletedTitle} deleted from the template.`);
+  }
 
-    if (event.target) {
-      event.target.value = "";
+  function duplicateSelectedBlock() {
+    if (!selectedBlock) return;
+    const timestamp = Date.now();
+    const duplicatedBlock: TemplateBlock = {
+      ...selectedBlock,
+      id: `${selectedBlock.kind}-${timestamp}`,
+      title: `${selectedBlock.title} Copy`,
+      tableConfig: selectedBlock.tableConfig
+        ? {
+            ...selectedBlock.tableConfig,
+            columns: selectedBlock.tableConfig.columns.map((column, index) => ({
+              ...column,
+              id: `${column.id}-copy-${timestamp}-${index}`,
+            })),
+          }
+        : undefined,
+    };
+
+    setBlocks((currentBlocks) => {
+      const currentIndex = currentBlocks.findIndex((block) => block.id === selectedBlock.id);
+      const nextBlocks = [...currentBlocks];
+      nextBlocks.splice(currentIndex + 1, 0, duplicatedBlock);
+      return nextBlocks;
+    });
+    setSelectedBlockId(duplicatedBlock.id);
+    setStatusMessage(`${selectedBlock.title} duplicated.`);
+  }
+
+  function moveSelectedBlock(direction: "up" | "down") {
+    if (!selectedBlock) return;
+
+    setBlocks((currentBlocks) => {
+      const currentIndex = currentBlocks.findIndex((block) => block.id === selectedBlock.id);
+      const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+
+      if (currentIndex === -1 || nextIndex < 0 || nextIndex >= currentBlocks.length) {
+        setStatusMessage(direction === "up" ? "Selected block is already at the top." : "Selected block is already at the bottom.");
+        return currentBlocks;
+      }
+
+      const nextBlocks = [...currentBlocks];
+      const movingBlock = nextBlocks[currentIndex];
+      nextBlocks[currentIndex] = nextBlocks[nextIndex];
+      nextBlocks[nextIndex] = movingBlock;
+      setStatusMessage(`${movingBlock.title} moved ${direction}.`);
+      return nextBlocks;
+    });
+  }
+
+  function addTableColumn(format?: TableColumnConfig["format"]) {
+    if (!selectedBlock || !isConfigurableTableBlock(selectedBlock)) {
+      setStatusMessage("Select Summary, Transaction or Financial table before adding a column.");
+      return;
+    }
+
+    const tableConfig = selectedBlock.tableConfig || createTableConfig(getDefaultRepeatSourceForBlock(selectedBlock));
+    const sourceFields = tableFieldOptions[tableConfig.repeatSource];
+    const alreadyUsedFields = new Set(tableConfig.columns.map((column) => column.fieldKey));
+    const formatMatch = format ? sourceFields.find((field) => field.format === format && !alreadyUsedFields.has(field.value)) : undefined;
+    const nextAvailableField = formatMatch || sourceFields.find((field) => !alreadyUsedFields.has(field.value)) || sourceFields[sourceFields.length - 1];
+    const nextColumnNumber = tableConfig.columns.length + 1;
+    const nextFormat = format || nextAvailableField?.format || "text";
+
+    const nextColumn: TableColumnConfig = {
+      id: `column-${Date.now()}`,
+      header: nextAvailableField?.label || `Column ${nextColumnNumber}`,
+      fieldKey: nextAvailableField?.value || "particulars",
+      width: nextFormat === "text" ? 32 : 18,
+      format: nextFormat,
+      align: nextFormat === "currency" || nextFormat === "number" || nextFormat === "percentage" ? "right" : "left",
+    };
+
+    updateSelectedTableConfig({ columns: [...tableConfig.columns, nextColumn] });
+    setSelectedColumnId(nextColumn.id);
+    setStatusMessage(`${nextColumn.header} column added and selected.`);
+  }
+
+  function deleteTableColumn(columnId: string) {
+    if (!selectedTableConfig || selectedTableConfig.columns.length <= 1) {
+      setStatusMessage("At least one table column is required.");
+      return;
+    }
+
+    updateSelectedTableConfig({ columns: selectedTableConfig.columns.filter((column) => column.id !== columnId) });
+    setSelectedColumnId(selectedTableConfig.columns[0]?.id || "");
+    setStatusMessage("Selected table column deleted.");
+  }
+
+  function mergeSelectedColumnWithNext() {
+    if (!selectedTableConfig || !selectedColumnId) {
+      setStatusMessage("Select a table column header first, then click Merge with Next.");
+      return;
+    }
+
+    const currentIndex = selectedTableConfig.columns.findIndex((column) => column.id === selectedColumnId);
+    const nextColumn = selectedTableConfig.columns[currentIndex + 1];
+
+    if (currentIndex === -1 || !nextColumn) {
+      setStatusMessage("There is no next column to merge with.");
+      return;
+    }
+
+    const currentColumn = selectedTableConfig.columns[currentIndex];
+    const mergedColumn: TableColumnConfig = {
+      ...currentColumn,
+      header: `${currentColumn.header} / ${nextColumn.header}`,
+      width: currentColumn.width + nextColumn.width,
+    };
+
+    updateSelectedTableConfig({
+      columns: selectedTableConfig.columns
+        .map((column, index) => (index === currentIndex ? mergedColumn : column))
+        .filter((_, index) => index !== currentIndex + 1),
+    });
+    setSelectedColumnId(mergedColumn.id);
+    setStatusMessage("Selected column merged with the next column.");
+  }
+
+  function splitSelectedColumn() {
+    if (!selectedTableConfig || !selectedColumnId) {
+      setStatusMessage("Select a column to split.");
+      return;
+    }
+
+    const currentIndex = selectedTableConfig.columns.findIndex((column) => column.id === selectedColumnId);
+    if (currentIndex === -1) return;
+
+    const currentColumn = selectedTableConfig.columns[currentIndex];
+    const newColumn: TableColumnConfig = {
+      ...currentColumn,
+      id: `split-column-${Date.now()}`,
+      header: "New split column",
+      width: Math.max(12, Math.round(currentColumn.width / 2)),
+    };
+
+    const adjustedCurrent = { ...currentColumn, width: Math.max(12, Math.round(currentColumn.width / 2)) };
+    const nextColumns = [...selectedTableConfig.columns];
+    nextColumns[currentIndex] = adjustedCurrent;
+    nextColumns.splice(currentIndex + 1, 0, newColumn);
+    updateSelectedTableConfig({ columns: nextColumns });
+    setSelectedColumnId(newColumn.id);
+    setStatusMessage("Column split into two configurable columns.");
+  }
+
+  function changeTableRepeatSource(repeatSource: TableBlockConfig["repeatSource"]) {
+    const nextConfig = createTableConfig(repeatSource);
+    updateSelectedTableConfig(nextConfig);
+    updateSelectedBlock({ repeatSource, subtitle: `Repeating table mapped to ${repeatSource}` });
+    setSelectedColumnSource(repeatSource);
+    setSelectedColumnId(nextConfig.columns[0]?.id || "");
+    setStatusMessage(`Table source changed to ${repeatSource}. Columns remapped automatically.`);
+  }
+
+  function updateSelectedChartConfig(updates: Partial<ChartConfig>) {
+    if (!selectedBlock || selectedBlock.kind !== "chart") {
+      setStatusMessage("Select a chart block first.");
+      return;
+    }
+
+    updateSelectedBlock({
+      chartConfig: {
+        chartType: "bar",
+        series: "current_nav",
+        title: "Portfolio Movement Chart",
+        ...selectedBlock.chartConfig,
+        ...updates,
+      },
+    });
+    setStatusMessage("Chart configuration updated.");
+  }
+
+  function insertField(field: MergeField) {
+    if (!selectedBlock) {
+      setStatusMessage("Select a block before inserting a field.");
+      return;
+    }
+
+    if (isConfigurableTableBlock(selectedBlock)) {
+      if (!selectedColumnId) {
+        setStatusMessage("Select a table column header first, then choose a field mapping.");
+        return;
+      }
+
+      const fieldFormat = field.type === "MONEY" ? "currency" : field.type === "DATE" ? "date" : field.type === "NUMBER" ? "number" : field.type === "PERCENT" ? "percentage" : "text";
+      updateSelectedTableColumn(selectedColumnId, {
+        header: field.label,
+        fieldKey: field.code,
+        format: fieldFormat,
+        align: fieldFormat === "currency" || fieldFormat === "number" || fieldFormat === "percentage" ? "right" : "left",
+      });
+      setStatusMessage(`${field.label} mapped to selected table column.`);
+      return;
+    }
+
+    const fieldCode = `{${field.code}}`;
+    updateSelectedBlock({ content: `${selectedBlock.content || ""}${selectedBlock.content ? " " : ""}${fieldCode}` });
+    setStatusMessage(`${fieldCode} inserted into ${selectedBlock.title}.`);
+  }
+
+  function saveCalculatedField() {
+    const cleanCode = newCalculatedCode.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    if (!cleanCode) {
+      setStatusMessage("Enter a calculated field name first.");
+      return;
+    }
+
+    const nextField: MergeField = {
+      code: cleanCode,
+      label: cleanCode.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+      category: "Calculated",
+      type: cleanCode.includes("xirr") ? "XIRR" : "FORMULA",
+      sample: newCalculatedFormula || "Custom calculated formula",
+    };
+
+    setCalculatedFields((current) => {
+      const withoutDuplicate = current.filter((field) => field.code !== cleanCode);
+      return [...withoutDuplicate, nextField];
+    });
+    setStatusMessage(`Calculated field {${cleanCode}} saved and available for insertion.`);
+  }
+
+  function renderContentWithSampleValues(content: string) {
+    return content.replace(/\{([^}]+)\}/g, (_match, code: string) => getInvestorValue(selectedInvestor, code.trim()));
+  }
+
+  function fallbackImportedBlocks(): TemplateBlock[] {
+    return [
+      createBlock("letterhead"),
+      createBlock("identity"),
+      createBlock("summary"),
+      createBlock("transactions"),
+      createBlock("financial"),
+      createBlock("signature"),
+    ].map(ensureTableConfigForTemplateBlock);
+  }
+
+  function applyImportedTemplate(result: ImportTemplateResponse, fileName: string) {
+    const suggestedBlocks = result.suggestedBlocks && result.suggestedBlocks.length > 0 ? result.suggestedBlocks : fallbackImportedBlocks();
+    const normalizedBlocks = suggestedBlocks.map(ensureTableConfigForTemplateBlock);
+
+    setImportDone(true);
+    setImportResult(result);
+    setBlocks(normalizedBlocks);
+    setSelectedBlockId(normalizedBlocks[0]?.id || "");
+    setSelectedColumnId(normalizedBlocks.find((block) => block.tableConfig)?.tableConfig?.columns[0]?.id || "");
+    setSelectedDocumentType(result.detectedDocumentType || "Statement of Account (SOA)");
+    setTemplateName(fileName.replace(/\.[^.]+$/, " Smart Template"));
+    resetRuntimeResults();
+    setWorkspaceTab("builder");
+    setRibbonTab("insert");
+    setMergeMode("import");
+    setStatusMessage(result.message || "Template imported. Review blocks, fields and formatting before saving.");
+  }
+
+  function simulateImport() {
+    fileInputRef.current?.click();
+  }
+
+  async function importTemplateFile(event: ChangeEvent<HTMLInputElement>) {
+    try {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      setApiBusy(true);
+      setStatusMessage("Uploading and analyzing existing Word/PDF template...");
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/document-studio/import-template", {
+        method: "POST",
+        body: formData,
+      });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.error || "Unable to import template.");
+      applyImportedTemplate(result, file.name);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Unable to import Word/PDF template.");
+    } finally {
+      setApiBusy(false);
+      if (event.target) event.target.value = "";
     }
   }
-}
 
   async function saveTemplate() {
-  try {
-    setApiBusy(true);
-    setStatusMessage("Saving template to Document Studio...");
+    try {
+      setApiBusy(true);
+      setStatusMessage("Saving template to Document Studio...");
 
-    const response = await fetch("/api/document-studio/templates", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        id: activeTemplateId || undefined,
-        template_name: templateName,
-        document_type: selectedDocumentType,
-        template_status: "Draft",
-        source_type: importDone ? "Imported Word/PDF" : "Created in VENTIQ",
-        import_confidence: importDone ? 87 : 0,
-        layout_json: {
-          page_size: "A4",
-          orientation: "Portrait",
-          margin_left_mm: pageMargins.left,
-          margin_right_mm: pageMargins.right,
-          margin_top_mm: pageMargins.top,
-          margin_bottom_mm: pageMargins.bottom,
-        },
-        blocks_json: blocks,
-        field_mappings: {
-  cell_fields: cellFields.map((field) => field.code),
-  column_sources: columnSources.map((source) => ({
-    id: source.id,
-    label: source.label,
-    fields: source.fields.map((field) => field.code),
-  })),
-  import_intelligence: importResult
-    ? {
-        detected_document_type: importResult.detectedDocumentType,
-        import_confidence: importResult.importConfidence,
-        detected_fields: importResult.detectedFields ?? [],
-        detected_sections: importResult.detectedSections ?? [],
-        unmapped_items: importResult.unmappedItems ?? [],
-        storage: importResult.storage ?? null,
-      }
-    : null,
-},
-        calculated_fields: availableCalculatedFields,
-      }),
-    });
+      const response = await fetch("/api/document-studio/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: activeTemplateId || undefined,
+          template_name: templateName,
+          document_type: selectedDocumentType,
+          template_status: "Draft",
+          source_type: importDone ? "Imported Word/PDF" : "Created in VENTIQ",
+          import_confidence: importDone ? importResult?.importConfidence ?? 87 : 0,
+          layout_json: {
+            page_size: "A4",
+            orientation: "Portrait",
+            margin_left_mm: pageSettings.marginLeft,
+            margin_right_mm: pageSettings.marginRight,
+            margin_top_mm: pageSettings.marginTop,
+            margin_bottom_mm: pageSettings.marginBottom,
+            show_grid: pageSettings.showGrid,
+            show_rulers: pageSettings.showRulers,
+            show_sample_values: pageSettings.showSampleValues,
+            zoom: pageSettings.zoom,
+          },
+          blocks_json: blocks,
+          field_mappings: {
+            cell_fields: cellFields.map((field) => field.code),
+            column_sources: columnSources.map((source) => ({
+              id: source.id,
+              label: source.label,
+              fields: source.fields.map((field) => field.code),
+            })),
+            import_intelligence: importResult
+              ? {
+                  detected_document_type: importResult.detectedDocumentType,
+                  import_confidence: importResult.importConfidence,
+                  detected_fields: importResult.detectedFields ?? [],
+                  detected_sections: importResult.detectedSections ?? [],
+                  unmapped_items: importResult.unmappedItems ?? [],
+                  storage: importResult.storage ?? null,
+                }
+              : null,
+          },
+          calculated_fields: calculatedFields,
+        }),
+      });
 
-    const result = await response.json();
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to save template.");
 
-    if (!response.ok) {
-      throw new Error(result.error || "Unable to save template.");
+      if (result.template?.id) setActiveTemplateId(result.template.id);
+      await loadSavedTemplates();
+      setStatusMessage(result.message || `${templateName} saved as a smart template.`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Unable to save Document Studio template.");
+    } finally {
+      setApiBusy(false);
     }
-
-    if (result.template?.id) {
-      setActiveTemplateId(result.template.id);
-    }
-
-    await loadSavedTemplates();
-
-    setStatusMessage(
-      result.message ||
-        `${templateName} saved as a smart VENTIQ template for ${selectedDocumentType}.`
-    );
-  } catch (error) {
-    setStatusMessage(
-      error instanceof Error
-        ? error.message
-        : "Unable to save Document Studio template."
-    );
-  } finally {
-    setApiBusy(false);
   }
-}
 
-async function previewTemplate() {
-  try {
-    setApiBusy(true);
-    setStatusMessage("Generating investor-wise preview from migrated data...");
+  async function previewTemplate() {
+    try {
+      setApiBusy(true);
+      setStatusMessage("Generating investor-wise preview from migrated data...");
 
-    const response = await fetch("/api/document-studio/preview", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        template_id: activeTemplateId || undefined,
-        document_type: selectedDocumentType,
-        investor_code: selectedInvestor.code,
-        statement_period: "Q1 FY 2025-26",
-        report_date: "30-Jun-2025",
-      }),
-    });
+      const response = await fetch("/api/document-studio/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          template_id: activeTemplateId || undefined,
+          document_type: selectedDocumentType,
+          investor_code: selectedInvestor.code,
+          statement_period: "Q1 FY 2025-26",
+          report_date: "30-Jun-2025",
+        }),
+      });
 
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(result.error || "Unable to generate preview.");
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to generate preview.");
+      setPreviewMergeData(result);
+      setWorkspaceTab("preview");
+      setStatusMessage(result.message || `Preview generated for ${result.investor?.investor_name || selectedInvestor.name}.`);
+    } catch (error) {
+      setPreviewMergeData(null);
+      setWorkspaceTab("preview");
+      setStatusMessage(error instanceof Error ? error.message : "Unable to generate investor preview.");
+    } finally {
+      setApiBusy(false);
     }
-
-    setPreviewMergeData(result);
-    setWorkspaceTab("preview");
-
-    setStatusMessage(
-      result.message ||
-        `Preview generated for ${
-          result.investor?.investor_name || selectedInvestor.name
-        }.`
-    );
-  } catch (error) {
-    setPreviewMergeData(null);
-    setWorkspaceTab("preview");
-    setStatusMessage(
-      error instanceof Error
-        ? error.message
-        : "Unable to generate investor preview."
-    );
-  } finally {
-    setApiBusy(false);
   }
-}
 
-async function runBatch() {
-  try {
-    setApiBusy(true);
-    setStatusMessage("Preparing batch generation queue...");
+  async function runBatch() {
+    try {
+      setApiBusy(true);
+      setStatusMessage("Preparing batch generation queue...");
 
-    const response = await fetch("/api/document-studio/batch", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        template_id: activeTemplateId || undefined,
-        document_type: selectedDocumentType,
-      }),
-    });
+      const response = await fetch("/api/document-studio/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ template_id: activeTemplateId || undefined, document_type: selectedDocumentType }),
+      });
 
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(result.error || "Unable to prepare batch.");
-    }
-
-    setBatchResult(result);
-    setWorkspaceTab("batch");
-
-    setStatusMessage(
-      result.message ||
-        "Batch generation prepared for all investors. Review exceptions before publishing."
-    );
-  } catch (error) {
-    setBatchResult(null);
-    setWorkspaceTab("batch");
-    setStatusMessage(
-      error instanceof Error
-        ? error.message
-        : "Unable to prepare batch generation."
-    );
-  } finally {
-    setApiBusy(false);
-  }
-}
-async function generatePdfFiles() {
-  try {
-    const batchId = batchResult?.batch?.id;
-
-    if (!batchId) {
-      setStatusMessage("Prepare a batch first before generating PDF files.");
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to prepare batch.");
+      setBatchResult(result);
       setWorkspaceTab("batch");
-      return;
+      setStatusMessage(result.message || "Batch generation prepared for all investors.");
+    } catch (error) {
+      setBatchResult(null);
+      setWorkspaceTab("batch");
+      setStatusMessage(error instanceof Error ? error.message : "Unable to prepare batch generation.");
+    } finally {
+      setApiBusy(false);
     }
-
-    setApiBusy(true);
-    setStatusMessage("Generating actual PDF files and uploading to storage...");
-
-    const response = await fetch("/api/document-studio/generate-pdfs", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        batch_id: batchId,
-      }),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(result.error || "Unable to generate PDF files.");
-    }
-
-    setPdfGenerationResult(result);
-    setWorkspaceTab("batch");
-
-    setStatusMessage(
-      result.message ||
-        "PDF files generated and uploaded successfully."
-    );
-  } catch (error) {
-    setPdfGenerationResult(null);
-    setStatusMessage(
-      error instanceof Error
-        ? error.message
-        : "Unable to generate PDF files."
-    );
-  } finally {
-    setApiBusy(false);
   }
-}
-async function publishQueue() {
-  try {
-    setWorkspaceTab("publish");
 
-    const batchId = batchResult?.batch?.id;
+  async function generatePdfFiles() {
+    try {
+      const batchId = batchResult?.batch?.id;
+      if (!batchId) {
+        setStatusMessage("Prepare a batch first before generating PDF files.");
+        setWorkspaceTab("batch");
+        return;
+      }
 
-    if (!batchId) {
-      setStatusMessage(
-        "Prepare a batch first before publishing documents to Investor Portal."
-      );
-      return;
+      setApiBusy(true);
+      setStatusMessage("Generating actual PDF files and uploading to storage...");
+      const response = await fetch("/api/document-studio/generate-pdfs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batch_id: batchId }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to generate PDF files.");
+      setPdfGenerationResult(result);
+      setWorkspaceTab("batch");
+      setStatusMessage(result.message || "PDF files generated and uploaded successfully.");
+    } catch (error) {
+      setPdfGenerationResult(null);
+      setStatusMessage(error instanceof Error ? error.message : "Unable to generate PDF files.");
+    } finally {
+      setApiBusy(false);
     }
-
-    setApiBusy(true);
-    setStatusMessage("Publishing generated document records to Investor Portal...");
-
-    const response = await fetch("/api/document-studio/publish", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        batch_id: batchId,
-      }),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(result.error || "Unable to publish documents.");
-    }
-
-    setPublishResult(result);
-
-    setStatusMessage(
-      result.message ||
-        "Documents published to Investor Portal successfully."
-    );
-  } catch (error) {
-    setPublishResult(null);
-    setStatusMessage(
-      error instanceof Error
-        ? error.message
-        : "Unable to publish documents to Investor Portal."
-    );
-  } finally {
-    setApiBusy(false);
   }
-}
+
+  async function publishQueue() {
+    try {
+      setWorkspaceTab("publish");
+      const batchId = batchResult?.batch?.id;
+      if (!batchId) {
+        setStatusMessage("Prepare a batch first before publishing documents to Investor Portal.");
+        return;
+      }
+
+      setApiBusy(true);
+      setStatusMessage("Publishing generated document records to Investor Portal...");
+      const response = await fetch("/api/document-studio/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batch_id: batchId }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to publish documents.");
+      setPublishResult(result);
+      setStatusMessage(result.message || "Documents published to Investor Portal successfully.");
+    } catch (error) {
+      setPublishResult(null);
+      setStatusMessage(error instanceof Error ? error.message : "Unable to publish documents to Investor Portal.");
+    } finally {
+      setApiBusy(false);
+    }
+  }
+
+  function renderStart() {
+    return (
+      <div className="ids-start-screen">
+        <div className="ids-start-hero">
+          <p className="ids-eyebrow">VENTIQ Document Studio</p>
+          <h1>How do you want to prepare this investor document?</h1>
+          <p>
+            Start from an existing Word/PDF, build a fresh AIF template using VENTIQ tools, or reuse a saved template from the library.
+          </p>
+        </div>
+
+        <div className="ids-start-options">
+          <button className="ids-start-card" onClick={simulateImport} type="button">
+            <span>01</span>
+            <strong>Upload existing Word/PDF</strong>
+            <p>Import your existing SOA, capital call, Form 64C/64D or notice template. VENTIQ extracts sections and creates editable blocks.</p>
+            <em>Best for client migration</em>
+          </button>
+
+          <button className="ids-start-card highlighted" onClick={() => startNewTemplate(true)} type="button">
+            <span>02</span>
+            <strong>Create new document</strong>
+            <p>Use Insert, Layout, Table Tools, Chart Tools and Merge Fields to build a new template from scratch.</p>
+            <em>Best for new fund templates</em>
+          </button>
+
+          <button className="ids-start-card" onClick={() => setWorkspaceTab("library")} type="button">
+            <span>03</span>
+            <strong>Use existing VENTIQ template</strong>
+            <p>Open a saved draft or load a ready starter template and customize it for the client.</p>
+            <em>Best for repeat use</em>
+          </button>
+        </div>
+
+        <div className="ids-start-actions">
+          <button className="ids-secondary-btn" onClick={() => startNewTemplate(false)} type="button">
+            Load full SOA starter template
+          </button>
+          <button className="ids-secondary-btn" onClick={() => setWorkspaceTab("library")} type="button">
+            Open Template Library
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderLibrary() {
+    return (
+      <div className="ids-library-layout">
+        <div className="ids-library-hero">
+          <div>
+            <p className="ids-eyebrow">Template Library</p>
+            <h2>Open a saved template or start from a ready VENTIQ template.</h2>
+            <p>Saved templates preserve block order, table columns, mapped fields, notes, signatures, chart settings and formatting.</p>
+          </div>
+          <div className="ids-action-row">
+            <button className="ids-secondary-btn" onClick={() => setWorkspaceTab("start")} type="button">
+              Back to start
+            </button>
+            <button className="ids-primary-btn" onClick={() => startNewTemplate(false)} type="button">
+              Use starter template
+            </button>
+          </div>
+        </div>
+
+        <div className="ids-template-grid">
+          {savedTemplates.length === 0 && (
+            <div className="ids-empty-card">
+              <strong>No saved templates loaded yet</strong>
+              <p>Create a new template or import a Word/PDF and save it. It will appear here.</p>
+              <button className="ids-primary-btn" onClick={() => startNewTemplate(true)} type="button">
+                Create new template
+              </button>
+            </div>
+          )}
+
+          {savedTemplates.map((template) => (
+            <button className="ids-template-card" key={template.id} onClick={() => openSavedTemplate(template)} type="button">
+              <span>{template.document_type || "AIF document"}</span>
+              <strong>{template.template_name}</strong>
+              <p>{template.source_type || "Created in VENTIQ"}</p>
+              <em>{template.template_status || "Draft"}</em>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   function renderRibbon() {
     if (ribbonTab === "home") {
+      const style = { ...baseStyle, ...selectedBlock?.style };
+
       return (
-        <div className="ids-ribbon-grid">
+        <div className="ids-ribbon-grid compact">
           <div className="ids-ribbon-group">
             <div className="ids-control-row">
-              <button
-                className={`ids-icon-btn ${selectedBlock?.stylePreset === "header" ? "active" : ""}`}
-                onClick={() => applySelectedBlockStyle("header")}
-                type="button"
-              >
-                B
-              </button>
-              <button
-                className={`ids-icon-btn ${selectedBlock?.stylePreset === "muted" ? "active" : ""}`}
-                onClick={() => applySelectedBlockStyle("muted")}
-                type="button"
-              >
-                /
-              </button>
-              <button
-                className={`ids-icon-btn ${selectedBlock?.stylePreset === "highlight" ? "active" : ""}`}
-                onClick={() => applySelectedBlockStyle("highlight")}
-                type="button"
-              >
-                U
-              </button>
-              <button
-                className="ids-icon-btn"
-                onClick={() => applySelectedBlockValueFormat("currency")}
-                type="button"
-              >
-                ₹
-              </button>
+              <button className={`ids-icon-btn ${style.bold ? "active" : ""}`} onClick={() => updateSelectedBlockStyle({ bold: !style.bold })} type="button">B</button>
+              <button className={`ids-icon-btn ${style.italic ? "active" : ""}`} onClick={() => updateSelectedBlockStyle({ italic: !style.italic })} type="button">/</button>
+              <button className={`ids-icon-btn ${style.underline ? "active" : ""}`} onClick={() => updateSelectedBlockStyle({ underline: !style.underline })} type="button">U</button>
             </div>
-            <div className="ids-group-label">Font & emphasis</div>
+            <div className="ids-group-label">Text style</div>
+          </div>
+
+          <div className="ids-ribbon-group wide">
+            <select className="ids-select" value={style.fontFamily} onChange={(event) => updateSelectedBlockStyle({ fontFamily: event.target.value as BlockStyle["fontFamily"] })}>
+              <option value="inter">Inter / Sans</option>
+              <option value="serif">Serif</option>
+              <option value="mono">Mono</option>
+            </select>
+            <select className="ids-select" value={style.fontSize} onChange={(event) => updateSelectedBlockStyle({ fontSize: event.target.value as BlockStyle["fontSize"] })}>
+              <option value="small">Small</option>
+              <option value="normal">Normal</option>
+              <option value="large">Large</option>
+            </select>
+            <div className="ids-group-label">Font</div>
           </div>
 
           <div className="ids-ribbon-group">
             <div className="ids-control-row">
-              <button
-                className={`ids-icon-btn ${selectedBlock?.align === "left" ? "active" : ""}`}
-                onClick={() => applySelectedBlockAlignment("left")}
-                type="button"
-              >
-                ←
-              </button>
-              <button
-                className={`ids-icon-btn ${selectedBlock?.align === "center" ? "active" : ""}`}
-                onClick={() => applySelectedBlockAlignment("center")}
-                type="button"
-              >
-                ↔
-              </button>
-              <button
-                className={`ids-icon-btn ${selectedBlock?.align === "right" ? "active" : ""}`}
-                onClick={() => applySelectedBlockAlignment("right")}
-                type="button"
-              >
-                →
-              </button>
-              <button
-                className="ids-icon-btn"
-                onClick={() => applySelectedBlockStyle("normal")}
-                type="button"
-              >
-                ≡
-              </button>
+              {(["left", "center", "right"] as BlockStyle["align"][]).map((align) => (
+                <button key={align} className={`ids-icon-btn ${style.align === align ? "active" : ""}`} onClick={() => updateSelectedBlockStyle({ align })} type="button">
+                  {align === "left" ? "←" : align === "center" ? "↔" : "→"}
+                </button>
+              ))}
             </div>
             <div className="ids-group-label">Alignment</div>
           </div>
 
           <div className="ids-ribbon-group wide">
-            <select
-              className="ids-select"
-              value={selectedBlock?.valueFormat || "number"}
-              onChange={(event) =>
-                applySelectedBlockValueFormat(
-                  event.target.value as NonNullable<TemplateBlock["valueFormat"]>
-                )
-              }
-            >
-              <option value="number">Number</option>
+            <select className="ids-select" value={style.numberFormat} onChange={(event) => updateSelectedBlockStyle({ numberFormat: event.target.value as BlockStyle["numberFormat"] })}>
+              <option value="plain">Plain</option>
               <option value="currency">Currency</option>
-              <option value="date">Date</option>
+              <option value="number">Number</option>
               <option value="percentage">Percentage</option>
-              <option value="multiple">Multiple</option>
+              <option value="date">Date</option>
             </select>
-            <select
-              className="ids-select"
-              value={selectedBlock?.stylePreset || "normal"}
-              onChange={(event) =>
-                applySelectedBlockStyle(
-                  event.target.value as NonNullable<TemplateBlock["stylePreset"]>
-                )
-              }
-            >
-              <option value="normal">Normal</option>
-              <option value="header">Header</option>
-              <option value="highlight">Subtotal / Highlight</option>
-              <option value="muted">Muted note</option>
-            </select>
-            <div className="ids-group-label">Value format & styles</div>
+            <button className="ids-soft-btn" onClick={() => addTableColumn("number")} type="button">+ Number column</button>
+            <div className="ids-group-label">Number tools</div>
           </div>
 
           <div className="ids-ribbon-group">
-            <button
-              className="ids-soft-btn"
-              onClick={() => {
-                applySelectedBlockStyle(selectedBlock?.stylePreset || "normal");
-                setStatusMessage("Current block formatting re-applied.");
-              }}
-              type="button"
-            >
-              🖌 Format Painter
-            </button>
-            <button
-              className="ids-soft-btn"
-              onClick={duplicateSelectedBlock}
-              type="button"
-            >
-              ⧉ Duplicate block
-            </button>
-            <div className="ids-group-label">Clipboard</div>
-          </div>
-
-          <div className="ids-ribbon-group">
-            <button
-              className="ids-soft-btn"
-              onClick={() => addBlock("letterhead")}
-              type="button"
-            >
-              ⌂ Letterhead
-            </button>
-            <button
-              className="ids-soft-btn"
-              onClick={() => addBlock("signature")}
-              type="button"
-            >
-              ✍ Signature
-            </button>
-            <div className="ids-group-label">Header & footer</div>
+            <button className="ids-soft-btn" onClick={duplicateSelectedBlock} type="button">⧉ Duplicate</button>
+            <button className="ids-soft-btn danger" onClick={deleteSelectedBlock} type="button">× Delete</button>
+            <div className="ids-group-label">Block</div>
           </div>
         </div>
       );
@@ -2090,68 +1568,32 @@ async function publishQueue() {
 
     if (ribbonTab === "insert") {
       return (
-        <div className="ids-ribbon-grid">
+        <div className="ids-ribbon-grid compact">
           <div className="ids-ribbon-group wide">
             <div className="ids-tile-row">
-              <button onClick={() => addBlock("summary")} type="button">
-                📋
-                <span>Summary</span>
-              </button>
-              <button onClick={() => addBlock("transactions")} type="button">
-                ⇄
-                <span>Transaction</span>
-              </button>
-              <button onClick={() => addBlock("financial")} type="button">
-                📄
-                <span>Financial</span>
-              </button>
-              <button onClick={() => addBlock("performance")} type="button">
-                ↗
-                <span>Performance</span>
-              </button>
-              <button onClick={() => addBlock("identity")} type="button">
-                🪪
-                <span>Identity</span>
-              </button>
-              <button onClick={() => addBlock("notes")} type="button">
-                ☰
-                <span>Text / Notes</span>
-              </button>
+              <button onClick={() => addBlock("summary")} type="button">📋<span>Summary Table</span></button>
+              <button onClick={() => addBlock("transactions")} type="button">⇄<span>Transactions</span></button>
+              <button onClick={() => addBlock("financial")} type="button">📄<span>Financial</span></button>
+              <button onClick={() => addBlock("performance")} type="button">↗<span>Metrics</span></button>
+              <button onClick={() => addBlock("notes")} type="button">☰<span>Text / Notes</span></button>
+              <button onClick={() => addBlock("signature")} type="button">✍<span>Signature</span></button>
             </div>
-            <div className="ids-group-label">Insert AIF blocks</div>
+            <div className="ids-group-label">Insert AIF sections</div>
           </div>
 
           <div className="ids-ribbon-group">
             <div className="ids-tile-row small">
-              <button onClick={() => addBlock("signature")} type="button">
-                ✍
-                <span>Signature</span>
-              </button>
-              <button onClick={() => addBlock("letterhead")} type="button">
-                ▣
-                <span>Letterhead</span>
-              </button>
-              <button onClick={() => addBlock("chart")} type="button">
-                📊
-                <span>Chart</span>
-              </button>
+              <button onClick={() => addBlock("identity")} type="button">🪪<span>Identity</span></button>
+              <button onClick={() => addBlock("letterhead")} type="button">▣<span>Letterhead</span></button>
+              <button onClick={() => addBlock("chart")} type="button">📊<span>Chart</span></button>
             </div>
-            <div className="ids-group-label">Text & media</div>
+            <div className="ids-group-label">Header & media</div>
           </div>
 
           <div className="ids-ribbon-group">
-            <button className="ids-soft-btn" onClick={addPageBreakBlock} type="button">
-              + Add page marker
-            </button>
-            <button
-              className={`ids-soft-btn danger ${blocks.length <= 1 ? "disabled" : ""}`}
-              disabled={blocks.length <= 1}
-              onClick={deleteSelectedBlock}
-              type="button"
-            >
-              × Delete block
-            </button>
-            <div className="ids-group-label">Pages / flow</div>
+            <button className="ids-soft-btn" onClick={() => startNewTemplate(true)} type="button">+ New template</button>
+            <button className="ids-soft-btn" onClick={simulateImport} type="button">Import Word/PDF</button>
+            <div className="ids-group-label">Template</div>
           </div>
         </div>
       );
@@ -2159,107 +1601,27 @@ async function publishQueue() {
 
     if (ribbonTab === "layout") {
       return (
-        <div className="ids-ribbon-grid">
-          <div className="ids-ribbon-group">
-            <div className="ids-margin-grid">
-              <label>
-                Left
-                <input
-                  value={pageMargins.left}
-                  onChange={(event) => updatePageMargin("left", event.target.value)}
-                />
-              </label>
-              <label>
-                Right
-                <input
-                  value={pageMargins.right}
-                  onChange={(event) => updatePageMargin("right", event.target.value)}
-                />
-              </label>
-              <label>
-                Top
-                <input
-                  value={pageMargins.top}
-                  onChange={(event) => updatePageMargin("top", event.target.value)}
-                />
-              </label>
-              <label>
-                Bottom
-                <input
-                  value={pageMargins.bottom}
-                  onChange={(event) => updatePageMargin("bottom", event.target.value)}
-                />
-              </label>
-            </div>
-            <div className="ids-group-label">Margins (mm)</div>
-          </div>
-
-          <div className="ids-ribbon-group">
-            <div className="ids-info-pair">
-              <span>Size</span>
-              <strong>A4</strong>
-            </div>
-            <div className="ids-info-pair">
-              <span>Orientation</span>
-              <strong>Portrait</strong>
-            </div>
-            <div className="ids-group-label">Page</div>
-          </div>
-
-          <div className="ids-ribbon-group">
-            <button
-              className={`ids-soft-btn ${selectedBlockIndex <= 0 ? "disabled" : ""}`}
-              disabled={selectedBlockIndex <= 0}
-              onClick={() => moveSelectedBlock("up")}
-              type="button"
-            >
-              ↑ Move up
-            </button>
-
-            <button
-              className={`ids-soft-btn ${
-                selectedBlockIndex === -1 || selectedBlockIndex >= blocks.length - 1
-                  ? "disabled"
-                  : ""
-              }`}
-              disabled={selectedBlockIndex === -1 || selectedBlockIndex >= blocks.length - 1}
-              onClick={() => moveSelectedBlock("down")}
-              type="button"
-            >
-              ↓ Move down
-            </button>
-            <div className="ids-group-label">Order in flow</div>
-          </div>
-
+        <div className="ids-ribbon-grid compact">
           <div className="ids-ribbon-group wide">
-            <label className="ids-check-row">
-              <input
-                checked={snapToGrid}
-                onChange={(event) => {
-                  setSnapToGrid(event.target.checked);
-                  setStatusMessage(event.target.checked ? "Snap to grid enabled." : "Snap to grid disabled.");
-                }}
-                type="checkbox"
-              />
-              Snap to grid
-            </label>
-            <div className="ids-control-row">
-              <button
-                className="ids-soft-btn"
-                onClick={() => setStatusMessage("Selected block brought to front in the template flow.")}
-                type="button"
-              >
-                To Front
-              </button>
-              <button
-                className="ids-soft-btn"
-                onClick={() => setStatusMessage("Selected block sent to back in the template flow.")}
-                type="button"
-              >
-                To Back
-              </button>
+            <div className="ids-margin-grid compact-margins">
+              <label>Left<input type="number" value={pageSettings.marginLeft} onChange={(event) => updatePageSettings({ marginLeft: Number(event.target.value) })} /></label>
+              <label>Right<input type="number" value={pageSettings.marginRight} onChange={(event) => updatePageSettings({ marginRight: Number(event.target.value) })} /></label>
+              <label>Top<input type="number" value={pageSettings.marginTop} onChange={(event) => updatePageSettings({ marginTop: Number(event.target.value) })} /></label>
+              <label>Bottom<input type="number" value={pageSettings.marginBottom} onChange={(event) => updatePageSettings({ marginBottom: Number(event.target.value) })} /></label>
             </div>
-            <div className="ids-group-label">Arrange</div>
+            <div className="ids-group-label">Margins mm</div>
+          </div>
+
+          <div className="ids-ribbon-group">
+            <button className="ids-soft-btn" disabled={selectedBlockIndex <= 0} onClick={() => moveSelectedBlock("up")} type="button">↑ Move up</button>
+            <button className="ids-soft-btn" disabled={selectedBlockIndex === -1 || selectedBlockIndex >= blocks.length - 1} onClick={() => moveSelectedBlock("down")} type="button">↓ Move down</button>
+            <div className="ids-group-label">Order</div>
+          </div>
+
+          <div className="ids-ribbon-group">
+            <button className="ids-soft-btn" onClick={() => updatePageSettings(basePageSettings)} type="button">Reset page</button>
+            <button className="ids-soft-btn danger" onClick={deleteSelectedBlock} type="button">Delete block</button>
+            <div className="ids-group-label">Page</div>
           </div>
         </div>
       );
@@ -2267,261 +1629,147 @@ async function publishQueue() {
 
     if (ribbonTab === "view") {
       return (
-        <div className="ids-ribbon-grid">
-          <div className="ids-ribbon-group">
-            <label className="ids-check-row">
-              <input
-                checked={showGrid}
-                onChange={(event) => {
-                  setShowGrid(event.target.checked);
-                  setStatusMessage(event.target.checked ? "Grid shown." : "Grid hidden.");
-                }}
-                type="checkbox"
-              />
-              Grid
-            </label>
-            <label className="ids-check-row">
-              <input
-                checked={showRulers}
-                onChange={(event) => {
-                  setShowRulers(event.target.checked);
-                  setStatusMessage(event.target.checked ? "Rulers shown." : "Rulers hidden.");
-                }}
-                type="checkbox"
-              />
-              Rulers
-            </label>
-            <label className="ids-check-row">
-              <input
-                checked={snapToGrid}
-                onChange={(event) => setSnapToGrid(event.target.checked)}
-                type="checkbox"
-              />
-              Snap to grid
-            </label>
-            <label className="ids-check-row">
-              <input
-                checked={showSampleValues}
-                onChange={(event) => {
-                  setShowSampleValues(event.target.checked);
-                  setStatusMessage(
-                    event.target.checked
-                      ? "Sample values shown in template."
-                      : "Merge field tokens shown in template."
-                  );
-                }}
-                type="checkbox"
-              />
-              Sample values
-            </label>
-            <div className="ids-group-label">Show</div>
+        <div className="ids-ribbon-grid compact">
+          <div className="ids-ribbon-group wide">
+            <label className="ids-check-row"><input checked={pageSettings.showGrid} onChange={(event) => updatePageSettings({ showGrid: event.target.checked })} type="checkbox" /> Grid</label>
+            <label className="ids-check-row"><input checked={pageSettings.showRulers} onChange={(event) => updatePageSettings({ showRulers: event.target.checked })} type="checkbox" /> Rulers</label>
+            <label className="ids-check-row"><input checked={pageSettings.showSampleValues} onChange={(event) => updatePageSettings({ showSampleValues: event.target.checked })} type="checkbox" /> Sample values</label>
+            <div className="ids-group-label">Show / hide</div>
           </div>
 
           <div className="ids-ribbon-group">
-            <select
-              className="ids-select"
-              value={showGrid ? "fine" : "off"}
-              onChange={(event) => {
-                setShowGrid(event.target.value !== "off");
-                setStatusMessage(`Grid mode changed to ${event.target.value}.`);
-              }}
-            >
-              <option value="fine">Grid — fine (¼)</option>
-              <option value="medium">Grid — medium</option>
-              <option value="off">Grid — off</option>
-            </select>
-            <p className="ids-mini-note">Zoom is live on the status bar.</p>
-            <div className="ids-group-label">Grid</div>
+            <button className="ids-soft-btn" onClick={() => updatePageSettings({ zoom: Math.max(60, pageSettings.zoom - 10) })} type="button">− Zoom</button>
+            <button className="ids-soft-btn" onClick={() => updatePageSettings({ zoom: Math.min(150, pageSettings.zoom + 10) })} type="button">+ Zoom</button>
+            <strong>{pageSettings.zoom}%</strong>
+            <div className="ids-group-label">Zoom</div>
           </div>
         </div>
       );
     }
 
     if (ribbonTab === "table") {
-      if (!isConfigurableTableBlock(selectedBlock)) {
+      if (!selectedTableConfig) {
         return (
-          <div className="ids-ribbon-grid">
-            <div className="ids-ribbon-group wide">
-              <div className="ids-mini-note">
-                Select a Summary, Transaction or Financial table block to use Table Tools.
-              </div>
-              <button className="ids-soft-btn" onClick={() => addBlock("transactions")} type="button">
-                Insert Transaction Table
-              </button>
-              <div className="ids-group-label">Table Tools</div>
-            </div>
+          <div className="ids-ribbon-empty">
+            <strong>Select Summary, Transaction or Financial table to use Table Tools.</strong>
+            <button className="ids-soft-btn" onClick={() => addBlock("transactions")} type="button">Insert transaction table</button>
           </div>
         );
       }
 
-      const config = selectedBlock.tableConfig || getDefaultTableConfigForBlock(selectedBlock);
-
       return (
-        <div className="ids-ribbon-grid">
+        <div className="ids-ribbon-grid compact">
           <div className="ids-ribbon-group">
-            <button
-              className="ids-soft-btn"
-              onClick={() => updateSelectedTableConfig({ repeatRows: !config.repeatRows })}
-              type="button"
-            >
-              {config.repeatRows ? "Static Rows" : "Repeat Rows"}
+            <button className="ids-soft-btn" onClick={() => updateSelectedTableConfig({ repeatRows: !selectedTableConfig.repeatRows })} type="button">
+              {selectedTableConfig.repeatRows ? "Static Rows" : "Repeat Rows"}
             </button>
-
-            <button className="ids-soft-btn" onClick={addTableColumn} type="button">
-              + Add Column
-            </button>
-
+            <button className="ids-soft-btn" onClick={() => addTableColumn()} type="button">+ Column</button>
+            <button className="ids-soft-btn" onClick={() => addTableColumn("number")} type="button">+ Number</button>
             <div className="ids-group-label">Rows & columns</div>
           </div>
 
-          <div className="ids-ribbon-group wide">
-            <select
-              className="ids-select"
-              value={config.repeatSource}
-              onChange={(event) =>
-                changeTableRepeatSource(
-                  event.target.value as TableBlockConfig["repeatSource"]
-                )
-              }
-            >
-              <option value="transactions">Repeats from Transactions</option>
-              <option value="pnl">P&L Line Items</option>
-              <option value="cashflows">Repeats from Cashflows</option>
-              <option value="capitalAccount">Repeats from Capital Account</option>
-              <option value="taxBreakup">Repeats from Tax Breakup</option>
-              <option value="distributionDetails">Repeats from Distribution Details</option>
-              <option value="unitMovements">Repeats from Unit Movements</option>
-              <option value="portfolioPerformance">Repeats from Portfolio Performance</option>
-              <option value="genericTable">Repeats from Generic Table</option>
-            </select>
+          <div className="ids-ribbon-group">
+            <button className="ids-soft-btn" onClick={mergeSelectedColumnWithNext} type="button">Merge with next</button>
+            <button className="ids-soft-btn" onClick={splitSelectedColumn} type="button">Split column</button>
+            <button className="ids-soft-btn danger" onClick={() => selectedColumnId && deleteTableColumn(selectedColumnId)} type="button">Delete column</button>
+            <div className="ids-group-label">Selected column</div>
+          </div>
 
-            <div className="ids-group-label">Repeat with data</div>
+          <div className="ids-ribbon-group wide">
+            <select className="ids-select" value={selectedTableConfig.repeatSource} onChange={(event) => changeTableRepeatSource(event.target.value as TableBlockConfig["repeatSource"])}>
+              {columnSources.map((source) => (
+                <option key={source.id} value={source.id}>{source.label}</option>
+              ))}
+            </select>
+            <div className="ids-group-label">Repeat source</div>
           </div>
 
           <div className="ids-ribbon-group">
-            {(["all", "horizontal", "none"] as TableBlockConfig["borderPreset"][]).map(
-              (borderPreset) => (
-                <button
-                  className={`ids-soft-btn ${config.borderPreset === borderPreset ? "active-tool" : ""}`}
-                  key={borderPreset}
-                  onClick={() => {
-                    updateSelectedTableConfig({ borderPreset });
-                    setStatusMessage(`${borderPreset} table border applied.`);
-                  }}
-                  type="button"
-                >
-                  {borderPreset === "all"
-                    ? "All Borders"
-                    : borderPreset === "horizontal"
-                    ? "Horizontal"
-                    : "No Borders"}
-                </button>
-              )
-            )}
+            {(["all", "horizontal", "outer", "none"] as TableBlockConfig["borderPreset"][]).map((borderPreset) => (
+              <button key={borderPreset} className={`ids-soft-btn ${selectedTableConfig.borderPreset === borderPreset ? "active-tool" : ""}`} onClick={() => updateSelectedTableConfig({ borderPreset })} type="button">
+                {borderPreset}
+              </button>
+            ))}
             <div className="ids-group-label">Borders</div>
           </div>
 
           <div className="ids-ribbon-group">
-            {(["gold", "minimal", "dark", "light"] as TableBlockConfig["headerStyle"][]).map(
-              (headerStyle) => (
-                <button
-                  className={`ids-soft-btn ${config.headerStyle === headerStyle ? "active-tool" : ""}`}
-                  key={headerStyle}
-                  onClick={() => {
-                    updateSelectedTableConfig({ headerStyle });
-                    setStatusMessage(`${headerStyle} table header style applied.`);
-                  }}
-                  type="button"
-                >
-                  {headerStyle === "gold"
-                    ? "Gold Header"
-                    : headerStyle === "minimal"
-                    ? "Minimal Header"
-                    : headerStyle === "dark"
-                    ? "Dark Header"
-                    : "Light Header"}
-                </button>
-              )
-            )}
-            <div className="ids-group-label">Header style</div>
+            {(["gold", "dark", "light", "minimal"] as TableBlockConfig["headerStyle"][]).map((headerStyle) => (
+              <button key={headerStyle} className={`ids-soft-btn ${selectedTableConfig.headerStyle === headerStyle ? "active-tool" : ""}`} onClick={() => updateSelectedTableConfig({ headerStyle })} type="button">
+                {headerStyle}
+              </button>
+            ))}
+            <div className="ids-group-label">Header</div>
           </div>
         </div>
       );
     }
 
+    const chartConfig = selectedBlock?.kind === "chart" ? selectedBlock.chartConfig || createBlock("chart").chartConfig : null;
+
     return (
-      <div className="ids-ribbon-grid">
-        <div className="ids-ribbon-group">
-          <select
-            className="ids-select"
-            value={selectedBlock?.kind === "chart" ? selectedBlock.chartType || "bar" : "bar"}
-            onChange={(event) =>
-              updateChartBlock({
-                chartType: event.target.value as NonNullable<TemplateBlock["chartType"]>,
-              })
-            }
-          >
-            <option value="bar">Bar chart</option>
-            <option value="line">Line chart</option>
-            <option value="waterfall">Waterfall</option>
-          </select>
+      <div className="ids-ribbon-grid compact">
+        {!chartConfig && (
+          <div className="ids-ribbon-empty">
+            <strong>Select a chart block or insert a new chart.</strong>
+            <button className="ids-soft-btn" onClick={() => addBlock("chart")} type="button">Insert chart</button>
+          </div>
+        )}
 
-          <select
-            className="ids-select"
-            value={selectedBlock?.kind === "chart" ? selectedBlock.chartSeries || "current_nav" : "current_nav"}
-            onChange={(event) => updateChartBlock({ chartSeries: event.target.value })}
-          >
-            <option value="current_nav">Series: {`{current_nav}`}</option>
-            <option value="distribution_amount">Series: {`{distribution_amount}`}</option>
-            <option value="dpi">Series: {`{dpi}`}</option>
-            <option value="tvpi">Series: {`{tvpi}`}</option>
-            <option value="irr">Series: {`{irr}`}</option>
-          </select>
+        {chartConfig && (
+          <>
+            <div className="ids-ribbon-group wide">
+              <select className="ids-select" value={chartConfig.chartType} onChange={(event) => updateSelectedChartConfig({ chartType: event.target.value as ChartConfig["chartType"] })}>
+                <option value="bar">Bar chart</option>
+                <option value="line">Line chart</option>
+                <option value="waterfall">Waterfall</option>
+                <option value="donut">Donut</option>
+              </select>
+              <select className="ids-select" value={chartConfig.series} onChange={(event) => updateSelectedChartConfig({ series: event.target.value as ChartConfig["series"] })}>
+                <option value="current_nav">Current NAV</option>
+                <option value="distribution_amount">Distribution</option>
+                <option value="tvpi">TVPI</option>
+                <option value="irr">IRR</option>
+              </select>
+              <div className="ids-group-label">Chart design</div>
+            </div>
 
-          <div className="ids-group-label">Chart type & series</div>
-        </div>
-
-        <div className="ids-ribbon-group wide">
-          <input
-            className="ids-select"
-            value={selectedBlock?.kind === "chart" ? selectedBlock.content || "Portfolio Movement Chart" : "Portfolio Movement Chart"}
-            onChange={(event) => updateChartBlock({ content: event.target.value })}
-            placeholder="Chart title"
-          />
-          <button
-            className="ids-soft-btn"
-            onClick={() => updateChartBlock({})}
-            type="button"
-          >
-            Insert / Select Chart
-          </button>
-
-          <div className="ids-group-label">Chart fields</div>
-        </div>
+            <div className="ids-ribbon-group wide">
+              <input className="ids-select" value={chartConfig.title} onChange={(event) => updateSelectedChartConfig({ title: event.target.value })} />
+              <div className="ids-group-label">Chart title</div>
+            </div>
+          </>
+        )}
       </div>
     );
   }
 
+  function getBlockClass(block: TemplateBlock) {
+    const style = { ...baseStyle, ...block.style };
+    return [
+      "ids-doc-block",
+      block.kind,
+      block.id === selectedBlockId ? "selected" : "",
+      `font-${style.fontFamily}`,
+      `size-${style.fontSize}`,
+      `align-${style.align}`,
+      style.bold ? "is-bold" : "",
+      style.italic ? "is-italic" : "",
+      style.underline ? "is-underlined" : "",
+    ].filter(Boolean).join(" ");
+  }
+
   function renderTemplateBlock(block: TemplateBlock) {
-    const isSelected = block.id === selectedBlockId;
+    const tableConfig = block.tableConfig || (isConfigurableTableBlock(block) ? createTableConfig(getDefaultRepeatSourceForBlock(block)) : null);
+    const chartConfig = block.chartConfig || (block.kind === "chart" ? { chartType: "bar", series: "current_nav", title: "Portfolio Movement Chart" } : null);
 
     return (
       <div
-        className={`ids-doc-block ${block.kind} ${isSelected ? "selected" : ""} block-align-${block.align || "left"} block-style-${block.stylePreset || "normal"}`}
+        className={getBlockClass(block)}
         key={block.id}
         onClick={() => {
           setSelectedBlockId(block.id);
-
-         if (isConfigurableTableBlock(block)) {
-  setRibbonTab("table");
-  setMergeMode("column");
-} else if (block.kind === "chart") {
-            setRibbonTab("chart");
-            setMergeMode("calculated");
-          } else {
-            setRibbonTab("home");
-            setMergeMode("cell");
-          }
+          if (block.tableConfig?.columns?.[0]) setSelectedColumnId(block.tableConfig.columns[0].id);
         }}
         role="button"
         tabIndex={0}
@@ -2532,7 +1780,7 @@ async function publishQueue() {
           <div className="ids-letterhead">
             <div>
               <strong>{getInvestorValue(selectedInvestor, "fund_name")}</strong>
-              <span>Registered AIF | GIFT City</span>
+              <span>{block.content || "Registered AIF | GIFT City"}</span>
             </div>
             <div className="ids-logo-box">VENTIQ</div>
           </div>
@@ -2540,128 +1788,92 @@ async function publishQueue() {
 
         {block.kind === "identity" && (
           <div className="ids-identity-grid">
-            <div>
-              <span>Investor</span>
-              <strong>{getInvestorValue(selectedInvestor, "investor_name")}</strong>
-            </div>
-            <div>
-              <span>Folio</span>
-              <strong>{getInvestorValue(selectedInvestor, "investor_code")}</strong>
-            </div>
-            <div>
-              <span>Statement period</span>
-              <strong>{getInvestorValue(selectedInvestor, "statement_period")}</strong>
-            </div>
-            <div>
-              <span>Report date</span>
-              <strong>{getInvestorValue(selectedInvestor, "report_date")}</strong>
-            </div>
+            <div><span>Investor</span><strong>{getInvestorValue(selectedInvestor, "investor_name")}</strong></div>
+            <div><span>Folio</span><strong>{getInvestorValue(selectedInvestor, "investor_code")}</strong></div>
+            <div><span>Statement period</span><strong>{getInvestorValue(selectedInvestor, "statement_period")}</strong></div>
+            <div><span>Report date</span><strong>{getInvestorValue(selectedInvestor, "report_date")}</strong></div>
           </div>
         )}
 
-       
-
-      
-        {isConfigurableTableBlock(block) && (
-  <table
-  className={`ids-template-table table-border-${
-    block.tableConfig?.borderPreset || "all"
-  } table-header-${block.tableConfig?.headerStyle || "gold"}`}
->
-    <thead>
-      <tr>
-        <th colSpan={block.tableConfig?.columns.length || 3}>
-          {getTableTitle(block)}
-        </th>
-      </tr>
-
-      <tr>
-        {(block.tableConfig?.columns || getDefaultTableConfigForBlock(block).columns).map(
-          (column) => (
-            <th
-              className={column.align === "right" ? "right" : ""}
-              key={column.id}
-            >
-              {column.header}
-            </th>
-          )
+        {tableConfig && (
+          <table className={`ids-template-table table-border-${tableConfig.borderPreset} table-header-${tableConfig.headerStyle}`}>
+            <thead>
+              <tr>
+                <th colSpan={tableConfig.columns.length}>{getTableTitle(block)}</th>
+              </tr>
+              <tr>
+                {tableConfig.columns.map((column) => (
+                  <th
+                    className={`${column.align === "right" ? "right" : column.align === "center" ? "center" : ""} ${selectedColumnId === column.id ? "selected-column" : ""}`}
+                    key={column.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedBlockId(block.id);
+                      setSelectedColumnId(column.id);
+                      setRibbonTab("table");
+                      setStatusMessage(`${column.header} column selected. Use right panel or Table Tools to edit it.`);
+                    }}
+                    style={{ width: `${column.width}%` }}
+                  >
+                    {column.header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(tableConfig.repeatRows ? [0, 1, 2] : [0]).map((rowIndex) => (
+                <tr key={`${block.id}-row-${rowIndex}`}>
+                  {tableConfig.columns.map((column) => (
+                    <td className={column.align === "right" ? "right" : column.align === "center" ? "center" : ""} key={`${block.id}-${rowIndex}-${column.id}`}>
+                      {pageSettings.showSampleValues ? getSampleValueForTableField(column.fieldKey) : `{${column.fieldKey}}`}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              <tr>
+                <td colSpan={tableConfig.columns.length}>
+                  <span className="ids-repeat-pill">
+                    {tableConfig.repeatRows ? "↻ Repeats from" : "Static table from"} {tableConfig.repeatSource} · {tableConfig.columns.length} mapped columns
+                  </span>
+                </td>
+              </tr>/* Compact smart editor ribbon */
+            </tbody>
+          </table>
         )}
-      </tr>
-    </thead>
-
-    <tbody>
-      {(block.tableConfig?.repeatRows ? [0, 1, 2] : [0]).map((rowIndex) => (
-        <tr key={`sample-row-${block.id}-${rowIndex}`}>
-          {(block.tableConfig?.columns || getDefaultTableConfigForBlock(block).columns).map(
-            (column) => (
-              <td
-                className={column.align === "right" ? "right" : ""}
-                key={`${block.id}-${rowIndex}-${column.id}`}
-              >
-                {showSampleValues
-                  ? getSampleValueForTableField(column.fieldKey)
-                  : `{${column.fieldKey}}`}
-              </td>
-            )
-          )}
-        </tr>
-      ))}
-
-      <tr>
-        <td colSpan={block.tableConfig?.columns.length || 3}>
-          <span className="ids-repeat-pill">
-            {block.tableConfig?.repeatRows ? "↻ repeats from" : "Static table from"}{" "}
-            {block.tableConfig?.repeatSource || block.repeatSource || "table"} ·{" "}
-            {block.tableConfig?.columns.length || 3} mapped columns
-          </span>
-        </td>
-      </tr>
-    </tbody>
-  </table>
-)}
 
         {block.kind === "performance" && (
           <div className="ids-performance-grid">
-            <div>
-              <span>DPI</span>
-              <strong>{getInvestorValue(selectedInvestor, "dpi")}</strong>
-            </div>
-            <div>
-              <span>TVPI</span>
-              <strong>{getInvestorValue(selectedInvestor, "tvpi")}</strong>
-            </div>
-            <div>
-              <span>IRR</span>
-              <strong>{getInvestorValue(selectedInvestor, "irr")}</strong>
-            </div>
-            <div>
-              <span>Distribution</span>
-              <strong>{getInvestorValue(selectedInvestor, "distribution_amount")}</strong>
-            </div>
+            <div><span>DPI</span><strong>{getInvestorValue(selectedInvestor, "dpi")}</strong></div>
+            <div><span>TVPI</span><strong>{getInvestorValue(selectedInvestor, "tvpi")}</strong></div>
+            <div><span>IRR</span><strong>{getInvestorValue(selectedInvestor, "irr")}</strong></div>
+            <div><span>Distribution</span><strong>{getInvestorValue(selectedInvestor, "distribution_amount")}</strong></div>
           </div>
         )}
 
-        {block.kind === "chart" && (
-          <div className={`ids-chart-box chart-${block.chartType || "bar"}`}>
-            <h4>{block.content || "Portfolio Movement Chart"}</h4>
-            <div className="ids-bars">
-              <span style={{ height: block.chartType === "line" ? "58%" : "48%" }} />
-              <span style={{ height: block.chartType === "waterfall" ? "64%" : "72%" }} />
-              <span style={{ height: block.chartType === "line" ? "76%" : "58%" }} />
-              <span style={{ height: "86%" }} />
-            </div>
-            <p>{`Series binds to {${block.chartSeries || "current_nav"}}`}</p>
+        {block.kind === "chart" && chartConfig && (
+          <div className={`ids-chart-box chart-${chartConfig.chartType}`}>
+            <h4>{chartConfig.title}</h4>
+            {chartConfig.chartType === "donut" ? (
+              <div className="ids-donut"><span>{getInvestorValue(selectedInvestor, chartConfig.series)}</span></div>
+            ) : chartConfig.chartType === "line" ? (
+              <div className="ids-line-chart"><span /><span /><span /><span /></div>
+            ) : (
+              <div className="ids-bars">
+                <span style={{ height: "48%" }} />
+                <span style={{ height: "72%" }} />
+                <span style={{ height: "58%" }} />
+                <span style={{ height: "86%" }} />
+              </div>
+            )}
+            <p>{`Series bind to {${chartConfig.series}}`}</p>
           </div>
         )}
 
         {block.kind === "notes" && (
-  <div className="ids-note-block">
-    {renderContentWithSampleValues(
-      block.content ||
-        "This statement is generated based on the books and records of the Fund as on {report_date}."
-    )}
-  </div>
-)}
+          <div className="ids-note-block">
+            {renderContentWithSampleValues(block.content || "This statement is generated based on the books and records of the Fund as on {report_date}.")}
+          </div>
+        )}
 
         {block.kind === "signature" && (
           <div className="ids-signature-block">
@@ -2683,19 +1895,27 @@ async function publishQueue() {
     return (
       <div className="ids-builder-shell">
         <div className="ids-page-sidebar">
-          <button className="active" type="button">
-            Page 1
-          </button>
-          <button type="button">+ Page</button>
+          <button className="active" type="button">Page 1</button>
+          <button onClick={() => setStatusMessage("Multi-page templates will be enabled after PDF rendering stabilizes.")} type="button">+ Page</button>
         </div>
 
         <div className="ids-canvas-wrap">
-          {showRulers && <div className="ids-ruler-top" />}
-          <div className={`ids-canvas-grid ${showGrid ? "" : "grid-off"}`}>
+          {pageSettings.showRulers && <div className="ids-ruler-top" />}
+          <div className={`ids-canvas-grid ${pageSettings.showGrid ? "show-grid" : ""}`}>
             <div
               className="ids-a4-page"
-              style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: "top center" }}
+              style={{
+                padding: `${pageSettings.marginTop}px ${pageSettings.marginRight}px ${pageSettings.marginBottom}px ${pageSettings.marginLeft}px`,
+                transform: `scale(${pageSettings.zoom / 100})`,
+                transformOrigin: "top center",
+              }}
             >
+              {blocks.length === 0 && (
+                <div className="ids-empty-canvas">
+                  <strong>Blank template</strong>
+                  <p>Use the Insert tab to add Letterhead, Summary, Transactions, Metrics, Notes and Signature blocks.</p>
+                </div>
+              )}
               {blocks.map((block) => renderTemplateBlock(block))}
             </div>
           </div>
@@ -2711,123 +1931,121 @@ async function publishQueue() {
       <aside className="ids-merge-panel">
         <div className="ids-panel-header">
           <strong>MERGE FIELDS</strong>
-          <span>{selectedBlock?.title ?? "No tile selected"}</span>
+          <span>{selectedBlock?.title ?? "No block selected"}</span>
         </div>
 
         <div className="ids-selected-context">
-  <p>Selected block</p>
-  <strong>{selectedBlock?.title ?? "No selection"}</strong>
-  <span>{selectedBlock?.subtitle ?? "Select a block to configure."}</span>
-</div>
-
-<div className="ids-block-editor">
-  <label>
-    Block title
-    <input
-      value={selectedBlock?.title ?? ""}
-      onChange={(event) =>
-        renameSelectedBlock("title", event.target.value)
-      }
-      placeholder="Enter block title"
-    />
-  </label>
-
-  <label>
-    Block description
-    <textarea
-      value={selectedBlock?.subtitle ?? ""}
-      onChange={(event) =>
-        renameSelectedBlock("subtitle", event.target.value)
-      }
-      placeholder="Enter block description"
-      rows={3}
-    />
-  </label>
-</div>
-{(selectedBlock?.kind === "notes" || selectedBlock?.kind === "signature") && (
-  <div className="ids-block-editor">
-    <label>
-      {selectedBlock.kind === "notes" ? "Notes content" : "Signature role"}
-      {selectedBlock.kind === "notes" ? (
-        <textarea
-          value={
-            selectedBlock.content ||
-            "This statement is generated based on the books and records of the Fund as on {report_date}."
-          }
-          onChange={(event) =>
-            updateSelectedBlock({ content: event.target.value })
-          }
-          placeholder="Enter note content"
-          rows={4}
-        />
-      ) : (
-        <input
-          value={selectedBlock.content || "Authorized Signatory"}
-          onChange={(event) =>
-            updateSelectedBlock({ content: event.target.value })
-          }
-          placeholder="Enter signature role"
-        />
-      )}
-    </label>
-  </div>
-)}
-        <div className="ids-merge-tabs">
-          <button
-            className={mergeMode === "cell" ? "active" : ""}
-            onClick={() => setMergeMode("cell")}
-            type="button"
-          >
-            Cell fields
-          </button>
-          <button
-            className={mergeMode === "column" ? "active" : ""}
-            onClick={() => setMergeMode("column")}
-            type="button"
-          >
-            Column fields
-          </button>
-          <button
-            className={mergeMode === "calculated" ? "active" : ""}
-            onClick={() => setMergeMode("calculated")}
-            type="button"
-          >
-            Calculated
-          </button>
-          <button
-            className={mergeMode === "import" ? "active" : ""}
-            onClick={() => setMergeMode("import")}
-            type="button"
-          >
-            Import AI
-          </button>
+          <p>Selected block</p>
+          <strong>{selectedBlock?.title ?? "No selection"}</strong>
+          <span>{selectedBlock?.subtitle ?? "Select a block to configure."}</span>
         </div>
+
+        {selectedBlock && (
+          <div className="ids-block-editor">
+            <label>
+              Block title
+              <input value={selectedBlock.title} onChange={(event) => updateSelectedBlock({ title: event.target.value })} placeholder="Enter block title" />
+            </label>
+            <label>
+              Block description
+              <textarea value={selectedBlock.subtitle} onChange={(event) => updateSelectedBlock({ subtitle: event.target.value })} placeholder="Enter block description" rows={2} />
+            </label>
+            {(selectedBlock.kind === "notes" || selectedBlock.kind === "signature" || selectedBlock.kind === "letterhead") && (
+              <label>
+                {selectedBlock.kind === "notes" ? "Notes content" : selectedBlock.kind === "signature" ? "Signature role" : "Letterhead subtitle"}
+                <textarea value={selectedBlock.content || ""} onChange={(event) => updateSelectedBlock({ content: event.target.value })} placeholder="Enter editable content" rows={3} />
+              </label>
+            )}
+          </div>
+        )}
+
+        <div className="ids-merge-tabs">
+          <button className={mergeMode === "cell" ? "active" : ""} onClick={() => setMergeMode("cell")} type="button">Cell fields</button>
+          <button className={mergeMode === "column" ? "active" : ""} onClick={() => setMergeMode("column")} type="button">Column fields</button>
+          <button className={mergeMode === "calculated" ? "active" : ""} onClick={() => setMergeMode("calculated")} type="button">Calculated</button>
+          <button className={mergeMode === "import" ? "active" : ""} onClick={() => setMergeMode("import")} type="button">Import AI</button>
+        </div>
+
+        {selectedTableConfig && (
+          <div className="ids-field-panel">
+            <div className="ids-panel-heading">
+              <div>
+                <p className="ids-eyebrow">Table Tools</p>
+                <h3>Column mapping</h3>
+              </div>
+            </div>
+
+            <label className="ids-form-label">
+              Repeat source
+              <select value={selectedTableConfig.repeatSource} onChange={(event) => changeTableRepeatSource(event.target.value as TableBlockConfig["repeatSource"])}>
+                {columnSources.map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}
+              </select>
+            </label>
+
+            <div className="ids-table-config-summary">
+              <span>Rows: {selectedTableConfig.repeatRows ? "Repeat with investor data" : "Static rows"}</span>
+              <span>Borders: {selectedTableConfig.borderPreset}</span>
+              <span>Header: {selectedTableConfig.headerStyle}</span>
+              <span>Selected column: {selectedColumn?.header || "Click a header"}</span>
+            </div>
+
+            <div className="ids-column-config-list">
+              {selectedTableConfig.columns.map((column) => (
+                <div className={`ids-column-config-card ${selectedColumnId === column.id ? "active" : ""}`} key={column.id} onClick={() => setSelectedColumnId(column.id)}>
+                  <div className="ids-column-config-top">
+                    <input value={column.header} onChange={(event) => updateSelectedTableColumn(column.id, { header: event.target.value })} />
+                    <button onClick={() => deleteTableColumn(column.id)} type="button">Delete</button>
+                  </div>
+
+                  <label>
+                    Field mapping
+                    <select value={column.fieldKey} onChange={(event) => {
+                      const selectedField = tableFieldOptions[selectedTableConfig.repeatSource].find((field) => field.value === event.target.value);
+                      updateSelectedTableColumn(column.id, {
+                        fieldKey: event.target.value,
+                        format: selectedField?.format || column.format,
+                        align: selectedField?.format === "currency" || selectedField?.format === "number" || selectedField?.format === "percentage" ? "right" : column.align,
+                      });
+                    }}>
+                      {tableFieldOptions[selectedTableConfig.repeatSource].map((field) => (
+                        <option key={field.value} value={field.value}>{field.label}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div className="ids-column-config-grid">
+                    <label>
+                      Format
+                      <select value={column.format} onChange={(event) => updateSelectedTableColumn(column.id, { format: event.target.value as TableColumnConfig["format"] })}>
+                        <option value="text">Text</option>
+                        <option value="date">Date</option>
+                        <option value="currency">Currency</option>
+                        <option value="number">Number</option>
+                        <option value="percentage">Percentage</option>
+                      </select>
+                    </label>
+                    <label>
+                      Align
+                      <select value={column.align} onChange={(event) => updateSelectedTableColumn(column.id, { align: event.target.value as TableColumnConfig["align"] })}>
+                        <option value="left">Left</option>
+                        <option value="center">Center</option>
+                        <option value="right">Right</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {mergeMode === "cell" && (
           <div className="ids-panel-body">
             <input className="ids-search" placeholder="Search fields..." />
-
-            <div className="ids-chip-row">
-              {["Fund", "Investor Info", "Capital Account", "P&L", "Performance"].map(
-                (category) => (
-                  <button key={category} type="button">
-                    {category}
-                  </button>
-                )
-              )}
-            </div>
-
             <div className="ids-field-list">
               {cellFields.map((field) => (
-                <button
-                  key={field.code}
-                  onClick={() => insertField(field)}
-                  type="button"
-                >
-                  <span>
-                    {field.label}
-                    <small>{field.sample}</small>
-                  </span>
+                <button key={field.code} onClick={() => insertField(field)} type="button">
+                  <span>{field.label}<small>{field.sample}</small></span>
                   <em>{field.type}</em>
                   <code>{`{${field.code}}`}</code>
                 </button>
@@ -2835,184 +2053,23 @@ async function publishQueue() {
             </div>
           </div>
         )}
-{isConfigurableTableBlock(selectedBlock) && (
-  <div className="ids-field-panel">
-    <div className="ids-panel-heading">
-      <div>
-        <p className="ids-eyebrow">Table Tools</p>
-        <h3>Table source and column mapping</h3>
-      </div>
-    </div>
 
-    <label className="ids-form-label">
-      Repeat source
-      <select
-        value={selectedBlock.tableConfig?.repeatSource || "transactions"}
-        onChange={(event) =>
-          changeTableRepeatSource(
-            event.target.value as TableBlockConfig["repeatSource"]
-          )
-        }
-      >
-        <option value="transactions">Transactions</option>
-        <option value="pnl">P&L Line Items</option>
-        <option value="cashflows">Cashflows</option>
-        <option value="capitalAccount">Capital Account</option>
-        <option value="taxBreakup">Tax Breakup</option>
-        <option value="distributionDetails">Distribution Details</option>
-        <option value="unitMovements">Unit Movements</option>
-        <option value="portfolioPerformance">Portfolio Performance</option>
-        <option value="genericTable">Generic Table</option>
-      </select>
-    </label>
-
-    <div className="ids-table-config-summary">
-      <span>
-        Rows:{" "}
-        {selectedBlock.tableConfig?.repeatRows
-          ? "Repeat with investor data"
-          : "Static rows"}
-      </span>
-      <span>
-        Borders: {selectedBlock.tableConfig?.borderPreset || "all"}
-      </span>
-      <span>
-        Header: {selectedBlock.tableConfig?.headerStyle || "gold"}
-      </span>
-    </div>
-
-    <div className="ids-column-config-list">
-      {(selectedBlock.tableConfig?.columns || createTableConfig().columns).map(
-        (column) => (
-          <div className="ids-column-config-card" key={column.id}>
-            <div className="ids-column-config-top">
-              <input
-                value={column.header}
-                onChange={(event) =>
-                  updateSelectedTableColumn(column.id, {
-                    header: event.target.value,
-                  })
-                }
-              />
-
-              <button
-                onClick={() => deleteTableColumn(column.id)}
-                type="button"
-              >
-                Delete
-              </button>
-            </div>
-
-            <label>
-              Field mapping
-              <select
-                value={column.fieldKey}
-                onChange={(event) => {
-                  const selectedField = tableFieldOptions[
-                    selectedBlock.tableConfig?.repeatSource || "transactions"
-                  ].find((field) => field.value === event.target.value);
-
-                  updateSelectedTableColumn(column.id, {
-                    fieldKey: event.target.value,
-                    format:
-                      (selectedField?.format as TableColumnConfig["format"]) ||
-                      column.format,
-                  });
-                }}
-              >
-                {tableFieldOptions[
-                  selectedBlock.tableConfig?.repeatSource || "transactions"
-                ].map((field) => (
-                  <option key={field.value} value={field.value}>
-                    {field.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div className="ids-column-config-grid">
-              <label>
-                Format
-                <select
-                  value={column.format}
-                  onChange={(event) =>
-                    updateSelectedTableColumn(column.id, {
-                      format: event.target.value as TableColumnConfig["format"],
-                    })
-                  }
-                >
-                  <option value="text">Text</option>
-                  <option value="date">Date</option>
-                  <option value="currency">Currency</option>
-                  <option value="number">Number</option>
-                  <option value="percentage">Percentage</option>
-                </select>
-              </label>
-
-              <label>
-                Align
-                <select
-                  value={column.align}
-                  onChange={(event) =>
-                    updateSelectedTableColumn(column.id, {
-                      align: event.target.value as TableColumnConfig["align"],
-                    })
-                  }
-                >
-                  <option value="left">Left</option>
-                  <option value="center">Center</option>
-                  <option value="right">Right</option>
-                </select>
-              </label>
-            </div>
-          </div>
-        )
-      )}
-    </div>
-  </div>
-)}
         {mergeMode === "column" && (
           <div className="ids-panel-body">
-            <p className="ids-muted">Table repeats from</p>
-            <select
-              className="ids-select full"
-              value={selectedColumnSource}
-              onChange={(event) => setSelectedColumnSource(event.target.value)}
-            >
-              {columnSources.map((source) => (
-                <option key={source.id} value={source.id}>
-                  {source.label}
-                </option>
-              ))}
+            <p className="ids-muted">Map selected table column from source</p>
+            <select className="ids-select full" value={selectedColumnSource} onChange={(event) => setSelectedColumnSource(event.target.value as TableBlockConfig["repeatSource"])}>
+              {columnSources.map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}
             </select>
-
-            <div className="ids-source-card">
-              <strong>{activeColumnSource.label}</strong>
-              <span>{activeColumnSource.description}</span>
-            </div>
-
-            <p className="ids-muted">Map selected column to</p>
-
+            <div className="ids-source-card"><strong>{activeColumnSource.label}</strong><span>{activeColumnSource.description}</span></div>
             <div className="ids-field-list compact">
               {activeColumnSource.fields.map((field) => (
-                <button
-                  key={field.code}
-                  onClick={() => insertField(field)}
-                  type="button"
-                >
-                  <span>
-                    {field.label}
-                    <small>{field.sample}</small>
-                  </span>
+                <button key={field.code} onClick={() => insertField(field)} type="button">
+                  <span>{field.label}<small>{field.sample}</small></span>
                   <code>{field.code}</code>
                 </button>
               ))}
             </div>
-
-            <div className="ids-explain">
-              Column fields are used when the table repeats investor-wise rows,
-              such as transactions, cashflows, tax breakup or P&L line items.
-            </div>
+            <div className="ids-explain">Click a table column header first, then click a field here to map it.</div>
           </div>
         )}
 
@@ -3020,44 +2077,19 @@ async function publishQueue() {
           <div className="ids-panel-body">
             <div className="ids-formula-box">
               <label>New calculated field</label>
-              <input
-                value={formulaName}
-                onChange={(event) => setFormulaName(event.target.value)}
-                placeholder="e.g. net_income"
-              />
-              <textarea
-                value={formulaExpression}
-                onChange={(event) => setFormulaExpression(event.target.value)}
-                placeholder="Formula: gross_income - total_expenses - tds"
-                rows={3}
-              />
+              <input value={newCalculatedCode} onChange={(event) => setNewCalculatedCode(event.target.value)} placeholder="e.g. net_income" />
+              <textarea value={newCalculatedFormula} onChange={(event) => setNewCalculatedFormula(event.target.value)} placeholder="Formula: gross_income - total_expenses - tds" rows={3} />
               <div className="ids-chip-row">
-                <button onClick={() => appendFormulaToken("+")} type="button">+</button>
-                <button onClick={() => appendFormulaToken("-")} type="button">−</button>
-                <button onClick={() => appendFormulaToken("×")} type="button">×</button>
-                <button onClick={() => appendFormulaToken("÷")} type="button">÷</button>
-                <button onClick={() => appendFormulaToken("XIRR()") } type="button">XIRR</button>
+                {["+", "−", "×", "÷", "XIRR"].map((symbol) => (
+                  <button key={symbol} onClick={() => setNewCalculatedFormula((current) => `${current} ${symbol} `)} type="button">{symbol}</button>
+                ))}
               </div>
-              <button
-                className="ids-gold-btn full"
-                onClick={saveCalculatedField}
-                type="button"
-              >
-                Save calculated field
-              </button>
+              <button className="ids-gold-btn full" onClick={saveCalculatedField} type="button">Save calculated field</button>
             </div>
-
             <div className="ids-field-list compact">
-              {availableCalculatedFields.map((field) => (
-                <button
-                  key={field.code}
-                  onClick={() => insertField(field)}
-                  type="button"
-                >
-                  <span>
-                    {field.label}
-                    <small>{field.sample}</small>
-                  </span>
+              {calculatedFields.map((field) => (
+                <button key={field.code} onClick={() => insertField(field)} type="button">
+                  <span>{field.label}<small>{field.sample}</small></span>
                   <em>{field.type}</em>
                   <code>{`{${field.code}}`}</code>
                 </button>
@@ -3066,775 +2098,158 @@ async function publishQueue() {
           </div>
         )}
 
-               {mergeMode === "import" && (
+        {mergeMode === "import" && (
           <div className="ids-panel-body">
-            <div className="ids-import-score">
-              <strong>
-                {importResult?.importConfidence !== undefined
-                  ? `${importResult.importConfidence}%`
-                  : importDone
-                  ? "87%"
-                  : "—"}
-              </strong>
-              <span>Import confidence</span>
-            </div>
-
+            <div className="ids-import-score"><strong>{importResult?.importConfidence !== undefined ? `${importResult.importConfidence}%` : importDone ? "87%" : "—"}</strong><span>Import confidence</span></div>
             <div className="ids-import-grid">
-              <div>
-                <strong>
-                  {importResult?.suggestedBlocks?.filter(
-                    (block) =>
-                      block.kind === "transactions" ||
-                      block.kind === "financial" ||
-                      block.kind === "summary"
-                  ).length ?? (importDone ? 5 : 0)}
-                </strong>
-                <span>Tables / blocks detected</span>
-              </div>
-
-              <div>
-                <strong>
-                  {importResult?.detectedFields?.length ?? (importDone ? 23 : 0)}
-                </strong>
-                <span>Fields detected</span>
-              </div>
-
-              <div>
-                <strong>
-                  {Math.max(
-                    0,
-                    (importResult?.detectedFields?.length ?? 0) -
-                      (importResult?.unmappedItems?.length ?? 0)
-                  ) || (importDone ? 19 : 0)}
-                </strong>
-                <span>Auto-mapped</span>
-              </div>
-
-              <div>
-                <strong>
-                  {importResult?.unmappedItems?.length ?? (importDone ? 4 : 0)}
-                </strong>
-                <span>Need review</span>
-              </div>
+              <div><strong>{importResult?.suggestedBlocks?.length ?? (importDone ? blocks.length : 0)}</strong><span>Blocks detected</span></div>
+              <div><strong>{importResult?.detectedFields?.length ?? 0}</strong><span>Fields detected</span></div>
+              <div><strong>{importResult?.unmappedItems?.length ?? 0}</strong><span>Need review</span></div>
             </div>
-
-            {importResult?.detectedDocumentType && (
-              <div className="ids-source-card">
-                <strong>Detected activity</strong>
-                <span>{importResult.detectedDocumentType}</span>
-              </div>
+            {importResult?.detectedSections && importResult.detectedSections.length > 0 && (
+              <div className="ids-source-card"><strong>Detected sections</strong><span>{importResult.detectedSections.join(" · ")}</span></div>
             )}
-
-            {importResult?.detectedSections &&
-              importResult.detectedSections.length > 0 && (
-                <div className="ids-source-card">
-                  <strong>Detected sections</strong>
-                  <span>{importResult.detectedSections.join(" · ")}</span>
-                </div>
-              )}
-
-            {importResult?.detectedFields &&
-              importResult.detectedFields.length > 0 && (
-                <div className="ids-source-card">
-                  <strong>Detected merge fields</strong>
-                  <div className="ids-chip-row">
-                    {importResult.detectedFields.slice(0, 18).map((field) => (
-                      <button key={field} type="button">
-                        {`{${field}}`}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-            {importResult?.unmappedItems &&
-              importResult.unmappedItems.length > 0 && (
-                <div className="ids-source-card">
-                  <strong>Needs mapping review</strong>
-                  <div className="ids-chip-row">
-                    {importResult.unmappedItems.slice(0, 12).map((field) => (
-                      <button key={field} type="button">
-                        {`{${field}}`}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-            <button
-              className="ids-primary-btn full"
-              disabled={apiBusy}
-              onClick={simulateImport}
-              type="button"
-            >
-              {apiBusy ? "Importing..." : "Import Word/PDF Template"}
-            </button>
-
-            <div className="ids-explain">
-              Word .docx templates are parsed for merge fields, AIF sections and
-              smart block suggestions. PDF upload is stored and classified now;
-              deep PDF layout extraction will come in the next version.
-            </div>
+            <button className="ids-primary-btn full" disabled={apiBusy} onClick={simulateImport} type="button">{apiBusy ? "Importing..." : "Import Word/PDF Template"}</button>
+            <div className="ids-explain">Upload a client template to convert it into editable VENTIQ blocks. Formatting can then be refined using Home, Layout, Table and Chart tools.</div>
           </div>
         )}
       </aside>
     );
   }
 
- function renderPreview() {
-  const mergedFields = previewMergeData?.mergedFields ?? {};
-
-  function previewValue(code: string, fallback: string) {
-    const value = mergedFields[code];
-
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
-
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return String(value);
-    }
-
-    return fallback;
-  }
-
-  const previewInvestorName = previewValue(
-    "investor_name",
-    selectedInvestor.name
-  );
-
-  const previewInvestorCode = previewValue(
-    "investor_code",
-    selectedInvestor.code
-  );
-
-  const previewInvestorType = previewValue(
-    "investor_type",
-    selectedInvestor.type
-  );
-
-  const previewFundName = previewValue("fund_name", selectedInvestor.fundName);
-
-  const previewTransactions =
-    previewMergeData?.tables?.transactions &&
-    previewMergeData.tables.transactions.length > 0
-      ? previewMergeData.tables.transactions
-      : [
-          {
-            date: "24-Apr-24",
-            description: "Units Allotment",
-            amount: "₹1,98,82,000",
-          },
-          {
-            date: "24-Apr-24",
-            description: "Setup Fees (One-time)",
-            amount: "₹1,18,000",
-          },
-          {
-            date: "02-Jul-24",
-            description: "Quarterly Income Distribution June 2024",
-            amount: "₹5,91,981",
-          },
-        ];
-
-  return (
-    <div className="ids-preview-layout">
-      <div className="ids-preview-toolbar">
-        <div>
-          <h2>PDF Preview</h2>
-          <p>
-            Previewing {selectedDocumentType} for {previewInvestorName}. Merge
-            fields are replaced with investor-specific migrated data.
-          </p>
-        </div>
-
-        <div className="ids-action-row">
-          <button
-            className="ids-secondary-btn"
-            onClick={() => setWorkspaceTab("builder")}
-            type="button"
-          >
-            Back to Builder
-          </button>
-
-          <button
-            className="ids-primary-btn"
-            disabled={apiBusy}
-            onClick={runBatch}
-            type="button"
-          >
-            {apiBusy ? "Preparing..." : "Generate Batch"}
-          </button>
-        </div>
-      </div>
-
-      {previewMergeData?.sourceCounts && (
-        <div className="ids-import-hero" style={{ marginBottom: 22 }}>
-          <div>
-            <p className="ids-eyebrow">Live Merge Data</p>
-            <h3>Preview is connected to migrated investor records</h3>
-            <p>
-              Commitment rows: {previewMergeData.sourceCounts.commitmentRows} ·
-              Financial position rows:{" "}
-              {previewMergeData.sourceCounts.positionRows} · Cashflow rows:{" "}
-              {previewMergeData.sourceCounts.cashflowRows} · Document rows:{" "}
-              {previewMergeData.sourceCounts.documentRows}
-            </p>
-          </div>
-        </div>
-      )}
-
-      <div className="ids-pdf-page">
-        <div className="ids-pdf-header">
-          <div>
-            <h2>{previewFundName}</h2>
-            <p>
-              {selectedDocumentType} ·{" "}
-              {previewValue("statement_period", "Q1 FY 2025-26")}
-            </p>
-          </div>
-          <strong>VENTIQ</strong>
-        </div>
-
-        <div className="ids-pdf-section">
-          <h3>Investor Details</h3>
-          <div className="ids-pdf-grid">
-            <span>Investor Name</span>
-            <strong>{previewInvestorName}</strong>
-
-            <span>Folio Code</span>
-            <strong>{previewInvestorCode}</strong>
-
-            <span>Investor Type</span>
-            <strong>{previewInvestorType}</strong>
-
-            <span>Report Date</span>
-            <strong>{previewValue("report_date", "30-Jun-2025")}</strong>
-          </div>
-        </div>
-
-        <div className="ids-pdf-section">
-          <h3>Capital Account Summary</h3>
-          <table>
-            <tbody>
-              <tr>
-                <td>Commitment Amount</td>
-                <td>
-                  {previewValue("commitment_amount", selectedInvestor.commitment)}
-                </td>
-              </tr>
-              <tr>
-                <td>Capital Called</td>
-                <td>
-                  {previewValue("capital_called", selectedInvestor.capitalCalled)}
-                </td>
-              </tr>
-              <tr>
-                <td>Uncalled Capital</td>
-                <td>
-                  {previewValue(
-                    "uncalled_capital",
-                    selectedInvestor.uncalledCapital
-                  )}
-                </td>
-              </tr>
-              <tr>
-                <td>Current NAV</td>
-                <td>{previewValue("current_nav", selectedInvestor.nav)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div className="ids-pdf-section">
-          <h3>Transactions</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Description</th>
-                <th>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {previewTransactions.map((transaction, index) => (
-                <tr key={`${transaction.date}-${transaction.description}-${index}`}>
-                  <td>{transaction.date || "-"}</td>
-                  <td>{transaction.description || "-"}</td>
-                  <td>{transaction.amount || "₹0"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="ids-pdf-section">
-          <h3>Performance</h3>
-          <div className="ids-pdf-metrics">
-            <div>
-              <span>DPI</span>
-              <strong>{previewValue("dpi", selectedInvestor.dpi)}</strong>
-            </div>
-            <div>
-              <span>TVPI</span>
-              <strong>{previewValue("tvpi", selectedInvestor.tvpi)}</strong>
-            </div>
-            <div>
-              <span>IRR</span>
-              <strong>{previewValue("irr", selectedInvestor.irr)}</strong>
-            </div>
-            <div>
-              <span>Distribution</span>
-              <strong>
-                {previewValue(
-                  "distribution_amount",
-                  selectedInvestor.distribution
-                )}
-              </strong>
-            </div>
-          </div>
-        </div>
-
-        <div className="ids-pdf-signature">
-          <span>For {previewFundName}</span>
-          <strong>Authorized Signatory</strong>
-        </div>
-      </div>
-    </div>
-  );
-}
-  function renderLibrary() {
+  function renderPreview() {
     return (
-      <div className="ids-simple-page">
-        <div className="ids-studio-hero">
-          <p className="ids-eyebrow">Template Library</p>
-          <h2>Build once. Generate investor-wise forever.</h2>
-          <p>
-  Store SOA, capital call, distribution, Form 64C/64D and annual
-  income report templates as smart VENTIQ documents. Saved templates in
-  database: {savedTemplates.length}.
-</p>
-        </div>
-
-        <div className="ids-card-grid">
-          {[
-            "Statement of Account",
-            "Capital Call Notice",
-            "Distribution Notice",
-            "Form 64C",
-            "Annual Income Report",
-            "Unit Statement",
-          ].map((template) => (
-            <button
-              className="ids-template-card"
-              key={template}
-              onClick={() => {
-                setSelectedDocumentType(template);
-                setWorkspaceTab("builder");
-                setStatusMessage(`${template} opened in Template Builder.`);
-              }}
-              type="button"
-            >
-              <strong>{template}</strong>
-              <span>Smart merge fields · AIF blocks · PDF preview</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="ids-import-hero">
+      <div className="ids-preview-layout">
+        <div className="ids-preview-toolbar">
           <div>
-            <p className="ids-eyebrow">Import Existing Template</p>
-            <h3>Upload old Word/PDF and auto-create 80–90% of the template</h3>
-            <p>
-              VENTIQ will detect tables, headings, fields, signature blocks,
-              charts and merge-field candidates, then create an editable smart
-              template.
-            </p>
+            <h2>PDF Preview</h2>
+            <p>Previewing {selectedDocumentType} for {previewMergeData?.investor?.investor_name || selectedInvestor.name}.</p>
           </div>
-
-          <button className="ids-primary-btn" onClick={simulateImport} type="button">
-            Import Existing Template
-          </button>
+          <div className="ids-action-row">
+            <button className="ids-secondary-btn" onClick={() => setWorkspaceTab("builder")} type="button">Back to Builder</button>
+            <button className="ids-primary-btn" disabled={apiBusy} onClick={runBatch} type="button">Generate Batch</button>
+          </div>
+        </div>
+        <div className="ids-pdf-page">
+          {blocks.map((block) => renderTemplateBlock(block))}
         </div>
       </div>
     );
   }
 
   function renderBatch() {
-  const batch = batchResult?.batch;
-
-  return (
-    <div className="ids-simple-page">
-      <div className="ids-studio-hero">
-        <p className="ids-eyebrow">Batch Generation</p>
-        <h2>Generate investor-wise PDFs from one template</h2>
-        <p>
-          Prepare the queue, generate actual PDF files, then publish the final
-          documents to Investor Portal.
-        </p>
-      </div>
-
-      <div className="ids-batch-card">
-        <label>
-          Template
-          <select
-            className="ids-select full"
-            value={selectedDocumentType}
-            onChange={(event) => setSelectedDocumentType(event.target.value)}
-          >
-            {documentTypes.map((type) => (
-              <option key={type}>{type}</option>
-            ))}
-          </select>
-        </label>
-
-        <div className="ids-action-row" style={{ marginTop: 16 }}>
-          <button
-            className="ids-primary-btn"
-            disabled={apiBusy}
-            onClick={runBatch}
-            type="button"
-          >
-            {apiBusy ? "Preparing..." : "1. Prepare Batch"}
-          </button>
-
-          <button
-            className="ids-primary-btn"
-            disabled={apiBusy || !batch}
-            onClick={generatePdfFiles}
-            type="button"
-          >
-            {apiBusy ? "Generating..." : "2. Generate PDF Files"}
-          </button>
-
-          <button
-            className="ids-secondary-btn"
-            disabled={apiBusy || !pdfGenerationResult}
-            onClick={publishQueue}
-            type="button"
-          >
-            3. Publish Queue
-          </button>
+    return (
+      <div className="ids-workflow-page">
+        <div className="ids-library-hero">
+          <div>
+            <p className="ids-eyebrow">Batch Generation</p>
+            <h2>Generate investor-wise documents from this template.</h2>
+            <p>Current template: {templateName}</p>
+          </div>
+          <div className="ids-action-row">
+            <button className="ids-secondary-btn" onClick={() => setWorkspaceTab("builder")} type="button">Back to Builder</button>
+            <button className="ids-primary-btn" disabled={apiBusy} onClick={generatePdfFiles} type="button">Generate PDFs</button>
+          </div>
         </div>
-
-        {batch && (
-          <div className="ids-import-hero" style={{ marginTop: 22 }}>
-            <div>
-              <p className="ids-eyebrow">Batch Prepared</p>
-              <h3>{batch.batch_name}</h3>
-              <p>
-                Total investors: {batch.total_investors} · Ready:{" "}
-                {batch.ready_count} · Review: {batch.review_count} · Queued
-                documents: {batchResult?.queuedDocuments ?? 0}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {pdfGenerationResult && (
-          <div className="ids-import-hero" style={{ marginTop: 22 }}>
-            <div>
-              <p className="ids-eyebrow">PDF Files Generated</p>
-              <h3>
-                {pdfGenerationResult.generatedDocuments} PDF file(s) generated
-              </h3>
-              <p>
-                Failed: {pdfGenerationResult.failedDocuments ?? 0}. Files are
-                uploaded to Supabase Storage and linked to the generation queue.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {!batch && (
-          <div className="ids-explain" style={{ marginTop: 22 }}>
-            Batch is not prepared yet. Click “Prepare Batch” to create a
-            generation queue from investor_master.
-          </div>
-        )}
-
-        {pdfGenerationResult?.documents &&
-          pdfGenerationResult.documents.length > 0 && (
-            <div className="ids-investor-list">
-              {pdfGenerationResult.documents.slice(0, 10).map((document) => (
-                <div key={`${document.investor_code}-${document.file_name}`}>
-                  <span>
-                    <strong>{document.investor_name}</strong>
-                    <small>
-                      {document.investor_code} · {document.file_name}
-                    </small>
-                  </span>
-
-                  {document.file_url ? (
-                    <a
-                      className="ids-secondary-btn"
-                      href={document.file_url}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      Open PDF
-                    </a>
-                  ) : (
-                    <em className="review">No URL</em>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-      </div>
-    </div>
-  );
-}
-function renderPublish() {
-  const batch = batchResult?.batch;
-  const hasGeneratedPdfs =
-    Boolean(pdfGenerationResult?.generatedDocuments) &&
-    Number(pdfGenerationResult?.generatedDocuments) > 0;
-
-  return (
-    <div className="ids-simple-page">
-      <div className="ids-studio-hero">
-        <p className="ids-eyebrow">Publish Queue</p>
-        <h2>Push approved PDF files to Investor Portal</h2>
-        <p>
-          Final generated PDF records are inserted into investor_documents and
-          become visible inside the Investor Portal.
-        </p>
-      </div>
-
-      {!batch && (
-        <div className="ids-explain" style={{ marginTop: 22 }}>
-          No batch is prepared yet. Go to Batch Generation and prepare a batch
-          first.
+        <div className="ids-batch-grid">
+          <div><strong>{batchResult?.batch?.total_investors ?? investors.length}</strong><span>Total investors</span></div>
+          <div><strong>{batchResult?.queuedDocuments ?? investors.length}</strong><span>Queued documents</span></div>
+          <div><strong>{pdfGenerationResult?.generatedDocuments ?? 0}</strong><span>Generated PDFs</span></div>
+          <div><strong>{pdfGenerationResult?.failedDocuments ?? 0}</strong><span>Failed</span></div>
         </div>
-      )}
-
-      {batch && !hasGeneratedPdfs && (
-        <div className="ids-explain" style={{ marginTop: 22 }}>
-          Batch is prepared, but PDF files are not generated yet. Go back to
-          Batch Generation and click “Generate PDF Files”.
-        </div>
-      )}
-
-      {batch && (
-        <>
-          <div className="ids-import-hero" style={{ marginTop: 22 }}>
-            <div>
-              <p className="ids-eyebrow">Current Batch</p>
-              <h3>{batch.batch_name}</h3>
-              <p>
-                Total investors: {batch.total_investors} · Generated PDFs:{" "}
-                {pdfGenerationResult?.generatedDocuments ?? 0} · Already
-                published:{" "}
-                {publishResult?.publishedDocuments ?? batch.published_count ?? 0}
-              </p>
-            </div>
-
-            <button
-              className="ids-primary-btn"
-              disabled={apiBusy || !hasGeneratedPdfs}
-              onClick={publishQueue}
-              type="button"
-            >
-              {apiBusy ? "Publishing..." : "Publish to Investor Portal"}
-            </button>
-          </div>
-
-          {publishResult && (
-            <div className="ids-import-hero" style={{ marginTop: 22 }}>
-              <div>
-                <p className="ids-eyebrow">Published</p>
-                <h3>{publishResult.publishedDocuments} PDF records pushed</h3>
-                <p>
-                  These records are now available in investor_documents and can
-                  be surfaced inside the Investor Portal.
-                </p>
-              </div>
-
-              <a className="ids-primary-btn" href="/investor-portal">
-                Open Investor Portal
-              </a>
-            </div>
-          )}
-
+        {pdfGenerationResult?.documents && (
           <div className="ids-publish-grid">
-            {(pdfGenerationResult?.documents ?? investors).map((item: any) => {
-              const investorName = item.investor_name || item.name;
-              const investorCode = item.investor_code || item.code;
-
-              return (
-                <div className="ids-publish-card" key={investorCode}>
-                  <strong>{investorName}</strong>
-                  <span>{investorCode}</span>
-                  <p>{selectedDocumentType}</p>
-                  <em>
-                    {publishResult ? "Published to Portal" : "Ready to publish"}
-                  </em>
-                </div>
-              );
-            })}
+            {pdfGenerationResult.documents.map((document) => (
+              <div className="ids-publish-card" key={`${document.investor_code}-${document.file_name}`}>
+                <strong>{document.investor_name}</strong>
+                <span>{document.investor_code}</span>
+                <p>{document.file_name}</p>
+                {document.file_url && <a href={document.file_url} target="_blank">Open PDF</a>}
+              </div>
+            ))}
           </div>
-        </>
-      )}
-    </div>
-  );
-}
+        )}
+      </div>
+    );
+  }
+
+  function renderPublish() {
+    return (
+      <div className="ids-workflow-page">
+        <div className="ids-library-hero">
+          <div>
+            <p className="ids-eyebrow">Publish Queue</p>
+            <h2>Publish generated investor documents to Investor Portal.</h2>
+            <p>{publishResult ? `${publishResult.publishedDocuments ?? 0} documents published.` : "Prepare batch and generate PDFs before publishing."}</p>
+          </div>
+          <div className="ids-action-row">
+            <button className="ids-secondary-btn" onClick={() => setWorkspaceTab("batch")} type="button">Back to Batch</button>
+            <button className="ids-primary-btn" disabled={apiBusy} onClick={publishQueue} type="button">Publish to Portal</button>
+          </div>
+        </div>
+        <div className="ids-publish-grid">
+          {investors.map((investor) => (
+            <div className="ids-publish-card" key={investor.code}>
+              <strong>{investor.name}</strong>
+              <span>{investor.code}</span>
+              <p>{selectedDocumentType}</p>
+              <em>{publishResult ? "Published to Portal" : "Ready to publish"}</em>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <main className="ids-page">
       <div className="ids-shell">
-        <div className="ids-top-header">
-          <div>
-            <p className="ids-eyebrow">VENTIQ Investor Document Studio</p>
-            <h1>AIF document templates, merge fields and PDF generation</h1>
-            <p>
-              Import existing Word/PDF templates, convert them into smart AIF
-              blocks, preview investor-wise output and batch-generate PDFs.
-            </p>
-          </div>
-
-          <a className="ids-home-link" href="/">
-            Back to Home
-          </a>
-        </div>
+        <input ref={fileInputRef} type="file" accept=".docx,.pdf" onChange={importTemplateFile} style={{ display: "none" }} />
 
         <div className="ids-workspace-tabs">
-          <button
-            className={workspaceTab === "library" ? "active" : ""}
-            onClick={() => setWorkspaceTab("library")}
-            type="button"
-          >
-            Template Library
-          </button>
-          <button
-            className={workspaceTab === "builder" ? "active" : ""}
-            onClick={() => setWorkspaceTab("builder")}
-            type="button"
-          >
-            Template Builder
-          </button>
-          <button
-            className={workspaceTab === "preview" ? "active" : ""}
-            onClick={previewTemplate}
-            type="button"
-          >
-            PDF Preview
-          </button>
-          <button
-            className={workspaceTab === "batch" ? "active" : ""}
-            onClick={runBatch}
-            type="button"
-          >
-            Batch Generation
-          </button>
-          <button
-            className={workspaceTab === "publish" ? "active" : ""}
-            onClick={publishQueue}
-            type="button"
-          >
-            Publish Queue
-          </button>
-                </div>
+          <button className={workspaceTab === "start" ? "active" : ""} onClick={() => setWorkspaceTab("start")} type="button">Start</button>
+          <button className={workspaceTab === "library" ? "active" : ""} onClick={() => setWorkspaceTab("library")} type="button">Template Library</button>
+          <button className={workspaceTab === "builder" ? "active" : ""} onClick={() => setWorkspaceTab("builder")} type="button">Template Builder</button>
+          <button className={workspaceTab === "preview" ? "active" : ""} onClick={previewTemplate} type="button">PDF Preview</button>
+          <button className={workspaceTab === "batch" ? "active" : ""} onClick={runBatch} type="button">Batch Generation</button>
+          <button className={workspaceTab === "publish" ? "active" : ""} onClick={publishQueue} type="button">Publish Queue</button>
+        </div>
 
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".docx,.pdf"
-          onChange={importTemplateFile}
-          style={{ display: "none" }}
-        />
+        {workspaceTab === "start" && renderStart()}
+        {workspaceTab === "library" && renderLibrary()}
 
         {workspaceTab === "builder" && (
           <div className="ids-studio-frame">
             <div className="ids-title-bar">
               <div className="ids-undo-group">
-                <button type="button">↶</button>
-                <button type="button">↷</button>
+                <button onClick={() => setStatusMessage("Undo will be connected to version history later.")} type="button">↶</button>
+                <button onClick={() => setStatusMessage("Redo will be connected to version history later.")} type="button">↷</button>
               </div>
 
-              <input
-                value={templateName}
-                onChange={(event) => setTemplateName(event.target.value)}
-              />
-
-             <button
-  className="ids-primary-btn"
-  disabled={apiBusy}
-  onClick={saveTemplate}
-  type="button"
->
-  {apiBusy ? "Working..." : "Save"}
-</button>
-
-<button
-  className="ids-primary-btn"
-  disabled={apiBusy}
-  onClick={previewTemplate}
-  type="button"
->
-  {apiBusy ? "Working..." : "Preview"}
-</button>
-
+              <input value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
+              <button className="ids-primary-btn" disabled={apiBusy} onClick={saveTemplate} type="button">{apiBusy ? "Working..." : "Save"}</button>
+              <button className="ids-primary-btn" disabled={apiBusy} onClick={previewTemplate} type="button">{apiBusy ? "Working..." : "Preview"}</button>
               <span>Preview as</span>
-
-              <select
-                value={selectedInvestorId}
-                onChange={(event) => setSelectedInvestorId(event.target.value)}
-              >
-                {investors.map((investor) => (
-                  <option key={investor.id} value={investor.id}>
-                    {investor.name}
-                  </option>
-                ))}
+              <select value={selectedInvestorId} onChange={(event) => setSelectedInvestorId(event.target.value)}>
+                {investors.map((investor) => <option key={investor.id} value={investor.id}>{investor.name}</option>)}
               </select>
-
-              <select
-                value={selectedDocumentType}
-                onChange={(event) => setSelectedDocumentType(event.target.value)}
-              >
-                {documentTypes.map((type) => (
-                  <option key={type}>{type}</option>
-                ))}
+              <select value={selectedDocumentType} onChange={(event) => setSelectedDocumentType(event.target.value)}>
+                {documentTypes.map((type) => <option key={type}>{type}</option>)}
               </select>
-
-              <button onClick={startNewTemplate} type="button">
-                New
-              </button>
-              <button onClick={simulateImport} type="button">
-                Import Word/PDF
-              </button>
-              <button onClick={() => setWorkspaceTab("library")} type="button">
-                Open
-              </button>
+              <button onClick={() => startNewTemplate(true)} type="button">New</button>
+              <button onClick={simulateImport} type="button">Import Word/PDF</button>
+              <button onClick={() => setWorkspaceTab("library")} type="button">Open</button>
             </div>
 
             <div className="ids-ribbon-tabs">
-              {(["home", "insert", "layout", "view", "table", "chart"] as RibbonTab[]).map(
-                (tab) => (
-                  <button
-                    className={ribbonTab === tab ? "active" : ""}
-                    key={tab}
-                    onClick={() => setRibbonTab(tab)}
-                    type="button"
-                  >
-                    {tab === "home"
-                      ? "Home"
-                      : tab === "insert"
-                      ? "Insert"
-                      : tab === "layout"
-                      ? "Layout"
-                      : tab === "view"
-                      ? "View"
-                      : tab === "table"
-                      ? "Table Tools"
-                      : "Chart Tools"}
-                  </button>
-                )
-              )}
+              {(["home", "insert", "layout", "view", "table", "chart"] as RibbonTab[]).map((tab) => (
+                <button className={ribbonTab === tab ? "active" : ""} key={tab} onClick={() => setRibbonTab(tab)} type="button">
+                  {tab === "home" ? "Home" : tab === "insert" ? "Insert" : tab === "layout" ? "Layout" : tab === "view" ? "View" : tab === "table" ? "Table Tools" : "Chart Tools"}
+                </button>
+              ))}
             </div>
 
             <div className="ids-ribbon-content">{renderRibbon()}</div>
-
             {renderBuilder()}
 
             <div className="ids-status-bar">
@@ -3842,32 +2257,15 @@ function renderPublish() {
               <span>{selectedBlock?.title ?? "No block selected"}</span>
               <span>{statusMessage}</span>
               <div>
-                <button
-                  onClick={() => setZoomLevel((current) => Math.max(50, current - 10))}
-                  type="button"
-                >
-                  −
-                </button>
-                <input
-                  type="range"
-                  min="50"
-                  max="160"
-                  value={zoomLevel}
-                  onChange={(event) => setZoomLevel(Number(event.target.value))}
-                />
-                <button
-                  onClick={() => setZoomLevel((current) => Math.min(160, current + 10))}
-                  type="button"
-                >
-                  +
-                </button>
-                <strong>{zoomLevel}%</strong>
+                <button onClick={() => updatePageSettings({ zoom: Math.max(60, pageSettings.zoom - 10) })} type="button">−</button>
+                <input type="range" min="60" max="150" value={pageSettings.zoom} onChange={(event) => updatePageSettings({ zoom: Number(event.target.value) })} />
+                <button onClick={() => updatePageSettings({ zoom: Math.min(150, pageSettings.zoom + 10) })} type="button">+</button>
+                <strong>{pageSettings.zoom}%</strong>
               </div>
             </div>
           </div>
         )}
 
-        {workspaceTab === "library" && renderLibrary()}
         {workspaceTab === "preview" && renderPreview()}
         {workspaceTab === "batch" && renderBatch()}
         {workspaceTab === "publish" && renderPublish()}
@@ -3878,7 +2276,7 @@ function renderPublish() {
           min-height: 100vh;
           background: #f5f2ea;
           color: #0b1833;
-          padding: 28px;
+          padding: 14px;
           font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
 
@@ -3887,45 +2285,13 @@ function renderPublish() {
           margin: 0 auto;
         }
 
-        .ids-top-header {
-          display: flex;
-          justify-content: space-between;
-          gap: 24px;
-          align-items: flex-start;
-          margin-bottom: 18px;
-        }
-
         .ids-eyebrow {
           color: #9a7312;
           font-size: 12px;
-          font-weight: 800;
+          font-weight: 900;
           letter-spacing: 0.13em;
           text-transform: uppercase;
           margin: 0 0 8px;
-        }
-
-        .ids-top-header h1 {
-          margin: 0;
-          font-size: 34px;
-          letter-spacing: -0.04em;
-        }
-
-        .ids-top-header p {
-          margin: 8px 0 0;
-          color: #5f6b80;
-          max-width: 820px;
-          font-size: 16px;
-          line-height: 1.5;
-        }
-
-        .ids-home-link {
-          color: #0b1833;
-          text-decoration: none;
-          border: 1px solid #ded4bf;
-          border-radius: 12px;
-          padding: 10px 14px;
-          background: #fffaf1;
-          font-weight: 700;
         }
 
         .ids-workspace-tabs {
@@ -3935,17 +2301,20 @@ function renderPublish() {
           border-radius: 14px;
           padding: 5px;
           gap: 4px;
-          margin-bottom: 16px;
+          margin-bottom: 10px;
+          overflow-x: auto;
+          max-width: 100%;
         }
 
         .ids-workspace-tabs button {
           border: 0;
           background: transparent;
-          padding: 10px 16px;
+          padding: 9px 14px;
           border-radius: 10px;
           color: #475569;
-          font-weight: 700;
+          font-weight: 800;
           cursor: pointer;
+          white-space: nowrap;
         }
 
         .ids-workspace-tabs button.active {
@@ -3953,7 +2322,115 @@ function renderPublish() {
           color: white;
         }
 
+        .ids-start-screen,
+        .ids-library-layout,
+        .ids-workflow-page,
+        .ids-preview-layout {
+          border: 1px solid #e0d4bd;
+          background: #fffdf8;
+          border-radius: 20px;
+          padding: 24px;
+          box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
+        }
+
+        .ids-start-hero h1,
+        .ids-library-hero h2,
+        .ids-preview-toolbar h2 {
+          margin: 0;
+          font-size: 32px;
+          letter-spacing: -0.04em;
+        }
+
+        .ids-start-hero p,
+        .ids-library-hero p,
+        .ids-preview-toolbar p {
+          color: #64748b;
+          line-height: 1.55;
+          max-width: 860px;
+        }
+
+        .ids-start-options,
+        .ids-template-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 16px;
+          margin-top: 20px;
+        }
+
+        .ids-start-card,
+        .ids-template-card,
+        .ids-empty-card {
+          text-align: left;
+          border: 1px solid #e4dac9;
+          background: #fffaf1;
+          border-radius: 18px;
+          padding: 20px;
+          cursor: pointer;
+          color: inherit;
+          min-height: 220px;
+        }
+
+        .ids-start-card.highlighted {
+          background: #091b3c;
+          color: white;
+        }
+
+        .ids-start-card span,
+        .ids-template-card span {
+          color: #b48314;
+          font-weight: 900;
+          font-size: 12px;
+        }
+
+        .ids-start-card strong,
+        .ids-template-card strong,
+        .ids-empty-card strong {
+          display: block;
+          font-size: 20px;
+          margin: 10px 0;
+        }
+
+        .ids-start-card p,
+        .ids-template-card p,
+        .ids-empty-card p {
+          color: #64748b;
+          line-height: 1.5;
+        }
+
+        .ids-start-card.highlighted p {
+          color: #cbd5e1;
+        }
+
+        .ids-start-card em,
+        .ids-template-card em {
+          display: inline-block;
+          margin-top: 12px;
+          color: #9a7312;
+          font-style: normal;
+          font-weight: 900;
+        }
+
+        .ids-start-actions,
+        .ids-action-row {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          margin-top: 18px;
+        }
+
+        .ids-library-hero,
+        .ids-preview-toolbar {
+          display: flex;
+          justify-content: space-between;
+          gap: 20px;
+          align-items: flex-start;
+          margin-bottom: 20px;
+        }
+
         .ids-studio-frame {
+          height: calc(100vh - 74px);
+          display: flex;
+          flex-direction: column;
           border: 1px solid #e0d4bd;
           background: #fffaf3;
           border-radius: 18px;
@@ -3963,12 +2440,13 @@ function renderPublish() {
 
         .ids-title-bar {
           display: grid;
-          grid-template-columns: auto 250px auto auto auto 240px 300px auto auto auto;
-          gap: 10px;
+          grid-template-columns: auto minmax(180px, 260px) auto auto auto minmax(150px, 220px) minmax(170px, 280px) auto auto auto;
+          gap: 8px;
           align-items: center;
-          padding: 12px 16px;
+          padding: 10px 12px;
           border-bottom: 1px solid #e6dcc9;
           background: #fbf7ef;
+          overflow-x: auto;
         }
 
         .ids-title-bar input,
@@ -3976,11 +2454,17 @@ function renderPublish() {
         .ids-select,
         .ids-search,
         .ids-formula-box input,
-        .ids-formula-box textarea {
+        .ids-formula-box textarea,
+        .ids-block-editor input,
+        .ids-block-editor textarea,
+        .ids-column-config-card input,
+        .ids-column-config-card select,
+        .ids-form-label select,
+        .ids-margin-grid input {
           border: 1px solid #c8b995;
           background: white;
           border-radius: 10px;
-          padding: 10px 12px;
+          padding: 9px 10px;
           color: #111827;
           font: inherit;
           min-width: 0;
@@ -3994,304 +2478,292 @@ function renderPublish() {
           background: #071a3a;
           color: white;
           border-radius: 10px;
-          padding: 10px 16px;
-          font-weight: 800;
+          padding: 9px 13px;
+          font-weight: 900;
           cursor: pointer;
+          white-space: nowrap;
         }
 
         .ids-secondary-btn {
-          background: #ffffff;
-          color: #0b1833;
-          border: 1px solid #d7cab1;
+          background: #fffaf1;
+          color: #071a3a;
+          border: 1px solid #d8caa9;
         }
 
-        .ids-gold-btn {
-          background: #9a7312;
-        }
-
-        .ids-primary-btn.full,
-        .ids-gold-btn.full,
-        .ids-select.full {
-          width: 100%;
+        .ids-primary-btn:disabled,
+        .ids-title-bar button:disabled,
+        .ids-soft-btn:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
         }
 
         .ids-undo-group {
           display: flex;
-          gap: 5px;
-        }
-
-        .ids-undo-group button {
-          width: 28px;
-          padding: 7px;
-          color: #94a3b8;
-          background: white;
-          border: 1px solid #e5dccb;
+          gap: 4px;
         }
 
         .ids-ribbon-tabs {
           display: flex;
-          background: #081b3a;
-          padding-left: 18px;
+          gap: 4px;
+          padding: 6px 12px 0;
+          background: #fbf7ef;
+          overflow-x: auto;
         }
 
         .ids-ribbon-tabs button {
           border: 0;
           background: transparent;
-          color: #cbd5e1;
-          padding: 12px 22px;
-          font-weight: 800;
+          padding: 9px 13px;
+          border-radius: 10px 10px 0 0;
+          font-weight: 900;
+          color: #64748b;
           cursor: pointer;
+          white-space: nowrap;
         }
 
         .ids-ribbon-tabs button.active {
-          background: #fffaf3;
-          color: #0b1833;
-          border-radius: 10px 10px 0 0;
+          background: white;
+          color: #071a3a;
+          border: 1px solid #eadfc9;
+          border-bottom: 0;
         }
 
         .ids-ribbon-content {
-          min-height: 120px;
-          background: #fffaf3;
+          background: white;
+          border-top: 1px solid #eadfc9;
           border-bottom: 1px solid #e6dcc9;
+          padding: 8px 12px;
+          min-height: 82px;
+          overflow-x: auto;
         }
 
         .ids-ribbon-grid {
-          display: flex;
+          display: grid;
+          grid-template-columns: repeat(5, max-content);
+          gap: 8px;
           align-items: stretch;
-          gap: 0;
         }
 
-        .ids-ribbon-group {
-          padding: 16px 22px 10px;
-          border-right: 1px solid #e6dcc9;
-          min-width: 190px;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          justify-content: center;
+        .ids-ribbon-grid.compact {
+          grid-auto-flow: column;
+          grid-auto-columns: max-content;
+        }
+
+        .ids-ribbon-group,
+        .ids-ribbon-empty {
+          border: 1px solid #eadfc9;
+          border-radius: 12px;
+          padding: 8px;
+          min-width: 120px;
+          display: grid;
+          gap: 7px;
+          align-content: start;
+          background: #fffdf8;
         }
 
         .ids-ribbon-group.wide {
-          min-width: 320px;
-        }
-
-        .ids-control-row {
-          display: flex;
-          gap: 6px;
-        }
-
-        .ids-icon-btn {
-          background: white;
-          border: 1px solid #d5c6a7;
-          border-radius: 8px;
-          min-width: 38px;
-          padding: 9px;
-          font-weight: 800;
-          cursor: pointer;
-        }
-
-        .ids-icon-btn.active {
-          background: #081b3a;
-          color: white;
-        }
-
-        .ids-soft-btn {
-          background: white;
-          border: 1px solid #d5c6a7;
-          border-radius: 10px;
-          padding: 10px 12px;
-          color: #0b1833;
-          font-weight: 700;
-          cursor: pointer;
-        }
-
-        .ids-soft-btn.disabled {
-          opacity: 0.45;
+          min-width: 250px;
         }
 
         .ids-group-label {
-          margin-top: auto;
-          color: #64748b;
+          font-size: 10px;
+          color: #8a7650;
           text-transform: uppercase;
-          letter-spacing: 0.12em;
-          font-size: 11px;
-          text-align: center;
-          font-weight: 800;
+          letter-spacing: 0.08em;
+          font-weight: 900;
         }
 
-        .ids-tile-row {
+        .ids-control-row,
+        .ids-tile-row,
+        .ids-chip-row {
           display: flex;
-          gap: 8px;
+          gap: 6px;
           flex-wrap: wrap;
         }
 
-        .ids-tile-row button {
-          min-width: 78px;
-          min-height: 68px;
-          border: 1px solid #d5c6a7;
-          background: white;
+        .ids-icon-btn,
+        .ids-soft-btn,
+        .ids-tile-row button,
+        .ids-chip-row button {
+          border: 1px solid #d8caa9;
+          background: #fffaf1;
+          color: #071a3a;
           border-radius: 10px;
-          color: #0b1833;
-          font-weight: 800;
+          padding: 8px 10px;
+          font-weight: 900;
           cursor: pointer;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 5px;
+        }
+
+        .ids-icon-btn.active,
+        .ids-soft-btn.active-tool {
+          background: #b48314;
+          color: #ffffff;
+          border-color: #b48314;
+        }
+
+        .ids-soft-btn.danger {
+          border-color: rgba(185, 28, 28, 0.3);
+          color: #991b1b;
+          background: #fff1f2;
+        }
+
+        .ids-tile-row button {
+          display: grid;
+          justify-items: center;
+          gap: 2px;
+          min-width: 78px;
         }
 
         .ids-tile-row.small button {
-          min-width: 86px;
-        }
-
-        .ids-margin-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 8px;
-        }
-
-        .ids-margin-grid label {
-          color: #64748b;
-          font-size: 11px;
-          text-transform: uppercase;
-          font-weight: 800;
-        }
-
-        .ids-margin-grid input {
-          width: 70px;
-          display: block;
-          margin-top: 4px;
-          padding: 8px;
-          border: 1px solid #d5c6a7;
-          border-radius: 8px;
-          text-align: center;
-        }
-
-        .ids-info-pair {
-          display: flex;
-          justify-content: space-between;
-          gap: 20px;
-          color: #64748b;
+          min-width: 72px;
         }
 
         .ids-check-row {
           display: flex;
           align-items: center;
-          gap: 8px;
-          color: #0b1833;
-          font-weight: 700;
+          gap: 6px;
+          font-size: 12px;
+          color: #334155;
+          font-weight: 800;
         }
 
-        .ids-mini-note {
+        .ids-margin-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(58px, 1fr));
+          gap: 6px;
+        }
+
+        .ids-margin-grid label {
+          display: grid;
+          gap: 4px;
+          font-size: 11px;
           color: #64748b;
-          font-size: 12px;
-          margin: 0;
+          font-weight: 800;
         }
 
         .ids-builder-shell {
+          min-height: 0;
+          flex: 1;
           display: grid;
-          grid-template-columns: 118px minmax(720px, 1fr) 380px;
-          min-height: 760px;
-          background: #f4f1ea;
+          grid-template-columns: 86px minmax(600px, 1fr) 370px;
+          overflow: hidden;
         }
 
         .ids-page-sidebar {
-          padding: 28px 16px;
-          border-right: 1px solid #e2d8c5;
-          display: flex;
-          align-items: flex-start;
+          background: #f8f2e7;
+          border-right: 1px solid #e6dcc9;
+          padding: 12px 8px;
+          display: grid;
           gap: 8px;
-          flex-wrap: wrap;
+          align-content: start;
         }
 
         .ids-page-sidebar button {
-          background: white;
-          border: 1px solid #d5c6a7;
+          border: 1px solid #d8caa9;
           border-radius: 10px;
-          padding: 9px 12px;
-          font-weight: 800;
+          background: white;
+          padding: 10px 6px;
+          font-weight: 900;
           cursor: pointer;
         }
 
         .ids-page-sidebar button.active {
-          border-color: #b98712;
+          border-color: #9a7312;
           color: #9a7312;
-          background: #fff8e8;
         }
 
         .ids-canvas-wrap {
+          min-width: 0;
           overflow: auto;
-          padding: 34px 40px 80px;
-          background: #efeee8;
+          background: #efe8da;
         }
 
         .ids-ruler-top {
-          height: 20px;
-          max-width: 1010px;
-          margin: 0 auto;
-          background-image: repeating-linear-gradient(
-            to right,
-            transparent 0,
-            transparent 95px,
-            #bbb3a2 96px,
-            transparent 98px
-          );
-          opacity: 0.8;
+          height: 18px;
+          background: repeating-linear-gradient(90deg, #e2d8c5 0 1px, transparent 1px 22px), #f7f1e7;
+          border-bottom: 1px solid #ded4bf;
         }
 
         .ids-canvas-grid {
-          background-color: #e0ded6;
-          background-image:
-            linear-gradient(#d2cec3 1px, transparent 1px),
-            linear-gradient(90deg, #d2cec3 1px, transparent 1px);
-          background-size: 24px 24px;
-          max-width: 1010px;
-          margin: 0 auto;
-          padding: 110px 70px;
-          min-height: 920px;
+          min-height: 100%;
+          padding: 24px 30px 80px;
+          display: flex;
+          justify-content: center;
         }
 
-        .ids-a4-page {
-          width: 794px;
-          min-height: 1123px;
+        .ids-canvas-grid.show-grid {
+          background-image: linear-gradient(rgba(154, 115, 18, 0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(154, 115, 18, 0.08) 1px, transparent 1px);
+          background-size: 18px 18px;
+        }
+
+        .ids-a4-page,
+        .ids-pdf-page {
+          width: 720px;
+          min-height: 1018px;
           background: white;
+          color: #0f172a;
+          box-shadow: 0 20px 40px rgba(15, 23, 42, 0.22);
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
+
+        .ids-pdf-page {
           margin: 0 auto;
-          padding: 46px;
-          box-shadow: 0 0 0 1px #ddd6c7, 0 20px 50px rgba(15, 23, 42, 0.12);
+          padding: 36px;
+        }
+
+        .ids-empty-canvas {
+          border: 1px dashed #c8b995;
+          border-radius: 14px;
+          padding: 24px;
+          text-align: center;
+          color: #64748b;
         }
 
         .ids-doc-block {
           position: relative;
           border: 1px solid transparent;
-          margin-bottom: 18px;
-          padding: 10px;
+          padding: 14px;
+          border-radius: 12px;
           cursor: pointer;
         }
 
+        .ids-doc-block:hover,
         .ids-doc-block.selected {
-          border-color: #b88a18;
-          box-shadow: 0 0 0 2px rgba(184, 138, 24, 0.12);
+          border-color: #b48314;
+          background: rgba(180, 131, 20, 0.04);
         }
 
         .ids-block-tag {
           position: absolute;
-          left: 8px;
-          top: -12px;
-          background: #fff8e8;
-          border: 1px solid #d1a33d;
+          top: -9px;
+          left: 12px;
+          background: #fff7e6;
           color: #9a7312;
-          font-size: 11px;
-          font-weight: 800;
-          border-radius: 6px;
-          padding: 2px 6px;
+          border: 1px solid #eadfc9;
+          border-radius: 999px;
+          padding: 2px 8px;
+          font-size: 10px;
+          font-weight: 900;
         }
+
+        .font-serif { font-family: Georgia, "Times New Roman", serif; }
+        .font-mono { font-family: "SFMono-Regular", Consolas, monospace; }
+        .size-small { font-size: 12px; }
+        .size-normal { font-size: 14px; }
+        .size-large { font-size: 16px; }
+        .align-center { text-align: center; }
+        .align-right { text-align: right; }
+        .is-bold { font-weight: 800; }
+        .is-italic { font-style: italic; }
+        .is-underlined { text-decoration: underline; }
 
         .ids-letterhead {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          border-bottom: 2px solid #0b1833;
+          border-bottom: 2px solid #b48314;
           padding-bottom: 12px;
         }
 
@@ -4300,108 +2772,83 @@ function renderPublish() {
           font-size: 20px;
         }
 
-        .ids-letterhead span {
+        .ids-letterhead span,
+        .ids-signature-block span,
+        .ids-identity-grid span,
+        .ids-performance-grid span {
           display: block;
           color: #64748b;
           margin-top: 4px;
         }
 
         .ids-logo-box {
-          background: #081b3a;
-          color: white;
-          border-radius: 10px;
-          padding: 14px 18px;
+          border: 2px solid #071a3a;
+          color: #071a3a;
+          border-radius: 12px;
+          padding: 12px 14px;
           font-weight: 900;
-          letter-spacing: 0.1em;
+          letter-spacing: 0.12em;
         }
 
         .ids-identity-grid,
         .ids-performance-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
-          border: 1px solid #cfc7b7;
+          gap: 10px;
         }
 
         .ids-identity-grid div,
         .ids-performance-grid div {
+          border: 1px solid #e2d8c5;
+          border-radius: 10px;
           padding: 10px;
-          border-right: 1px solid #e5dece;
-        }
-
-        .ids-identity-grid span,
-        .ids-performance-grid span {
-          display: block;
-          color: #64748b;
-          font-size: 11px;
-          text-transform: uppercase;
-          font-weight: 800;
-        }
-
-        .ids-identity-grid strong,
-        .ids-performance-grid strong {
-          display: block;
-          margin-top: 5px;
-          color: #0b1833;
+          background: #fffdf8;
         }
 
         .ids-template-table {
           width: 100%;
           border-collapse: collapse;
-          font-size: 14px;
+          font-size: 12px;
+          background: white;
         }
 
-        .ids-template-table th {
-          background: #e5e5e5;
-          border: 1px solid #cfcfcf;
-          color: #0b1833;
-          padding: 8px;
-          text-align: center;
-        }
-
+        .ids-template-table th,
         .ids-template-table td {
-          border: 1px solid #ddd;
+          border: 1px solid #d6d0c4;
           padding: 8px;
-          color: #24324a;
+          text-align: left;
         }
 
-        .ids-template-table .right {
-          text-align: right;
+        .ids-template-table th.right,
+        .ids-template-table td.right { text-align: right; }
+        .ids-template-table th.center,
+        .ids-template-table td.center { text-align: center; }
+
+        .ids-template-table th.selected-column {
+          outline: 3px solid rgba(180, 131, 20, 0.28);
+          background: #fff4d2 !important;
         }
 
-        .ids-template-table .bold-row td {
-          font-weight: 800;
-        }
+        .table-header-gold thead tr:first-child th,
+        .table-header-gold thead tr:nth-child(2) th { background: #b48314; color: white; }
+        .table-header-dark thead tr:first-child th,
+        .table-header-dark thead tr:nth-child(2) th { background: #071a3a; color: white; }
+        .table-header-light thead tr:first-child th,
+        .table-header-light thead tr:nth-child(2) th { background: #f8f2e7; color: #0f172a; }
+        .table-header-minimal thead tr:first-child th,
+        .table-header-minimal thead tr:nth-child(2) th { background: white; color: #0f172a; }
+        .table-border-horizontal th,
+        .table-border-horizontal td { border-left: 0; border-right: 0; }
+        .table-border-outer th,
+        .table-border-outer td { border: 0; border-bottom: 1px solid #e2d8c5; }
+        .table-border-none th,
+        .table-border-none td { border: 0; }
 
         .ids-repeat-pill {
           display: inline-block;
-          background: #eaf2ff;
-          color: #1d5ca8;
-          padding: 4px 8px;
-          border-radius: 6px;
-          font-size: 12px;
-          font-weight: 800;
-        }
-
-        .ids-chart-box {
-          border: 1px solid #d2d2d2;
-          padding: 18px;
-          text-align: center;
-        }
-
-        .ids-bars {
-          height: 120px;
-          border-bottom: 1px solid #d7d7d7;
-          display: flex;
-          align-items: flex-end;
-          justify-content: center;
-          gap: 22px;
-          margin: 20px 0;
-        }
-
-        .ids-bars span {
-          display: block;
-          width: 60px;
-          background: #1f5fa8;
+          color: #9a7312;
+          font-weight: 900;
+          font-size: 11px;
         }
 
         .ids-note-block {
@@ -4409,21 +2856,87 @@ function renderPublish() {
           background: #fff8e8;
           padding: 14px;
           color: #334155;
+          line-height: 1.55;
         }
 
         .ids-signature-block {
           display: flex;
           justify-content: space-between;
           gap: 40px;
-          margin-top: 36px;
+          margin-top: auto;
           padding-top: 20px;
           border-top: 1px solid #d6d0c4;
         }
 
-        .ids-signature-block span {
+        .ids-chart-box {
+          border: 1px solid #e2d8c5;
+          border-radius: 14px;
+          padding: 16px;
+          background: #fffdf8;
+        }
+
+        .ids-chart-box h4 {
+          margin: 0 0 12px;
+        }
+
+        .ids-bars {
+          height: 130px;
+          display: flex;
+          align-items: flex-end;
+          justify-content: center;
+          gap: 22px;
+          margin: 10px 0;
+        }
+
+        .ids-bars span {
           display: block;
-          color: #64748b;
-          margin-top: 6px;
+          width: 48px;
+          background: #1f5fa8;
+          border-radius: 8px 8px 0 0;
+        }
+
+        .chart-waterfall .ids-bars span:nth-child(2),
+        .chart-waterfall .ids-bars span:nth-child(4) {
+          background: #9a7312;
+        }
+
+        .ids-line-chart {
+          height: 140px;
+          position: relative;
+          background: linear-gradient(180deg, transparent 24%, #e2d8c5 25%, transparent 26%, transparent 49%, #e2d8c5 50%, transparent 51%, transparent 74%, #e2d8c5 75%, transparent 76%);
+        }
+
+        .ids-line-chart span {
+          position: absolute;
+          width: 14px;
+          height: 14px;
+          border-radius: 999px;
+          background: #1f5fa8;
+        }
+
+        .ids-line-chart span:nth-child(1) { left: 12%; top: 62%; }
+        .ids-line-chart span:nth-child(2) { left: 36%; top: 42%; }
+        .ids-line-chart span:nth-child(3) { left: 60%; top: 52%; }
+        .ids-line-chart span:nth-child(4) { left: 84%; top: 24%; }
+
+        .ids-donut {
+          width: 150px;
+          height: 150px;
+          border-radius: 999px;
+          margin: 10px auto;
+          background: conic-gradient(#1f5fa8 0 62%, #b48314 62% 82%, #e2d8c5 82% 100%);
+          display: grid;
+          place-items: center;
+        }
+
+        .ids-donut span {
+          width: 88px;
+          height: 88px;
+          border-radius: 999px;
+          background: white;
+          display: grid;
+          place-items: center;
+          font-weight: 900;
         }
 
         .ids-merge-panel {
@@ -4433,206 +2946,222 @@ function renderPublish() {
         }
 
         .ids-panel-header {
-          padding: 18px;
+          padding: 14px;
           border-bottom: 1px solid #e2d8c5;
         }
 
         .ids-panel-header strong {
           color: #9a7312;
-          font-size: 13px;
+          font-size: 12px;
           letter-spacing: 0.08em;
         }
 
         .ids-panel-header span {
           display: block;
           color: #64748b;
-          margin-top: 6px;
+          margin-top: 4px;
         }
 
-        .ids-selected-context {
-          padding: 16px 18px;
-          border-bottom: 1px solid #efe7d9;
+        .ids-selected-context,
+        .ids-field-panel,
+        .ids-panel-body,
+        .ids-block-editor {
+          margin: 12px;
+          padding: 12px;
+          border: 1px solid #eadfc9;
+          border-radius: 14px;
+          background: white;
         }
 
         .ids-selected-context p,
         .ids-muted {
-          margin: 0 0 8px;
+          margin: 0 0 6px;
           color: #64748b;
-          font-size: 13px;
+          font-size: 12px;
+          font-weight: 800;
         }
 
         .ids-selected-context strong {
           display: block;
-          margin-bottom: 5px;
         }
 
         .ids-selected-context span {
+          display: block;
           color: #64748b;
-          font-size: 13px;
+          margin-top: 4px;
+          font-size: 12px;
+        }
+
+        .ids-block-editor {
+          display: grid;
+          gap: 10px;
+        }
+
+        .ids-block-editor label,
+        .ids-form-label,
+        .ids-column-config-card label,
+        .ids-formula-box label {
+          display: grid;
+          gap: 6px;
+          color: #6b7280;
+          font-size: 11px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+        }
+
+        .ids-block-editor textarea {
+          resize: vertical;
         }
 
         .ids-merge-tabs {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
-          background: #eeeae1;
-          margin: 14px 18px;
-          border-radius: 10px;
-          padding: 4px;
           gap: 4px;
+          margin: 12px;
+          background: #f8f2e7;
+          border-radius: 12px;
+          padding: 4px;
         }
 
         .ids-merge-tabs button {
           border: 0;
           background: transparent;
-          padding: 9px 4px;
-          border-radius: 8px;
-          font-weight: 800;
-          color: #475569;
+          color: #64748b;
+          border-radius: 9px;
+          padding: 8px 4px;
+          font-size: 11px;
+          font-weight: 900;
           cursor: pointer;
-          font-size: 12px;
         }
 
         .ids-merge-tabs button.active {
-          background: white;
-          color: #0b1833;
-          box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+          background: #071a3a;
+          color: white;
         }
 
-        .ids-panel-body {
-          padding: 0 18px 24px;
-        }
-
-        .ids-chip-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 7px;
+        .ids-table-config-summary,
+        .ids-import-grid,
+        .ids-batch-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 8px;
           margin: 12px 0;
         }
 
-        .ids-chip-row button {
-          border: 1px solid #e0d4bd;
-          background: #fffaf3;
-          border-radius: 999px;
-          padding: 6px 10px;
-          color: #566070;
-          font-weight: 800;
-          cursor: pointer;
+        .ids-table-config-summary span,
+        .ids-import-grid div,
+        .ids-batch-grid div {
+          background: #fffaf1;
+          border: 1px solid #eadfc9;
+          border-radius: 10px;
+          padding: 9px;
+          font-size: 12px;
+          color: #475569;
         }
 
+        .ids-column-config-list,
         .ids-field-list {
-          display: flex;
-          flex-direction: column;
+          display: grid;
           gap: 8px;
         }
 
-        .ids-field-list button {
-          border: 1px solid #e3d8c4;
-          background: white;
-          border-radius: 10px;
+        .ids-column-config-card {
+          border: 1px solid #e2d8c5;
+          border-radius: 12px;
           padding: 10px;
-          text-align: left;
+          background: #fffdf8;
+        }
+
+        .ids-column-config-card.active {
+          border-color: #b48314;
+          box-shadow: 0 0 0 3px rgba(180, 131, 20, 0.12);
+        }
+
+        .ids-column-config-top,
+        .ids-column-config-grid {
           display: grid;
           grid-template-columns: 1fr auto;
-          gap: 6px;
+          gap: 8px;
+          align-items: center;
+        }
+
+        .ids-column-config-grid {
+          grid-template-columns: 1fr 1fr;
+          margin-top: 8px;
+        }
+
+        .ids-column-config-top button {
+          border: 1px solid #fecaca;
+          background: #fff1f2;
+          color: #991b1b;
+          border-radius: 10px;
+          padding: 8px;
+          font-weight: 900;
           cursor: pointer;
         }
 
-        .ids-field-list button span {
-          font-weight: 800;
-          color: #334155;
+        .ids-field-list button {
+          display: grid;
+          grid-template-columns: 1fr auto;
+          gap: 8px;
+          text-align: left;
+          border: 1px solid #e2d8c5;
+          background: #fffaf1;
+          border-radius: 12px;
+          padding: 10px;
+          cursor: pointer;
+          color: #0f172a;
         }
 
-        .ids-field-list button small {
+        .ids-field-list button small,
+        .ids-field-list code,
+        .ids-field-list em {
           display: block;
-          color: #94a3b8;
-          font-weight: 600;
-          margin-top: 2px;
-        }
-
-        .ids-field-list button em {
+          color: #64748b;
           font-size: 11px;
-          color: #9a7312;
+          margin-top: 3px;
           font-style: normal;
-          background: #fff8e8;
-          padding: 2px 6px;
-          border-radius: 6px;
-        }
-
-        .ids-field-list button code {
-          grid-column: 1 / -1;
-          color: #1d5ca8;
-          font-size: 12px;
-        }
-
-        .ids-field-list.compact button {
-          grid-template-columns: 1fr;
         }
 
         .ids-source-card,
         .ids-explain,
-        .ids-formula-box,
-        .ids-import-score,
-        .ids-import-grid div {
-          background: #fff8e8;
-          border: 1px solid #eadab8;
+        .ids-import-score {
+          background: #fffaf1;
+          border: 1px solid #eadfc9;
           border-radius: 12px;
           padding: 12px;
-          margin: 12px 0;
-        }
-
-        .ids-source-card strong,
-        .ids-source-card span {
-          display: block;
-        }
-
-        .ids-source-card span,
-        .ids-explain {
-          color: #64748b;
+          margin: 10px 0;
+          color: #475569;
           line-height: 1.45;
-        }
-
-        .ids-formula-box {
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-
-        .ids-import-score {
-          text-align: center;
         }
 
         .ids-import-score strong {
           display: block;
-          font-size: 42px;
-          color: #9a7312;
+          font-size: 30px;
+          color: #071a3a;
         }
 
-        .ids-import-grid {
+        .ids-formula-box {
           display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 10px;
+          gap: 8px;
+          margin-bottom: 12px;
         }
 
-        .ids-import-grid strong {
-          display: block;
-          font-size: 22px;
-        }
-
-        .ids-import-grid span {
-          color: #64748b;
-          font-size: 12px;
+        .full {
+          width: 100%;
         }
 
         .ids-status-bar {
           display: grid;
           grid-template-columns: auto auto 1fr auto;
-          align-items: center;
           gap: 14px;
-          background: #fffaf3;
-          border-top: 1px solid #e2d8c5;
-          padding: 10px 16px;
+          align-items: center;
+          padding: 8px 12px;
+          border-top: 1px solid #e6dcc9;
+          background: #fbf7ef;
           color: #64748b;
-          font-size: 13px;
+          font-size: 12px;
         }
 
         .ids-status-bar div {
@@ -4642,712 +3171,349 @@ function renderPublish() {
         }
 
         .ids-status-bar button {
-          width: 28px;
-          height: 28px;
-          border-radius: 7px;
-          border: 1px solid #c8b995;
+          border: 1px solid #d8caa9;
           background: white;
-        }
-
-        .ids-simple-page,
-        .ids-preview-layout {
-          background: white;
-          border: 1px solid #e1d6bd;
-          border-radius: 18px;
-          padding: 28px;
-          box-shadow: 0 20px 50px rgba(15, 23, 42, 0.06);
-        }
-
-        .ids-studio-hero h2,
-        .ids-preview-toolbar h2 {
-          font-size: 28px;
-          margin: 0 0 8px;
-          letter-spacing: -0.03em;
-        }
-
-        .ids-studio-hero p,
-        .ids-preview-toolbar p {
-          color: #64748b;
-          max-width: 760px;
-          line-height: 1.55;
-          margin: 0;
-        }
-
-        .ids-card-grid {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 16px;
-          margin-top: 24px;
-        }
-
-        .ids-template-card {
-          border: 1px solid #e0d4bd;
-          background: #fffaf3;
-          border-radius: 16px;
-          padding: 20px;
-          text-align: left;
+          border-radius: 8px;
+          padding: 4px 8px;
           cursor: pointer;
-        }
-
-        .ids-template-card strong,
-        .ids-template-card span {
-          display: block;
-        }
-
-        .ids-template-card strong {
-          font-size: 18px;
-          margin-bottom: 8px;
-        }
-
-        .ids-template-card span {
-          color: #64748b;
-        }
-
-        .ids-import-hero {
-          margin-top: 24px;
-          border: 1px dashed #c7a448;
-          background: #fff8e8;
-          border-radius: 16px;
-          padding: 22px;
-          display: flex;
-          justify-content: space-between;
-          gap: 20px;
-          align-items: center;
-        }
-
-        .ids-preview-toolbar {
-          display: flex;
-          justify-content: space-between;
-          gap: 20px;
-          align-items: center;
-          margin-bottom: 24px;
-        }
-
-        .ids-action-row {
-          display: flex;
-          gap: 10px;
-          align-items: center;
-          flex-wrap: wrap;
-        }
-
-        .ids-pdf-page {
-          width: 794px;
-          min-height: 1123px;
-          background: white;
-          margin: 0 auto;
-          padding: 52px;
-          box-shadow: 0 0 0 1px #ddd6c7, 0 25px 80px rgba(15, 23, 42, 0.18);
-        }
-
-        .ids-pdf-header {
-          display: flex;
-          justify-content: space-between;
-          border-bottom: 2px solid #0b1833;
-          padding-bottom: 16px;
-        }
-
-        .ids-pdf-header h2 {
-          margin: 0;
-          font-size: 24px;
-        }
-
-        .ids-pdf-header p {
-          margin: 6px 0 0;
-          color: #64748b;
-        }
-
-        .ids-pdf-header strong {
-          background: #081b3a;
-          color: white;
-          padding: 14px;
-          border-radius: 10px;
-          align-self: start;
-        }
-
-        .ids-pdf-section {
-          margin-top: 24px;
-        }
-
-        .ids-pdf-section h3 {
-          margin: 0 0 12px;
-          font-size: 16px;
-          background: #eeeeee;
-          padding: 8px;
-          text-align: center;
-          border: 1px solid #d4d4d4;
-        }
-
-        .ids-pdf-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          border: 1px solid #ddd;
-        }
-
-        .ids-pdf-grid span,
-        .ids-pdf-grid strong {
-          padding: 10px;
-          border-bottom: 1px solid #eee;
-        }
-
-        .ids-pdf-grid span {
-          color: #64748b;
-        }
-
-        .ids-pdf-section table {
-          width: 100%;
-          border-collapse: collapse;
-        }
-
-        .ids-pdf-section td,
-        .ids-pdf-section th {
-          border: 1px solid #ddd;
-          padding: 9px;
-          text-align: left;
-        }
-
-        .ids-pdf-section td:last-child,
-        .ids-pdf-section th:last-child {
-          text-align: right;
-        }
-
-        .ids-pdf-metrics {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 10px;
-        }
-
-        .ids-pdf-metrics div {
-          border: 1px solid #ddd;
-          padding: 14px;
-        }
-
-        .ids-pdf-metrics span {
-          color: #64748b;
-          display: block;
-          font-size: 12px;
-          text-transform: uppercase;
-        }
-
-        .ids-pdf-metrics strong {
-          display: block;
-          margin-top: 6px;
-          font-size: 18px;
-        }
-
-        .ids-pdf-signature {
-          margin-top: 60px;
-          display: flex;
-          justify-content: space-between;
-          border-top: 1px solid #ddd;
-          padding-top: 20px;
-        }
-
-        .ids-batch-card {
-          margin-top: 22px;
-          max-width: 720px;
-          border: 1px solid #e0d4bd;
-          border-radius: 16px;
-          padding: 22px;
-          background: #fffaf3;
-        }
-
-        .ids-batch-card label {
-          display: block;
-          color: #9a7312;
-          font-weight: 900;
-          text-transform: uppercase;
-          letter-spacing: 0.08em;
-          font-size: 12px;
-        }
-
-        .ids-investor-list {
-          margin: 18px 0;
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-
-        .ids-investor-list div,
-        .ids-publish-card {
-          background: white;
-          border: 1px solid #e0d4bd;
-          border-radius: 12px;
-          padding: 14px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 14px;
-        }
-
-        .ids-investor-list span,
-        .ids-investor-list small {
-          display: block;
-        }
-
-        .ids-investor-list small {
-          color: #64748b;
-          margin-top: 4px;
-        }
-
-        .ids-investor-list em,
-        .ids-publish-card em {
-          font-style: normal;
-          font-weight: 900;
-          border-radius: 999px;
-          padding: 6px 10px;
-          background: #e9f9ef;
-          color: #137333;
-        }
-
-        .ids-investor-list em.review {
-          background: #fff8e0;
-          color: #9a7312;
         }
 
         .ids-publish-grid {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 16px;
-          margin: 24px 0;
+          gap: 12px;
         }
 
         .ids-publish-card {
-          display: block;
-        }
-
-        .ids-publish-card strong,
-        .ids-publish-card span,
-        .ids-publish-card p {
-          display: block;
-          margin-bottom: 6px;
-        }
-
-        .ids-publish-card span,
-        .ids-publish-card p {
-          color: #64748b;
-        }
-
-        @media (max-width: 1200px) {
-          .ids-title-bar {
-            grid-template-columns: 1fr 1fr;
-          }
-
-          .ids-builder-shell {
-            grid-template-columns: 1fr;
-          }
-
-          .ids-merge-panel {
-            border-left: 0;
-            border-top: 1px solid #e2d8c5;
-          }
-
-          .ids-card-grid,
-          .ids-publish-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-        /* VENTIQ Document Studio layout fix */
-        .ids-page {
+          border: 1px solid #eadfc9;
+          background: #fffdf8;
+          border-radius: 14px;
           padding: 14px;
+          display: grid;
+          gap: 6px;
         }
 
-        .ids-top-header {
-          display: none;
-        }
-
-        .ids-workspace-tabs {
-          margin-bottom: 8px;
-        }
-
-        .ids-studio-frame {
-          height: calc(100vh - 34px);
-          display: flex;
-          flex-direction: column;
-        }
-
-        .ids-title-bar {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 10px 12px;
-          flex-wrap: nowrap;
-          overflow-x: auto;
-        }
-
-        .ids-title-bar input {
-          width: 280px;
-          flex: 0 0 280px;
-        }
-
-        .ids-title-bar select {
-          height: 42px;
-          flex: 0 0 260px;
-        }
-
-        .ids-title-bar span {
-          white-space: nowrap;
+        .ids-publish-card span,
+        .ids-publish-card p,
+        .ids-publish-card em {
+          margin: 0;
           color: #64748b;
-          font-size: 13px;
+          font-style: normal;
         }
 
-        .ids-title-bar button,
-        .ids-primary-btn,
-        .ids-secondary-btn,
-        .ids-gold-btn {
-          height: 42px;
-          padding: 9px 14px;
-          white-space: nowrap;
+        @media (max-width: 1180px) {
+          .ids-builder-shell {
+            grid-template-columns: 76px minmax(500px, 1fr) 340px;
+          }
+
+          .ids-title-bar {
+            grid-template-columns: auto 220px auto auto auto 180px 220px auto auto auto;
+          }
         }
-
-        .ids-ribbon-tabs button {
-          padding: 10px 20px;
-        }
-
-        .ids-ribbon-content {
-          min-height: 96px;
-          flex-shrink: 0;
-        }
-
-        .ids-ribbon-group {
-          padding: 12px 18px 8px;
-          min-width: 150px;
-        }
-
-        .ids-ribbon-group.wide {
-          min-width: 260px;
-        }
-
-        .ids-tile-row button {
-          min-width: 72px;
-          min-height: 58px;
-          font-size: 13px;
-        }
-
-        .ids-tile-row.small button {
-          min-width: 76px;
-        }
-
-        .ids-builder-shell {
-          grid-template-columns: 92px minmax(620px, 1fr) 390px;
-          min-height: 0;
-          flex: 1;
-          overflow: hidden;
-        }
-
-        .ids-page-sidebar {
-          padding: 22px 12px;
-          align-content: flex-start;
-        }
-
-        .ids-canvas-wrap {
-          padding: 24px 28px 70px;
-          overflow: auto;
-        }
-
-        .ids-ruler-top {
-          max-width: 860px;
-          height: 18px;
-        }
-
-        .ids-canvas-grid {
-          max-width: 900px;
-          padding: 70px 42px;
-          min-height: 760px;
-        }
-
-        .ids-a4-page {
-          width: 720px;
-          min-height: 1018px;
-          padding: 34px;
-        }
-
-        .ids-doc-block {
-          margin-bottom: 14px;
-          padding: 8px;
-        }
-
-        .ids-letterhead strong {
-          font-size: 18px;
-        }
-
-        .ids-logo-box {
-          padding: 12px 16px;
-          font-size: 13px;
-        }
-
-        .ids-identity-grid,
-        .ids-performance-grid {
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          font-size: 13px;
-        }
-
-        .ids-identity-grid div,
-        .ids-performance-grid div {
-          padding: 8px;
-        }
-
-        .ids-template-table {
-          font-size: 13px;
-        }
-
-        .ids-template-table th,
-        .ids-template-table td {
-          padding: 7px;
-        }
-
-        .ids-merge-panel {
-          width: 390px;
-          overflow-y: auto;
-        }
-
-        .ids-panel-header {
-          padding: 14px 16px;
-        }
-
-        .ids-selected-context {
-          padding: 12px 16px;
-        }
-
-        .ids-merge-tabs {
-          margin: 12px 16px;
-        }
-
-        .ids-panel-body {
-          padding: 0 16px 20px;
-        }
-
-        .ids-field-list button {
-          padding: 9px;
-        }
-
-        .ids-status-bar {
-          flex-shrink: 0;
-          padding: 8px 14px;
-        }
-
-        .ids-status-bar span:nth-child(3) {
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-          .ids-table-config-summary {
-  display: grid;
-  gap: 8px;
-  margin: 12px 0 16px;
+          /* Compact premium Document Studio ribbon v3 */
+.ids-page {
+  padding: 8px !important;
 }
 
-.ids-table-config-summary span {
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(15, 23, 42, 0.56);
-  color: #cbd5e1;
-  border-radius: 12px;
-  padding: 9px 10px;
-  font-size: 12px;
-  font-weight: 800;
+.ids-studio-frame {
+  height: calc(100vh - 18px) !important;
+  max-height: calc(100vh - 18px) !important;
+  border-radius: 14px !important;
+  overflow: hidden !important;
 }
 
-.ids-column-config-list {
-  display: grid;
-  gap: 12px;
+.ids-title-bar {
+  height: 48px !important;
+  min-height: 48px !important;
+  padding: 6px 10px !important;
+  gap: 8px !important;
+  grid-template-columns:
+    auto
+    minmax(260px, 430px)
+    auto
+    auto
+    auto
+    minmax(180px, 280px)
+    minmax(220px, 360px)
+    auto
+    auto
+    auto !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
 }
 
-.ids-column-config-card {
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.42);
-  border-radius: 16px;
-  padding: 12px;
+.ids-title-bar input,
+.ids-title-bar select {
+  height: 34px !important;
+  padding: 6px 10px !important;
+  font-size: 13px !important;
+  border-radius: 10px !important;
 }
 
-.ids-column-config-top {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 10px;
+.ids-title-bar button,
+.ids-primary-btn,
+.ids-secondary-btn,
+.ids-gold-btn {
+  height: 34px !important;
+  padding: 6px 12px !important;
+  font-size: 12px !important;
+  border-radius: 10px !important;
+  line-height: 1 !important;
 }
 
-.ids-column-config-card input,
-.ids-column-config-card select,
-.ids-form-label select {
-  width: 100%;
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  background: rgba(2, 6, 23, 0.65);
-  color: #f8fafc;
-  border-radius: 10px;
-  padding: 9px 10px;
-  font: inherit;
+.ids-undo-group {
+  gap: 5px !important;
 }
 
-.ids-column-config-card label,
-.ids-form-label {
-  display: grid;
-  gap: 6px;
-  color: #94a3b8;
-  font-size: 11px;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+.ids-undo-group button {
+  width: 34px !important;
+  min-width: 34px !important;
+  padding: 0 !important;
 }
 
-.ids-column-config-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 10px;
+.ids-ribbon-tabs {
+  height: 38px !important;
+  min-height: 38px !important;
+  padding: 4px 10px 0 !important;
+  gap: 4px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  background: #fbf7ef !important;
 }
 
-.ids-column-config-top button {
-  border: 1px solid rgba(239, 68, 68, 0.32);
-  background: rgba(239, 68, 68, 0.12);
-  color: #fecaca;
-  border-radius: 10px;
-  padding: 9px 10px;
-  font-weight: 900;
-  cursor: pointer;
-}
-  .ids-soft-btn.active-tool {
-  background: #b48314 !important;
-  color: #ffffff !important;
-  border-color: #b48314 !important;
-  box-shadow: 0 0 0 3px rgba(180, 131, 20, 0.18);
+.ids-ribbon-tabs button {
+  height: 34px !important;
+  padding: 0 16px !important;
+  font-size: 13px !important;
+  border-radius: 10px 10px 0 0 !important;
+  white-space: nowrap !important;
 }
 
-.ids-soft-btn:active,
-.ids-table-action-row button:active {
-  transform: translateY(1px);
-  opacity: 0.86;
-}.ids-template-table.table-border-all th,
-.ids-template-table.table-border-all td {
-  border: 1px solid rgba(148, 163, 184, 0.28);
+.ids-ribbon-content {
+  height: 74px !important;
+  min-height: 74px !important;
+  max-height: 74px !important;
+  padding: 6px 10px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  background: #fffdf8 !important;
 }
 
-.ids-template-table.table-border-horizontal th,
-.ids-template-table.table-border-horizontal td {
-  border-left: 0;
-  border-right: 0;
-  border-top: 0;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.28);
+.ids-ribbon-grid,
+.ids-ribbon-grid.compact {
+  height: 62px !important;
+  min-height: 62px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  width: max-content !important;
+  min-width: 100% !important;
 }
 
-.ids-template-table.table-border-none th,
-.ids-template-table.table-border-none td {
-  border-color: transparent;
+.ids-ribbon-group,
+.ids-ribbon-empty {
+  height: 58px !important;
+  min-height: 58px !important;
+  min-width: auto !important;
+  max-width: none !important;
+  padding: 6px 8px !important;
+  border-radius: 12px !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  align-content: center !important;
+  gap: 6px !important;
+  background: #fffaf1 !important;
 }
 
-.ids-template-table.table-header-gold thead tr:first-child th,
-.ids-template-table.table-header-gold thead tr:nth-child(2) th {
-  background: rgba(180, 131, 20, 0.16);
-  color: #f8fafc;
+.ids-ribbon-group.wide {
+  min-width: auto !important;
+  max-width: none !important;
 }
 
-.ids-template-table.table-header-minimal thead tr:first-child th,
-.ids-template-table.table-header-minimal thead tr:nth-child(2) th {
-  background: rgba(15, 23, 42, 0.42);
-  color: #cbd5e1;
+.ids-group-label {
+  display: none !important;
 }
 
-.ids-template-table.table-header-dark thead tr:first-child th,
-.ids-template-table.table-header-dark thead tr:nth-child(2) th {
-  background: rgba(2, 6, 23, 0.78);
-  color: #ffffff;
+.ids-control-row,
+.ids-tile-row,
+.ids-tile-row.small,
+.ids-chip-row {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  gap: 5px !important;
 }
 
-.ids-template-table.table-header-light thead tr:first-child th,
-.ids-template-table.table-header-light thead tr:nth-child(2) th {
-  background: rgba(248, 250, 252, 0.9);
-  color: #0f172a;
-}
-  .ids-soft-btn.danger {
-  border-color: rgba(248, 113, 113, 0.35);
-  color: #fecaca;
-  background: rgba(127, 29, 29, 0.16);
+.ids-icon-btn {
+  width: 32px !important;
+  min-width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  font-size: 13px !important;
+  border-radius: 9px !important;
 }
 
-.ids-soft-btn.danger:hover {
-  background: rgba(127, 29, 29, 0.28);
+.ids-soft-btn,
+.ids-tile-row button,
+.ids-tile-row.small button,
+.ids-chip-row button {
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 6px 10px !important;
+  font-size: 12px !important;
+  line-height: 1 !important;
+  border-radius: 9px !important;
+  white-space: nowrap !important;
 }
 
-.ids-soft-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-  .ids-block-editor {
-  display: grid;
-  gap: 10px;
-  margin: 12px 0 16px;
-  padding: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.44);
+.ids-tile-row button,
+.ids-tile-row.small button {
+  min-width: auto !important;
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
 }
 
-.ids-block-editor label {
-  display: grid;
-  gap: 6px;
-  color: #94a3b8;
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+.ids-tile-row button span,
+.ids-tile-row.small button span {
+  font-size: 12px !important;
 }
 
-.ids-block-editor input,
-.ids-block-editor textarea {
-  width: 100%;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 10px;
-  background: rgba(2, 6, 23, 0.72);
-  color: #f8fafc;
-  padding: 9px 10px;
-  font-size: 12px;
-  outline: none;
+.ids-select,
+.ids-search,
+.ids-ribbon-group select {
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 5px 10px !important;
+  font-size: 12px !important;
+  border-radius: 9px !important;
 }
 
-.ids-block-editor textarea {
-  resize: vertical;
+.ids-check-row {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  font-size: 12px !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  margin: 0 !important;
 }
 
-.ids-block-editor input:focus,
-.ids-block-editor textarea:focus {
-  border-color: rgba(180, 131, 20, 0.72);
-  box-shadow: 0 0 0 3px rgba(180, 131, 20, 0.12);
+.ids-check-row input {
+  width: 14px !important;
+  height: 14px !important;
 }
 
-
-.ids-canvas-grid.grid-off {
-  background-image: none !important;
+.ids-margin-grid {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
 }
 
-.ids-doc-block.block-align-center {
-  text-align: center;
+.ids-margin-grid label {
+  width: 54px !important;
+  display: grid !important;
+  gap: 3px !important;
+  font-size: 9px !important;
+  line-height: 1 !important;
 }
 
-.ids-doc-block.block-align-right {
-  text-align: right;
+.ids-margin-grid input {
+  height: 30px !important;
+  width: 52px !important;
+  padding: 4px !important;
+  font-size: 12px !important;
+  text-align: center !important;
+  border-radius: 9px !important;
 }
 
-.ids-doc-block.block-style-header {
-  border-color: rgba(154, 115, 18, 0.45);
-  background: #fff7df;
+.ids-info-pair {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  font-size: 12px !important;
+  white-space: nowrap !important;
 }
 
-.ids-doc-block.block-style-highlight {
-  border-color: rgba(180, 131, 20, 0.5);
-  box-shadow: 0 0 0 3px rgba(180, 131, 20, 0.08);
+.ids-mini-note {
+  display: none !important;
 }
 
-.ids-doc-block.block-style-muted {
-  background: #f8fafc;
-  color: #475569;
+.ids-builder-shell {
+  height: calc(100vh - 192px) !important;
+  min-height: 0 !important;
+  grid-template-columns: 74px minmax(620px, 1fr) 330px !important;
+  overflow: hidden !important;
 }
 
-.ids-chart-box.chart-line .ids-bars span {
-  border-radius: 999px 999px 0 0;
+.ids-page-sidebar {
+  width: 74px !important;
+  padding: 8px 6px !important;
+  overflow: hidden !important;
 }
 
-.ids-chart-box.chart-waterfall .ids-bars span:nth-child(2),
-.ids-chart-box.chart-waterfall .ids-bars span:nth-child(4) {
-  opacity: 0.65;
+.ids-page-sidebar button {
+  width: 58px !important;
+  min-height: 48px !important;
+  padding: 6px 4px !important;
+  font-size: 12px !important;
+  border-radius: 10px !important;
+}
+
+.ids-canvas-wrap {
+  min-width: 0 !important;
+  overflow: auto !important;
+}
+
+.ids-ruler-top {
+  height: 14px !important;
+}
+
+.ids-canvas-grid {
+  padding: 18px 22px 70px !important;
+}
+
+.ids-a4-page {
+  width: 700px !important;
+  min-height: 960px !important;
+  padding: 26px 30px !important;
+}
+
+.ids-doc-block {
+  padding: 12px !important;
+}
+
+.ids-merge-panel {
+  width: 330px !important;
+  min-width: 330px !important;
+  max-width: 330px !important;
+}
+
+.ids-panel-header {
+  padding: 10px 12px !important;
+}
+
+.ids-selected-context,
+.ids-block-editor,
+.ids-panel-body,
+.ids-field-panel {
+  margin: 8px !important;
+  padding: 10px !important;
+  border-radius: 12px !important;
+}
+
+.ids-merge-tabs {
+  margin: 8px !important;
+}
+
+.ids-status-bar {
+  height: 30px !important;
+  min-height: 30px !important;
+  padding: 5px 10px !important;
+  font-size: 11px !important;
 }
       `}</style>
     </main>
