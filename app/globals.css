@@ -11579,4 +11579,37 @@ button.secondary-action:disabled {
   .ids-generated-preview-identity {
     grid-template-columns: 1fr;
   }
+}.ids-batch-actions {
+  margin: 14px 0 18px;
+  flex-wrap: wrap;
+}
+
+.ids-batch-card-selected {
+  border-color: rgba(176, 137, 47, 0.8) !important;
+  background: rgba(255, 250, 241, 0.92) !important;
+}
+
+.ids-batch-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.ids-batch-check-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: #b0892f;
+}
+
+.ids-publish-card em {
+  display: inline-block;
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
 }

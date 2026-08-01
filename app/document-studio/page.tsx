@@ -137,6 +137,19 @@ type PreviewMergeResponse = {
   sourceCounts?: Record<string, number>;
 };
 
+type BatchDocumentRow = {
+  id?: string;
+  investor_code?: string | null;
+  investor_name?: string | null;
+  email?: string | null;
+  document_type?: string | null;
+  document_name?: string | null;
+  file_name?: string | null;
+  file_url?: string | null;
+  generation_status?: string | null;
+  portal_publish_status?: string | null;
+};
+
 type BatchGenerationResponse = {
   message?: string;
   batch?: {
@@ -151,6 +164,7 @@ type BatchGenerationResponse = {
     status: string | null;
   };
   queuedDocuments?: number;
+  documents?: BatchDocumentRow[];
 };
 
 type PublishResponse = {
@@ -159,19 +173,14 @@ type PublishResponse = {
   publishedDocuments?: number;
 };
 
+
 type PdfGenerationResponse = {
   message?: string;
   batch_id?: string;
   generatedDocuments?: number;
   failedDocuments?: number;
-  documents?: {
-    investor_code?: string;
-    investor_name?: string;
-    file_name?: string;
-    file_url?: string;
-  }[];
+  documents?: BatchDocumentRow[];
 };
-
 type ImportTemplateResponse = {
   message?: string;
   detectedDocumentType?: string;
@@ -1069,6 +1078,7 @@ export default function DocumentStudioPage() {
   const [batchResult, setBatchResult] = useState<BatchGenerationResponse | null>(null);
   const [publishResult, setPublishResult] = useState<PublishResponse | null>(null);
   const [pdfGenerationResult, setPdfGenerationResult] = useState<PdfGenerationResponse | null>(null);
+  const [selectedBatchDocumentIds, setSelectedBatchDocumentIds] = useState<string[]>([]);
   const [importResult, setImportResult] = useState<ImportTemplateResponse | null>(null);
   const [apiBusy, setApiBusy] = useState(false);
   const [pageSettings, setPageSettings] = useState<PageSettings>(basePageSettings);
@@ -1081,6 +1091,24 @@ export default function DocumentStudioPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedInvestor = investors.find((investor) => investor.id === selectedInvestorId) ?? investors[0];
+  const batchDocuments = useMemo(() => {
+  return pdfGenerationResult?.documents || batchResult?.documents || [];
+}, [batchResult, pdfGenerationResult]);
+
+const selectedBatchDocuments = useMemo(() => {
+  return batchDocuments.filter(
+    (document) => document.id && selectedBatchDocumentIds.includes(document.id)
+  );
+}, [batchDocuments, selectedBatchDocumentIds]);
+
+const failedBatchDocumentIds = useMemo(() => {
+  return batchDocuments
+    .filter((document) =>
+      (document.generation_status || "").toLowerCase().includes("failed")
+    )
+    .map((document) => document.id)
+    .filter((id): id is string => Boolean(id));
+}, [batchDocuments]);
 
   const selectedBlock = useMemo(() => {
     return blocks.find((block) => block.id === selectedBlockId) ?? blocks[0] ?? null;
@@ -1116,7 +1144,39 @@ export default function DocumentStudioPage() {
       console.warn("Unable to load saved document templates:", error);
     }
   }
+function selectAllBatchDocuments() {
+  const ids = batchDocuments
+    .map((document) => document.id)
+    .filter((id): id is string => Boolean(id));
 
+  setSelectedBatchDocumentIds(ids);
+  setStatusMessage(`${ids.length} queued document(s) selected.`);
+}
+
+function clearBatchSelection() {
+  setSelectedBatchDocumentIds([]);
+  setStatusMessage("Batch selection cleared.");
+}
+
+function selectFailedBatchDocuments() {
+  setSelectedBatchDocumentIds(failedBatchDocumentIds);
+
+  setStatusMessage(
+    failedBatchDocumentIds.length > 0
+      ? `${failedBatchDocumentIds.length} failed document(s) selected for regeneration.`
+      : "No failed documents found in this batch."
+  );
+}
+
+function toggleBatchDocumentSelection(documentId?: string) {
+  if (!documentId) return;
+
+  setSelectedBatchDocumentIds((currentIds) =>
+    currentIds.includes(documentId)
+      ? currentIds.filter((id) => id !== documentId)
+      : [...currentIds, documentId]
+  );
+}
   function resetRuntimeResults() {
     setPreviewMergeData(null);
     setBatchResult(null);
@@ -1692,58 +1752,119 @@ function startDocumentPreset(preset: DocumentPreset) {
   }
 
   async function runBatch() {
-    try {
-      setApiBusy(true);
-      setStatusMessage("Preparing batch generation queue...");
+  try {
+    setApiBusy(true);
+    setStatusMessage("Preparing batch generation queue...");
 
-      const response = await fetch("/api/document-studio/batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ template_id: activeTemplateId || undefined, document_type: selectedDocumentType }),
-      });
+    const response = await fetch("/api/document-studio/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        template_id: activeTemplateId || undefined,
+        document_type: selectedDocumentType,
+      }),
+    });
 
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Unable to prepare batch.");
-      setBatchResult(result);
-      setWorkspaceTab("batch");
-      setStatusMessage(result.message || "Batch generation prepared for all investors.");
-    } catch (error) {
-      setBatchResult(null);
-      setWorkspaceTab("batch");
-      setStatusMessage(error instanceof Error ? error.message : "Unable to prepare batch generation.");
-    } finally {
-      setApiBusy(false);
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Unable to prepare batch.");
     }
+
+    const queuedDocumentIds = (result.documents || [])
+      .map((document: BatchDocumentRow) => document.id)
+      .filter((id: string | undefined): id is string => Boolean(id));
+
+    setBatchResult(result);
+    setPdfGenerationResult(null);
+    setPublishResult(null);
+    setSelectedBatchDocumentIds(queuedDocumentIds);
+    setWorkspaceTab("batch");
+
+    setStatusMessage(
+      result.message ||
+        `Batch generation prepared. ${queuedDocumentIds.length} document(s) selected.`
+    );
+  } catch (error) {
+    setBatchResult(null);
+    setSelectedBatchDocumentIds([]);
+    setWorkspaceTab("batch");
+    setStatusMessage(
+      error instanceof Error ? error.message : "Unable to prepare batch generation."
+    );
+  } finally {
+    setApiBusy(false);
   }
+}
 
-  async function generatePdfFiles() {
-    try {
-      const batchId = batchResult?.batch?.id;
-      if (!batchId) {
-        setStatusMessage("Prepare a batch first before generating PDF files.");
-        setWorkspaceTab("batch");
-        return;
-      }
+async function generatePdfFiles(mode: "selected" | "failed" | "all" = "selected") {
+  try {
+    const batchId = batchResult?.batch?.id;
 
-      setApiBusy(true);
-      setStatusMessage("Generating actual PDF files and uploading to storage...");
-      const response = await fetch("/api/document-studio/generate-pdfs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ batch_id: batchId }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Unable to generate PDF files.");
-      setPdfGenerationResult(result);
+    if (!batchId) {
+      setStatusMessage("Prepare a batch first before generating PDF files.");
       setWorkspaceTab("batch");
-      setStatusMessage(result.message || "PDF files generated and uploaded successfully.");
-    } catch (error) {
-      setPdfGenerationResult(null);
-      setStatusMessage(error instanceof Error ? error.message : "Unable to generate PDF files.");
-    } finally {
-      setApiBusy(false);
+      return;
     }
+
+    const allDocumentIds = batchDocuments
+      .map((document) => document.id)
+      .filter((id): id is string => Boolean(id));
+
+    const selectedIds =
+      mode === "all"
+        ? allDocumentIds
+        : mode === "failed"
+        ? failedBatchDocumentIds
+        : selectedBatchDocumentIds;
+
+    if (allDocumentIds.length > 0 && selectedIds.length === 0) {
+      setStatusMessage("Select at least one queued document before generating PDFs.");
+      setWorkspaceTab("batch");
+      return;
+    }
+
+    setApiBusy(true);
+
+    setStatusMessage(
+      mode === "failed"
+        ? "Regenerating failed PDF files..."
+        : mode === "all"
+        ? "Generating all PDF files..."
+        : "Generating selected PDF files..."
+    );
+
+    const response = await fetch("/api/document-studio/generate-pdfs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        batch_id: batchId,
+        document_ids: selectedIds.length > 0 ? selectedIds : undefined,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Unable to generate PDF files.");
+    }
+
+    setPdfGenerationResult(result);
+    setWorkspaceTab("batch");
+
+    setStatusMessage(
+      result.message || "PDF files generated and uploaded successfully."
+    );
+  } catch (error) {
+    setPdfGenerationResult(null);
+    setWorkspaceTab("batch");
+    setStatusMessage(
+      error instanceof Error ? error.message : "Unable to generate PDF files."
+    );
+  } finally {
+    setApiBusy(false);
   }
+}
 
   async function publishQueue() {
     try {
@@ -2777,41 +2898,182 @@ function renderPreview() {
 }
 
 
-  function renderBatch() {
-    return (
-      <div className="ids-workflow-page">
-        <div className="ids-library-hero">
-          <div>
-            <p className="ids-eyebrow">Batch Generation</p>
-            <h2>Generate investor-wise documents from this template.</h2>
-            <p>Current template: {templateName}</p>
-          </div>
-          <div className="ids-action-row">
-            <button className="ids-secondary-btn" onClick={() => setWorkspaceTab("builder")} type="button">Back to Builder</button>
-            <button className="ids-primary-btn" disabled={apiBusy} onClick={generatePdfFiles} type="button">Generate PDFs</button>
-          </div>
+ function renderBatch() {
+  const generatedCount = pdfGenerationResult?.generatedDocuments ?? 0;
+  const failedCount = pdfGenerationResult?.failedDocuments ?? 0;
+  const queuedCount = batchResult?.queuedDocuments ?? batchDocuments.length;
+  const selectedCount = selectedBatchDocumentIds.length;
+
+  return (
+    <div className="ids-workflow-page">
+      <div className="ids-library-hero">
+        <div>
+          <p className="ids-eyebrow">Batch Generation</p>
+          <h2>Generate investor-wise documents from this template.</h2>
+          <p>
+            Current template: {templateName}. Select investors, generate PDFs,
+            and regenerate failed documents if required.
+          </p>
         </div>
-        <div className="ids-batch-grid">
-          <div><strong>{batchResult?.batch?.total_investors ?? investors.length}</strong><span>Total investors</span></div>
-          <div><strong>{batchResult?.queuedDocuments ?? investors.length}</strong><span>Queued documents</span></div>
-          <div><strong>{pdfGenerationResult?.generatedDocuments ?? 0}</strong><span>Generated PDFs</span></div>
-          <div><strong>{pdfGenerationResult?.failedDocuments ?? 0}</strong><span>Failed</span></div>
+
+        <div className="ids-action-row">
+          <button
+            className="ids-secondary-btn"
+            onClick={() => setWorkspaceTab("builder")}
+            type="button"
+          >
+            Back to Builder
+          </button>
+
+          <button
+            className="ids-secondary-btn"
+            disabled={apiBusy}
+            onClick={runBatch}
+            type="button"
+          >
+            Refresh Queue
+          </button>
+
+          <button
+            className="ids-primary-btn"
+            disabled={apiBusy || !batchResult?.batch?.id}
+            onClick={() => generatePdfFiles("selected")}
+            type="button"
+          >
+            Generate Selected
+          </button>
         </div>
-        {pdfGenerationResult?.documents && (
-          <div className="ids-publish-grid">
-            {pdfGenerationResult.documents.map((document) => (
-              <div className="ids-publish-card" key={`${document.investor_code}-${document.file_name}`}>
-                <strong>{document.investor_name}</strong>
-                <span>{document.investor_code}</span>
-                <p>{document.file_name}</p>
-                {document.file_url && <a href={document.file_url} target="_blank">Open PDF</a>}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
-    );
-  }
+
+      <div className="ids-batch-grid">
+        <div>
+          <strong>{batchResult?.batch?.total_investors ?? investors.length}</strong>
+          <span>Total investors</span>
+        </div>
+
+        <div>
+          <strong>{queuedCount}</strong>
+          <span>Queued documents</span>
+        </div>
+
+        <div>
+          <strong>{selectedCount}</strong>
+          <span>Selected</span>
+        </div>
+
+        <div>
+          <strong>{generatedCount}</strong>
+          <span>Generated PDFs</span>
+        </div>
+
+        <div>
+          <strong>{failedCount}</strong>
+          <span>Failed</span>
+        </div>
+      </div>
+
+      <div className="ids-action-row ids-batch-actions">
+        <button
+          className="ids-secondary-btn"
+          disabled={apiBusy || batchDocuments.length === 0}
+          onClick={selectAllBatchDocuments}
+          type="button"
+        >
+          Select All
+        </button>
+
+        <button
+          className="ids-secondary-btn"
+          disabled={apiBusy || selectedBatchDocumentIds.length === 0}
+          onClick={clearBatchSelection}
+          type="button"
+        >
+          Clear Selection
+        </button>
+
+        <button
+          className="ids-secondary-btn"
+          disabled={apiBusy || failedBatchDocumentIds.length === 0}
+          onClick={selectFailedBatchDocuments}
+          type="button"
+        >
+          Select Failed
+        </button>
+
+        <button
+          className="ids-secondary-btn"
+          disabled={apiBusy || failedBatchDocumentIds.length === 0}
+          onClick={() => generatePdfFiles("failed")}
+          type="button"
+        >
+          Regenerate Failed
+        </button>
+
+        <button
+          className="ids-secondary-btn"
+          disabled={apiBusy || batchDocuments.length === 0}
+          onClick={() => generatePdfFiles("all")}
+          type="button"
+        >
+          Generate All
+        </button>
+      </div>
+
+      {batchDocuments.length === 0 && (
+        <div className="ids-empty-card">
+          <strong>No batch queue loaded</strong>
+          <p>
+            Click Generate Batch from Preview or Refresh Queue here to prepare
+            investor-wise documents.
+          </p>
+          <button className="ids-primary-btn" onClick={runBatch} type="button">
+            Prepare Batch Queue
+          </button>
+        </div>
+      )}
+
+      {batchDocuments.length > 0 && (
+        <div className="ids-publish-grid">
+          {batchDocuments.map((document) => {
+            const documentId = document.id || "";
+            const isSelected = selectedBatchDocumentIds.includes(documentId);
+            const status = document.generation_status || "Ready";
+
+            return (
+              <div
+                className={`ids-publish-card ${
+                  isSelected ? "ids-batch-card-selected" : ""
+                }`}
+                key={`${document.investor_code}-${document.file_name}-${document.id}`}
+              >
+                <label className="ids-batch-check-row">
+                  <input
+                    checked={isSelected}
+                    disabled={!documentId}
+                    onChange={() => toggleBatchDocumentSelection(documentId)}
+                    type="checkbox"
+                  />
+                  <span>{isSelected ? "Selected" : "Not selected"}</span>
+                </label>
+
+                <strong>{document.investor_name || "Investor"}</strong>
+                <span>{document.investor_code || "Investor code pending"}</span>
+                <p>{document.file_name || document.document_name || templateName}</p>
+                <em>{status}</em>
+
+                {document.file_url && (
+                  <a href={document.file_url} target="_blank">
+                    Open PDF
+                  </a>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
   function renderPublish() {
   const generatedPdfCards = pdfGenerationResult?.documents ?? [];
