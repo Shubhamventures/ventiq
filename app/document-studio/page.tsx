@@ -2529,25 +2529,253 @@ function startDocumentPreset(preset: DocumentPreset) {
     );
   }
 
-  function renderPreview() {
-    return (
-      <div className="ids-preview-layout">
-        <div className="ids-preview-toolbar">
-          <div>
-            <h2>PDF Preview</h2>
-            <p>Previewing {selectedDocumentType} for {previewMergeData?.investor?.investor_name || selectedInvestor.name}.</p>
+  function renderPdfPreviewBlock(block: TemplateBlock) {
+  const tableConfig =
+    block.tableConfig ||
+    (isConfigurableTableBlock(block)
+      ? createTableConfig(getDefaultRepeatSourceForBlock(block))
+      : null);
+
+  const chartConfig =
+    block.chartConfig ||
+    (block.kind === "chart"
+      ? {
+          chartType: "bar" as const,
+          series: "current_nav" as const,
+          title: "Portfolio Movement Chart",
+        }
+      : null);
+
+  return (
+    <section
+      className={`ids-generated-preview-block pdf-kind-${block.kind}`}
+      key={`pdf-preview-${block.id}`}
+    >
+      {block.kind !== "letterhead" &&
+        block.kind !== "identity" &&
+        block.kind !== "signature" && (
+          <div className="ids-generated-preview-heading">
+            <h3>{block.title}</h3>
+            {block.subtitle && <p>{block.subtitle}</p>}
           </div>
-          <div className="ids-action-row">
-            <button className="ids-secondary-btn" onClick={() => setWorkspaceTab("builder")} type="button">Back to Builder</button>
-            <button className="ids-primary-btn" disabled={apiBusy} onClick={runBatch} type="button">Generate Batch</button>
+        )}
+
+      {block.kind === "letterhead" && (
+        <div className="ids-generated-preview-letterhead">
+          <div>
+            <h2>{getInvestorValue(selectedInvestor, "fund_name")}</h2>
+            <p>{block.content || "Registered AIF | GIFT City"}</p>
+          </div>
+          <strong>VENTIQ</strong>
+        </div>
+      )}
+
+      {block.kind === "identity" && (
+        <div className="ids-generated-preview-identity">
+          <div>
+            <span>Investor Name</span>
+            <strong>{getInvestorValue(selectedInvestor, "investor_name")}</strong>
+          </div>
+
+          <div>
+            <span>Investor Code</span>
+            <strong>{getInvestorValue(selectedInvestor, "investor_code")}</strong>
+          </div>
+
+          <div>
+            <span>Investor Type</span>
+            <strong>{getInvestorValue(selectedInvestor, "investor_type")}</strong>
+          </div>
+
+          <div>
+            <span>Statement Period</span>
+            <strong>{getInvestorValue(selectedInvestor, "statement_period")}</strong>
+          </div>
+
+          <div>
+            <span>Report Date</span>
+            <strong>{getInvestorValue(selectedInvestor, "report_date")}</strong>
           </div>
         </div>
-        <div className="ids-pdf-page">
-          {blocks.map((block) => renderTemplateBlock(block))}
+      )}
+
+      {tableConfig && (
+        <table className="ids-generated-preview-table">
+          <thead>
+            <tr>
+              <th colSpan={tableConfig.columns.length}>
+                {getTableTitle(block)}
+              </th>
+            </tr>
+
+            <tr>
+              {tableConfig.columns.map((column) => (
+                <th
+                  className={
+                    column.align === "right"
+                      ? "right"
+                      : column.align === "center"
+                      ? "center"
+                      : ""
+                  }
+                  key={`preview-${block.id}-${column.id}`}
+                  style={{ width: `${column.width}%` }}
+                >
+                  {column.header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {(tableConfig.repeatRows ? [0, 1, 2] : [0]).map((rowIndex) => (
+              <tr key={`preview-${block.id}-row-${rowIndex}`}>
+                {tableConfig.columns.map((column) => (
+                  <td
+                    className={
+                      column.align === "right"
+                        ? "right"
+                        : column.align === "center"
+                        ? "center"
+                        : ""
+                    }
+                    key={`preview-${block.id}-${rowIndex}-${column.id}`}
+                  >
+                    {pageSettings.showSampleValues
+                      ? getSampleValueForTableField(column.fieldKey)
+                      : `{${column.fieldKey}}`}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {block.kind === "performance" && (
+        <div className="ids-generated-preview-metrics">
+          <div>
+            <span>DPI</span>
+            <strong>{getInvestorValue(selectedInvestor, "dpi")}</strong>
+          </div>
+
+          <div>
+            <span>TVPI</span>
+            <strong>{getInvestorValue(selectedInvestor, "tvpi")}</strong>
+          </div>
+
+          <div>
+            <span>IRR</span>
+            <strong>{getInvestorValue(selectedInvestor, "irr")}</strong>
+          </div>
+
+          <div>
+            <span>Distribution</span>
+            <strong>{getInvestorValue(selectedInvestor, "distribution_amount")}</strong>
+          </div>
+        </div>
+      )}
+
+      {block.kind === "chart" && chartConfig && (
+        <div className="ids-generated-preview-chart">
+          <h4>{chartConfig.title}</h4>
+
+          <div className="ids-generated-preview-bars">
+            <span style={{ height: "46%" }} />
+            <span style={{ height: "72%" }} />
+            <span style={{ height: "58%" }} />
+            <span style={{ height: "86%" }} />
+          </div>
+
+          <p>{`Series: {${chartConfig.series}}`}</p>
+        </div>
+      )}
+
+      {block.kind === "notes" && (
+        <p className="ids-generated-preview-note">
+          {renderContentWithSampleValues(
+            block.content ||
+              "This statement is generated based on the books and records of the Fund as on {report_date}."
+          )}
+        </p>
+      )}
+
+      {block.kind === "signature" && (
+        <div className="ids-generated-preview-signature">
+          <div>
+            <strong>For {getInvestorValue(selectedInvestor, "fund_name")}</strong>
+            <span>{block.content || "Authorized Signatory"}</span>
+          </div>
+
+          <div>
+            <span>Generated on</span>
+            <strong>{getInvestorValue(selectedInvestor, "generated_on")}</strong>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function renderPreview() {
+  return (
+    <div className="ids-preview-layout">
+      <div className="ids-preview-toolbar">
+        <div>
+          <p className="ids-eyebrow">PDF-compatible preview</p>
+          <h2>{selectedDocumentType}</h2>
+          <p>
+            Previewing {templateName} for{" "}
+            {previewMergeData?.investor?.investor_name || selectedInvestor.name}.
+            This view removes builder-only controls so it is closer to the generated PDF.
+          </p>
+        </div>
+
+        <div className="ids-action-row">
+          <button
+            className="ids-secondary-btn"
+            onClick={() => setWorkspaceTab("builder")}
+            type="button"
+          >
+            Back to Builder
+          </button>
+
+          <button
+            className="ids-secondary-btn"
+            disabled={apiBusy}
+            onClick={previewTemplate}
+            type="button"
+          >
+            Refresh Preview Data
+          </button>
+
+          <button
+            className="ids-primary-btn"
+            disabled={apiBusy}
+            onClick={runBatch}
+            type="button"
+          >
+            Generate Batch
+          </button>
         </div>
       </div>
-    );
-  }
+
+      <div className="ids-generated-preview-wrap">
+        <div className="ids-generated-preview-page">
+          {blocks.length === 0 ? (
+            <div className="ids-empty-canvas">
+              <strong>No blocks available</strong>
+              <p>Go back to Builder and add sections before previewing.</p>
+            </div>
+          ) : (
+            blocks.map((block) => renderPdfPreviewBlock(block))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
   function renderBatch() {
     return (
