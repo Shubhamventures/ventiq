@@ -754,8 +754,12 @@ const [statusMessage, setStatusMessage] = useState(
   }, [blocks, selectedBlockId]);
 
   const activeColumnSource =
-    columnSources.find((source) => source.id === selectedColumnSource) ??
-    columnSources[0];
+  columnSources.find((source) => source.id === selectedColumnSource) ??
+  columnSources[0];
+
+const selectedBlockIndex = blocks.findIndex(
+  (block) => block.id === selectedBlockId
+);
     async function loadSavedTemplates() {
   try {
     const response = await fetch("/api/document-studio/templates", {
@@ -1084,6 +1088,124 @@ function changeTableRepeatSource(
   setMergeMode("cell");
 }
   }
+
+
+function moveSelectedBlock(direction: "up" | "down") {
+  setBlocks((currentBlocks) => {
+    const currentIndex = currentBlocks.findIndex(
+      (block) => block.id === selectedBlockId
+    );
+
+    if (currentIndex === -1) {
+      return currentBlocks;
+    }
+
+    const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+
+    if (nextIndex < 0 || nextIndex >= currentBlocks.length) {
+      setStatusMessage(
+        direction === "up"
+          ? "Selected block is already at the top."
+          : "Selected block is already at the bottom."
+      );
+      return currentBlocks;
+    }
+
+    const nextBlocks = [...currentBlocks];
+    const selected = nextBlocks[currentIndex];
+
+    nextBlocks[currentIndex] = nextBlocks[nextIndex];
+    nextBlocks[nextIndex] = selected;
+
+    setStatusMessage(
+      `${selected.title} moved ${direction === "up" ? "up" : "down"}.`
+    );
+
+    return nextBlocks;
+  });
+}
+
+function duplicateSelectedBlock() {
+  if (!selectedBlock) {
+    return;
+  }
+
+  const timestamp = Date.now();
+
+  const duplicatedBlock: TemplateBlock = {
+    ...selectedBlock,
+    id: `${selectedBlock.kind}-${timestamp}`,
+    title: `${selectedBlock.title} Copy`,
+    tableConfig: selectedBlock.tableConfig
+      ? {
+          ...selectedBlock.tableConfig,
+          columns: selectedBlock.tableConfig.columns.map((column, index) => ({
+            ...column,
+            id: `${column.id}-copy-${timestamp}-${index}`,
+          })),
+        }
+      : undefined,
+  };
+
+  setBlocks((currentBlocks) => {
+    const currentIndex = currentBlocks.findIndex(
+      (block) => block.id === selectedBlockId
+    );
+
+    if (currentIndex === -1) {
+      return [...currentBlocks, duplicatedBlock];
+    }
+
+    const nextBlocks = [...currentBlocks];
+    nextBlocks.splice(currentIndex + 1, 0, duplicatedBlock);
+    return nextBlocks;
+  });
+
+  setSelectedBlockId(duplicatedBlock.id);
+
+  if (isConfigurableTableBlock(duplicatedBlock)) {
+    setRibbonTab("table");
+    setMergeMode("column");
+  }
+
+  setStatusMessage(`${selectedBlock.title} duplicated with its mappings.`);
+}
+
+function deleteSelectedBlock() {
+  if (blocks.length <= 1) {
+    setStatusMessage("At least one template block is required.");
+    return;
+  }
+
+  const deletedTitle = selectedBlock?.title || "Selected block";
+
+  setBlocks((currentBlocks) => {
+    const currentIndex = currentBlocks.findIndex(
+      (block) => block.id === selectedBlockId
+    );
+
+    const nextBlocks = currentBlocks.filter(
+      (block) => block.id !== selectedBlockId
+    );
+
+    const nextSelectedBlock =
+      nextBlocks[Math.max(0, currentIndex - 1)] || nextBlocks[0];
+
+    setSelectedBlockId(nextSelectedBlock.id);
+
+    if (isConfigurableTableBlock(nextSelectedBlock)) {
+      setRibbonTab("table");
+      setMergeMode("column");
+    } else {
+      setRibbonTab("home");
+      setMergeMode("cell");
+    }
+
+    return nextBlocks;
+  });
+
+  setStatusMessage(`${deletedTitle} deleted from the template.`);
+}
   function isConfigurableTableBlock(block?: TemplateBlock) {
   return (
     block?.kind === "summary" ||
@@ -1650,9 +1772,13 @@ async function publishQueue() {
             <button className="ids-soft-btn" type="button">
               🖌 Format Painter
             </button>
-            <button className="ids-soft-btn" type="button">
-              ⧉ Duplicate tile
-            </button>
+            <button
+  className="ids-soft-btn"
+  onClick={duplicateSelectedBlock}
+  type="button"
+>
+  ⧉ Duplicate block
+</button>
             <div className="ids-group-label">Clipboard</div>
           </div>
 
@@ -1724,9 +1850,14 @@ async function publishQueue() {
             <button className="ids-soft-btn" type="button">
               + Add page
             </button>
-            <button className="ids-soft-btn disabled" type="button">
-              × Delete page
-            </button>
+            <button
+  className={`ids-soft-btn danger ${blocks.length <= 1 ? "disabled" : ""}`}
+  disabled={blocks.length <= 1}
+  onClick={deleteSelectedBlock}
+  type="button"
+>
+  × Delete block
+</button>
             <div className="ids-group-label">Pages</div>
           </div>
         </div>
@@ -1771,12 +1902,27 @@ async function publishQueue() {
           </div>
 
           <div className="ids-ribbon-group">
-            <button className="ids-soft-btn disabled" type="button">
-              ↑ Move up
-            </button>
-            <button className="ids-soft-btn disabled" type="button">
-              ↓ Move down
-            </button>
+            <button
+  className={`ids-soft-btn ${selectedBlockIndex <= 0 ? "disabled" : ""}`}
+  disabled={selectedBlockIndex <= 0}
+  onClick={() => moveSelectedBlock("up")}
+  type="button"
+>
+  ↑ Move up
+</button>
+
+<button
+  className={`ids-soft-btn ${
+    selectedBlockIndex === -1 || selectedBlockIndex >= blocks.length - 1
+      ? "disabled"
+      : ""
+  }`}
+  disabled={selectedBlockIndex === -1 || selectedBlockIndex >= blocks.length - 1}
+  onClick={() => moveSelectedBlock("down")}
+  type="button"
+>
+  ↓ Move down
+</button>
             <div className="ids-group-label">Order in flow</div>
           </div>
 
@@ -4661,6 +4807,20 @@ function renderPublish() {
 .ids-template-table.table-header-light thead tr:nth-child(2) th {
   background: rgba(248, 250, 252, 0.9);
   color: #0f172a;
+}
+  .ids-soft-btn.danger {
+  border-color: rgba(248, 113, 113, 0.35);
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.16);
+}
+
+.ids-soft-btn.danger:hover {
+  background: rgba(127, 29, 29, 0.28);
+}
+
+.ids-soft-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
       `}</style>
     </main>
