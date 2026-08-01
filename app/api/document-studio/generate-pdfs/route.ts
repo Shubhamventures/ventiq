@@ -1,666 +1,1028 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 
-export const runtime = "nodejs";
+type TableColumnConfig = {
+  id: string;
+  header: string;
+  fieldKey: string;
+  width: number;
+  format: "text" | "date" | "currency" | "number" | "percentage";
+  align: "left" | "center" | "right";
+};
 
-type DataRow = Record<string, unknown>;
+type TableBlockConfig = {
+  repeatSource:
+    | "transactions"
+    | "pnl"
+    | "cashflows"
+    | "capitalAccount"
+    | "taxBreakup"
+    | "distributionDetails"
+    | "unitMovements"
+    | "portfolioPerformance"
+    | "genericTable";
+  repeatRows: boolean;
+  borderPreset: "all" | "outer" | "horizontal" | "none";
+  headerStyle: "dark" | "light" | "gold" | "minimal";
+  columns: TableColumnConfig[];
+};
 
-const STORAGE_BUCKET = "document-studio-generated-pdfs";
+type ChartConfig = {
+  chartType: "bar" | "line" | "waterfall" | "donut";
+  series: "current_nav" | "distribution_amount" | "tvpi" | "irr";
+  title: string;
+};
+
+type TemplateBlock = {
+  id: string;
+  kind:
+    | "letterhead"
+    | "identity"
+    | "summary"
+    | "transactions"
+    | "financial"
+    | "performance"
+    | "chart"
+    | "notes"
+    | "signature";
+  title: string;
+  subtitle: string;
+  content?: string;
+  repeatSource?: TableBlockConfig["repeatSource"];
+  tableConfig?: TableBlockConfig;
+  chartConfig?: ChartConfig;
+};
+
+type GeneratedDocument = {
+  id: string;
+  template_id?: string | null;
+  investor_id?: string | null;
+  investor_code?: string | null;
+  investor_name?: string | null;
+  email?: string | null;
+  document_type?: string | null;
+  document_name?: string | null;
+  file_name?: string | null;
+  preview_data?: Record<string, unknown> | null;
+};
+
+type BatchRecord = {
+  id: string;
+  template_id?: string | null;
+  document_type?: string | null;
+  batch_name?: string | null;
+};
+
+const bucketName = "document-studio-generated-pdfs";
 
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
-    return null;
+    throw new Error("Missing Supabase environment variables.");
   }
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       persistSession: false,
+      autoRefreshToken: false,
     },
   });
-}
-
-function getString(row: DataRow | null | undefined, keys: string[], fallback = "") {
-  if (!row) return fallback;
-
-  for (const key of keys) {
-    const value = row[key];
-
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
-
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return String(value);
-    }
-  }
-
-  return fallback;
-}
-
-function getNumber(row: DataRow | null | undefined, keys: string[]) {
-  if (!row) return 0;
-
-  for (const key of keys) {
-    const value = row[key];
-
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return value;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() &&
-      !Number.isNaN(Number(value))
-    ) {
-      return Number(value);
-    }
-  }
-
-  return 0;
-}
-
-function formatInr(value: number) {
-  if (!Number.isFinite(value) || value <= 0) {
-    return "INR 0";
-  }
-
-  return `INR ${new Intl.NumberFormat("en-IN", {
-    maximumFractionDigits: 0,
-  }).format(value)}`;
 }
 
 function safePdfText(value: unknown) {
   return String(value ?? "")
     .replace(/₹/g, "INR ")
-    .replace(/[^\x00-\x7F]/g, "-")
-    .slice(0, 120);
+    .replace(/–/g, "-")
+    .replace(/—/g, "-")
+    .replace(/×/g, "x")
+    .replace(/↻/g, "")
+    .replace(/[^\x20-\x7E]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function cleanFilePart(value: string) {
-  return value.replace(/[^a-zA-Z0-9]/g, "_").replace(/_+/g, "_");
-}
+function formatAmount(value: unknown) {
+  const text = safePdfText(value);
 
-async function safeSelectRows(
-  supabase: any,
-  tableName: string,
-  options?: {
-    eq?: {
-      column: string;
-      value: string;
-    };
-    orderBy?: string;
+  if (!text) {
+    return "-";
   }
-) {
-  try {
-    let query = supabase.from(tableName).select("*");
 
-    if (options?.eq) {
-      query = query.eq(options.eq.column, options.eq.value);
-    }
-
-    if (options?.orderBy) {
-      query = query.order(options.orderBy, { ascending: false });
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.warn(`Document Studio PDF skipped ${tableName}:`, error.message);
-      return [] as DataRow[];
-    }
-
-    return (data ?? []) as DataRow[];
-  } catch (error) {
-    console.warn(`Document Studio PDF skipped ${tableName}:`, error);
-    return [] as DataRow[];
-  }
+  return text.replace(/^INR\s*/, "INR ");
 }
 
-async function createInvestorPdf(params: {
-  documentType: string;
-  investorName: string;
-  investorCode: string;
-  fundName: string;
-  commitmentAmount: string;
-  capitalCalled: string;
-  uncalledCapital: string;
-  currentNav: string;
-  distributionAmount: string;
-  dpi: string;
-  tvpi: string;
-  irr: string;
-  transactions: {
-    date: string;
-    description: string;
-    amount: string;
-  }[];
+function renderTemplateText(template: string, data: Record<string, string>) {
+  return safePdfText(
+    template.replace(/\{([^}]+)\}/g, (_match, key: string) => {
+      const cleanKey = key.trim();
+      return data[cleanKey] ?? `{${cleanKey}}`;
+    })
+  );
+}
+
+function getFieldValue(fieldKey: string, data: Record<string, string>) {
+  const fallbackValues: Record<string, string> = {
+    transaction_date: "24-Apr-24",
+    transaction_description: "Units Allotment",
+    transaction_type: "Capital Call",
+    transaction_amount: "INR 1,98,82,000",
+    units: "1,98,820",
+    nav: "INR 100.00",
+
+    particular: "Interest / Fee Income",
+    reference: "A",
+    amount: "INR 8,38,428",
+    formula: "C = A + B",
+
+    cashflow_date: "24-Apr-24",
+    cashflow_type: "Capital Call",
+    remarks: "Investor cashflow",
+
+    opening_capital: "INR 1,50,00,000",
+    capital_contribution: "INR 50,00,000",
+    income_allocation: "INR 8,44,514",
+    distribution: "INR 5,91,981",
+    closing_capital: "INR 1,82,40,000",
+
+    income_head: "Interest income",
+    gross_income: "INR 8,44,514",
+    tds: "INR 84,451",
+    net_income: "INR 7,60,063",
+
+    distribution_date: "02-Jul-24",
+    gross_distribution: "INR 5,91,981",
+    tax_withheld: "INR 59,198",
+    net_distribution: "INR 5,32,783",
+
+    unit_date: "24-Apr-24",
+    opening_units: "0",
+    units_added: "1,98,820",
+    units_redeemed: "0",
+    closing_units: "1,98,820",
+
+    company_name: "Portfolio Co A",
+    invested_amount: "INR 50,00,000",
+    current_value: data.current_nav || "INR 1,82,40,000",
+    moic: "1.64x",
+    irr: data.irr || "18.7%",
+
+    particulars: "Sample line item",
+  };
+
+  return data[fieldKey] ?? fallbackValues[fieldKey] ?? `{${fieldKey}}`;
+}
+
+function getDefaultTableConfig(
+  repeatSource: TableBlockConfig["repeatSource"]
+): TableBlockConfig {
+  const fieldMap: Record<TableBlockConfig["repeatSource"], TableColumnConfig[]> = {
+    transactions: [
+      { id: "date", header: "Date", fieldKey: "transaction_date", width: 18, format: "date", align: "left" },
+      { id: "desc", header: "Description", fieldKey: "transaction_description", width: 42, format: "text", align: "left" },
+      { id: "type", header: "Type", fieldKey: "transaction_type", width: 20, format: "text", align: "left" },
+      { id: "amount", header: "Amount", fieldKey: "transaction_amount", width: 20, format: "currency", align: "right" },
+    ],
+    pnl: [
+      { id: "particular", header: "Particular", fieldKey: "particular", width: 42, format: "text", align: "left" },
+      { id: "reference", header: "Reference", fieldKey: "reference", width: 18, format: "text", align: "left" },
+      { id: "amount", header: "Amount", fieldKey: "amount", width: 22, format: "currency", align: "right" },
+      { id: "formula", header: "Formula", fieldKey: "formula", width: 18, format: "text", align: "left" },
+    ],
+    cashflows: [
+      { id: "date", header: "Cashflow Date", fieldKey: "cashflow_date", width: 25, format: "date", align: "left" },
+      { id: "type", header: "Cashflow Type", fieldKey: "cashflow_type", width: 35, format: "text", align: "left" },
+      { id: "amount", header: "Amount", fieldKey: "amount", width: 25, format: "currency", align: "right" },
+      { id: "remarks", header: "Remarks", fieldKey: "remarks", width: 15, format: "text", align: "left" },
+    ],
+    capitalAccount: [
+      { id: "opening", header: "Opening Capital", fieldKey: "opening_capital", width: 22, format: "currency", align: "right" },
+      { id: "contribution", header: "Capital Contribution", fieldKey: "capital_contribution", width: 24, format: "currency", align: "right" },
+      { id: "income", header: "Income Allocation", fieldKey: "income_allocation", width: 22, format: "currency", align: "right" },
+      { id: "closing", header: "Closing Capital", fieldKey: "closing_capital", width: 22, format: "currency", align: "right" },
+    ],
+    taxBreakup: [
+      { id: "head", header: "Income Head", fieldKey: "income_head", width: 34, format: "text", align: "left" },
+      { id: "gross", header: "Gross Income", fieldKey: "gross_income", width: 22, format: "currency", align: "right" },
+      { id: "tds", header: "TDS", fieldKey: "tds", width: 22, format: "currency", align: "right" },
+      { id: "net", header: "Net Income", fieldKey: "net_income", width: 22, format: "currency", align: "right" },
+    ],
+    distributionDetails: [
+      { id: "date", header: "Distribution Date", fieldKey: "distribution_date", width: 25, format: "date", align: "left" },
+      { id: "gross", header: "Gross Distribution", fieldKey: "gross_distribution", width: 25, format: "currency", align: "right" },
+      { id: "tax", header: "Tax Withheld", fieldKey: "tax_withheld", width: 25, format: "currency", align: "right" },
+      { id: "net", header: "Net Distribution", fieldKey: "net_distribution", width: 25, format: "currency", align: "right" },
+    ],
+    unitMovements: [
+      { id: "date", header: "Date", fieldKey: "unit_date", width: 22, format: "date", align: "left" },
+      { id: "opening", header: "Opening Units", fieldKey: "opening_units", width: 26, format: "number", align: "right" },
+      { id: "added", header: "Units Added", fieldKey: "units_added", width: 26, format: "number", align: "right" },
+      { id: "closing", header: "Closing Units", fieldKey: "closing_units", width: 26, format: "number", align: "right" },
+    ],
+    portfolioPerformance: [
+      { id: "company", header: "Company", fieldKey: "company_name", width: 34, format: "text", align: "left" },
+      { id: "invested", header: "Invested Amount", fieldKey: "invested_amount", width: 24, format: "currency", align: "right" },
+      { id: "value", header: "Current Value", fieldKey: "current_value", width: 24, format: "currency", align: "right" },
+      { id: "moic", header: "MOIC", fieldKey: "moic", width: 18, format: "number", align: "right" },
+    ],
+    genericTable: [
+      { id: "particulars", header: "Particulars", fieldKey: "particulars", width: 70, format: "text", align: "left" },
+      { id: "amount", header: "Amount", fieldKey: "amount", width: 30, format: "currency", align: "right" },
+    ],
+  };
+
+  return {
+    repeatSource,
+    repeatRows: true,
+    borderPreset: "all",
+    headerStyle: "gold",
+    columns: fieldMap[repeatSource],
+  };
+}
+
+function getDefaultBlocks(documentType: string): TemplateBlock[] {
+  const common: TemplateBlock[] = [
+    {
+      id: "letterhead",
+      kind: "letterhead",
+      title: "Letterhead",
+      subtitle: "Fund logo and statement details",
+      content: "Registered AIF | GIFT City",
+    },
+    {
+      id: "identity",
+      kind: "identity",
+      title: "Investor identity block",
+      subtitle: "Investor name, folio and report details",
+    },
+  ];
+
+  const signature: TemplateBlock = {
+    id: "signature",
+    kind: "signature",
+    title: "Signature block",
+    subtitle: "Authorized signatory and generation date",
+    content: "Authorized Signatory",
+  };
+
+  if (documentType === "Capital Call Notice") {
+    return [
+      ...common,
+      {
+        id: "capital-call-note",
+        kind: "notes",
+        title: "Capital call notice text",
+        subtitle: "Purpose, amount due and due date wording",
+        content:
+          "Dear {investor_name}, this is to notify you of a capital call for {fund_name}. Please remit the called amount as per the fund records on or before the due date mentioned in this notice.",
+      },
+      {
+        id: "capital-call-summary",
+        kind: "summary",
+        title: "Capital call summary",
+        subtitle: "Commitment, called capital and uncalled capital",
+        repeatSource: "capitalAccount",
+        tableConfig: getDefaultTableConfig("capitalAccount"),
+      },
+      signature,
+    ];
+  }
+
+  if (documentType === "Distribution Notice") {
+    return [
+      ...common,
+      {
+        id: "distribution-note",
+        kind: "notes",
+        title: "Distribution notice text",
+        subtitle: "Distribution communication wording",
+        content:
+          "Dear {investor_name}, we are pleased to inform you that a distribution has been approved for {fund_name}. The distribution details are provided below.",
+      },
+      {
+        id: "distribution-breakup",
+        kind: "financial",
+        title: "Distribution breakup",
+        subtitle: "Gross distribution, tax withheld and net distribution",
+        repeatSource: "distributionDetails",
+        tableConfig: getDefaultTableConfig("distributionDetails"),
+      },
+      signature,
+    ];
+  }
+
+  if (documentType === "Form 64C" || documentType === "Form 64D") {
+    return [
+      ...common,
+      {
+        id: "tax-breakup",
+        kind: "financial",
+        title: `${documentType} income breakup`,
+        subtitle: "Income head, gross income, TDS and net income",
+        repeatSource: "taxBreakup",
+        tableConfig: getDefaultTableConfig("taxBreakup"),
+      },
+      {
+        id: "tax-note",
+        kind: "notes",
+        title: `${documentType} note`,
+        subtitle: "Tax reporting note",
+        content:
+          "This document captures income and tax information as per the records of {fund_name}. Investors should consult their tax advisors.",
+      },
+      signature,
+    ];
+  }
+
+  return [
+    ...common,
+    {
+      id: "summary",
+      kind: "summary",
+      title: "Capital account summary",
+      subtitle: "Commitment, called capital, uncalled capital and NAV",
+      repeatSource: "capitalAccount",
+      tableConfig: getDefaultTableConfig("capitalAccount"),
+    },
+    {
+      id: "transactions",
+      kind: "transactions",
+      title: "Investor transaction statement",
+      subtitle: "Capital calls, distributions, units and NAV movements",
+      repeatSource: "transactions",
+      tableConfig: getDefaultTableConfig("transactions"),
+    },
+    {
+      id: "financial",
+      kind: "financial",
+      title: "Statement of income and distribution",
+      subtitle: "Income, expenses, net income and payout",
+      repeatSource: "pnl",
+      tableConfig: getDefaultTableConfig("pnl"),
+    },
+    {
+      id: "performance",
+      kind: "performance",
+      title: "Metrics table",
+      subtitle: "DPI, TVPI, IRR and distribution metrics",
+    },
+    {
+      id: "notes",
+      kind: "notes",
+      title: "Notes",
+      subtitle: "Narrative note and disclaimer",
+      content:
+        "This statement is generated based on the books and records of the Fund as on {report_date}.",
+    },
+    signature,
+  ];
+}
+
+function normalizeBlocks(value: unknown, documentType: string): TemplateBlock[] {
+  if (!Array.isArray(value)) {
+    return getDefaultBlocks(documentType);
+  }
+
+  const blocks = value
+    .map((item) => item as Partial<TemplateBlock>)
+    .filter((item) => item.kind)
+    .map((item, index): TemplateBlock => {
+      const repeatSource =
+        item.tableConfig?.repeatSource ||
+        item.repeatSource ||
+        (item.kind === "summary"
+          ? "capitalAccount"
+          : item.kind === "financial"
+          ? "pnl"
+          : item.kind === "transactions"
+          ? "transactions"
+          : undefined);
+
+      return {
+        id: item.id || `block-${index}`,
+        kind: item.kind as TemplateBlock["kind"],
+        title: item.title || "Document block",
+        subtitle: item.subtitle || "",
+        content: item.content,
+        repeatSource,
+        tableConfig: repeatSource
+          ? {
+              ...getDefaultTableConfig(repeatSource),
+              ...item.tableConfig,
+              repeatSource,
+              columns:
+                item.tableConfig?.columns && item.tableConfig.columns.length > 0
+                  ? item.tableConfig.columns
+                  : getDefaultTableConfig(repeatSource).columns,
+            }
+          : undefined,
+        chartConfig: item.chartConfig,
+      };
+    });
+
+  return blocks.length > 0 ? blocks : getDefaultBlocks(documentType);
+}
+
+function makeData(document: GeneratedDocument, documentType: string) {
+  const previewData =
+    document.preview_data && typeof document.preview_data === "object"
+      ? (document.preview_data as Record<string, unknown>)
+      : {};
+
+  const mergedFields =
+    previewData.mergedFields && typeof previewData.mergedFields === "object"
+      ? (previewData.mergedFields as Record<string, unknown>)
+      : {};
+
+  const investorName =
+    safePdfText(mergedFields.investor_name || document.investor_name || "Investor");
+  const investorCode =
+    safePdfText(mergedFields.investor_code || document.investor_code || "INV-0000");
+
+  return {
+    investor_name: investorName,
+    investor_code: investorCode,
+    investor_type: safePdfText(mergedFields.investor_type || "Investor"),
+    fund_name: safePdfText(mergedFields.fund_name || "VENTIQ Capital Fund I"),
+    fund_address: safePdfText(mergedFields.fund_address || "GIFT City, Gandhinagar"),
+    statement_period: safePdfText(mergedFields.statement_period || "Q1 FY 2025-26"),
+    report_date: safePdfText(mergedFields.report_date || "30-Jun-2025"),
+    commitment_amount: formatAmount(mergedFields.commitment_amount || "INR 2,50,00,000"),
+    capital_called: formatAmount(mergedFields.capital_called || "INR 1,50,00,000"),
+    uncalled_capital: formatAmount(mergedFields.uncalled_capital || "INR 1,00,00,000"),
+    current_nav: formatAmount(mergedFields.current_nav || "INR 1,82,40,000"),
+    distribution_amount: formatAmount(mergedFields.distribution_amount || "INR 42,00,000"),
+    dpi: safePdfText(mergedFields.dpi || "0.28x"),
+    tvpi: safePdfText(mergedFields.tvpi || "1.49x"),
+    irr: safePdfText(mergedFields.irr || "18.7%"),
+    generated_on: new Date().toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }),
+    document_type: safePdfText(documentType),
+  };
+}
+
+function drawWrappedText(args: {
+  page: PDFPage;
+  text: string;
+  x: number;
+  y: number;
+  maxWidth: number;
+  size: number;
+  font: PDFFont;
+  color?: ReturnType<typeof rgb>;
+  lineHeight?: number;
 }) {
-  const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([595.28, 841.89]);
+  const {
+    page,
+    text,
+    x,
+    y,
+    maxWidth,
+    size,
+    font,
+    color = rgb(0.07, 0.1, 0.16),
+    lineHeight = size + 4,
+  } = args;
 
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const words = safePdfText(text).split(" ");
+  const lines: string[] = [];
+  let currentLine = "";
+
+  for (const word of words) {
+    const candidate = currentLine ? `${currentLine} ${word}` : word;
+    const candidateWidth = font.widthOfTextAtSize(candidate, size);
+
+    if (candidateWidth <= maxWidth || !currentLine) {
+      currentLine = candidate;
+    } else {
+      lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+
+  let nextY = y;
+
+  for (const line of lines) {
+    page.drawText(line, {
+      x,
+      y: nextY,
+      size,
+      font,
+      color,
+    });
+    nextY -= lineHeight;
+  }
+
+  return nextY;
+}
+
+async function createPdfForDocument(args: {
+  document: GeneratedDocument;
+  blocks: TemplateBlock[];
+  documentType: string;
+}) {
+  const { document, blocks, documentType } = args;
+
+  const pdfDoc = await PDFDocument.create();
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-  const navy = rgb(0.03, 0.1, 0.23);
-  const gold = rgb(0.6, 0.42, 0.08);
-  const grey = rgb(0.39, 0.45, 0.55);
-  const lightGrey = rgb(0.93, 0.93, 0.93);
+  const pageSize: [number, number] = [595.28, 841.89];
+  const margin = 42;
+  const usableWidth = pageSize[0] - margin * 2;
 
-  let y = 790;
+  let page = pdfDoc.addPage(pageSize);
+  let y = pageSize[1] - margin;
 
-  page.drawText(safePdfText(params.fundName), {
-    x: 48,
-    y,
-    size: 18,
-    font: boldFont,
-    color: navy,
-  });
+  const data = makeData(document, documentType);
 
-  page.drawText("VENTIQ", {
-    x: 480,
-    y,
-    size: 14,
-    font: boldFont,
-    color: navy,
-  });
+  function ensureSpace(requiredHeight: number) {
+    if (y - requiredHeight > margin) {
+      return;
+    }
 
-  y -= 22;
+    page = pdfDoc.addPage(pageSize);
+    y = pageSize[1] - margin;
+  }
 
-  page.drawText(safePdfText(params.documentType), {
-    x: 48,
-    y,
-    size: 11,
-    font,
-    color: grey,
-  });
+  function sectionTitle(title: string, subtitle?: string) {
+    ensureSpace(52);
 
-  page.drawText("Generated from Investor Document Studio", {
-    x: 320,
-    y,
-    size: 9,
-    font,
-    color: gold,
-  });
-
-  y -= 16;
-
-  page.drawLine({
-    start: { x: 48, y },
-    end: { x: 548, y },
-    thickness: 1.4,
-    color: navy,
-  });
-
-  y -= 38;
-
-  page.drawText("Investor Details", {
-    x: 48,
-    y,
-    size: 13,
-    font: boldFont,
-    color: navy,
-  });
-
-  y -= 18;
-
-  const investorRows = [
-    ["Investor Name", params.investorName],
-    ["Folio / Investor Code", params.investorCode],
-    ["Report Date", "30-Jun-2025"],
-    ["Statement Period", "Q1 FY 2025-26"],
-  ];
-
-  investorRows.forEach(([label, value]) => {
-    page.drawText(safePdfText(label), {
-      x: 52,
+    page.drawText(safePdfText(title), {
+      x: margin,
       y,
-      size: 9,
-      font,
-      color: grey,
-    });
-
-    page.drawText(safePdfText(value), {
-      x: 190,
-      y,
-      size: 10,
+      size: 13,
       font: boldFont,
-      color: navy,
+      color: rgb(0.07, 0.1, 0.16),
     });
 
-    y -= 16;
-  });
+    y -= 15;
 
-  y -= 18;
+    if (subtitle) {
+      y = drawWrappedText({
+        page,
+        text: subtitle,
+        x: margin,
+        y,
+        maxWidth: usableWidth,
+        size: 8.5,
+        font: regularFont,
+        color: rgb(0.39, 0.45, 0.55),
+        lineHeight: 11,
+      });
+    }
 
-  page.drawRectangle({
-    x: 48,
-    y: y - 18,
-    width: 500,
-    height: 22,
-    color: lightGrey,
-  });
+    y -= 8;
+  }
 
-  page.drawText("Capital Account Summary", {
-    x: 215,
-    y: y - 11,
-    size: 11,
-    font: boldFont,
-    color: navy,
-  });
+  function drawKeyValueGrid(items: { label: string; value: string }[]) {
+    const rowHeight = 26;
+    const labelWidth = 120;
+    const valueWidth = usableWidth - labelWidth;
 
-  y -= 42;
+    ensureSpace(items.length * rowHeight + 10);
 
-  const summaryRows = [
-    ["Commitment Amount", params.commitmentAmount],
-    ["Capital Called", params.capitalCalled],
-    ["Uncalled Capital", params.uncalledCapital],
-    ["Current NAV", params.currentNav],
-    ["Distribution Amount", params.distributionAmount],
-  ];
+    items.forEach((item, index) => {
+      const rowY = y - index * rowHeight;
 
-  summaryRows.forEach(([label, value]) => {
-    page.drawText(safePdfText(label), {
-      x: 60,
-      y,
-      size: 10,
-      font,
-      color: navy,
+      page.drawRectangle({
+        x: margin,
+        y: rowY - 16,
+        width: usableWidth,
+        height: rowHeight,
+        borderWidth: 0.5,
+        borderColor: rgb(0.84, 0.82, 0.77),
+        color: index % 2 === 0 ? rgb(0.99, 0.97, 0.93) : rgb(1, 1, 1),
+      });
+
+      page.drawText(safePdfText(item.label), {
+        x: margin + 8,
+        y: rowY - 6,
+        size: 8,
+        font: boldFont,
+        color: rgb(0.39, 0.45, 0.55),
+      });
+
+      page.drawText(safePdfText(item.value), {
+        x: margin + labelWidth,
+        y: rowY - 6,
+        size: 8.5,
+        font: regularFont,
+        color: rgb(0.07, 0.1, 0.16),
+        maxWidth: valueWidth - 10,
+      });
     });
 
-    page.drawText(safePdfText(value), {
-      x: 380,
-      y,
-      size: 10,
+    y -= items.length * rowHeight + 18;
+  }
+
+  function drawTable(block: TemplateBlock) {
+    const repeatSource =
+      block.tableConfig?.repeatSource ||
+      block.repeatSource ||
+      (block.kind === "summary"
+        ? "capitalAccount"
+        : block.kind === "financial"
+        ? "pnl"
+        : "transactions");
+
+    const tableConfig =
+      block.tableConfig && block.tableConfig.columns?.length
+        ? block.tableConfig
+        : getDefaultTableConfig(repeatSource);
+
+    const columns = tableConfig.columns;
+    const rowCount = tableConfig.repeatRows ? 3 : 1;
+    const headerHeight = 24;
+    const rowHeight = 24;
+    const tableHeight = headerHeight * 2 + rowHeight * rowCount + 22;
+
+    sectionTitle(block.title, block.subtitle);
+    ensureSpace(tableHeight);
+
+    const headerColor =
+      tableConfig.headerStyle === "dark"
+        ? rgb(0.03, 0.1, 0.23)
+        : tableConfig.headerStyle === "light" || tableConfig.headerStyle === "minimal"
+        ? rgb(0.97, 0.94, 0.88)
+        : rgb(0.71, 0.51, 0.08);
+
+    page.drawRectangle({
+      x: margin,
+      y: y - headerHeight,
+      width: usableWidth,
+      height: headerHeight,
+      color: headerColor,
+    });
+
+    page.drawText(safePdfText(block.title || "Table"), {
+      x: margin + 8,
+      y: y - 15,
+      size: 9,
       font: boldFont,
-      color: navy,
+      color:
+        tableConfig.headerStyle === "light" || tableConfig.headerStyle === "minimal"
+          ? rgb(0.07, 0.1, 0.16)
+          : rgb(1, 1, 1),
     });
 
-    y -= 18;
-  });
+    y -= headerHeight;
 
-  y -= 18;
+    let columnX = margin;
 
-  page.drawRectangle({
-    x: 48,
-    y: y - 18,
-    width: 500,
-    height: 22,
-    color: lightGrey,
-  });
+    columns.forEach((column) => {
+      const columnWidth = usableWidth * (column.width / 100);
 
-  page.drawText("Transactions", {
-    x: 250,
-    y: y - 11,
-    size: 11,
-    font: boldFont,
-    color: navy,
-  });
+      page.drawRectangle({
+        x: columnX,
+        y: y - headerHeight,
+        width: columnWidth,
+        height: headerHeight,
+        borderWidth: tableConfig.borderPreset === "none" ? 0 : 0.5,
+        borderColor: rgb(0.84, 0.82, 0.77),
+        color: rgb(0.99, 0.97, 0.93),
+      });
 
-  y -= 42;
+      page.drawText(safePdfText(column.header), {
+        x: columnX + 5,
+        y: y - 15,
+        size: 7.5,
+        font: boldFont,
+        color: rgb(0.07, 0.1, 0.16),
+        maxWidth: Math.max(20, columnWidth - 10),
+      });
 
-  page.drawText("Date", {
-    x: 55,
-    y,
-    size: 10,
-    font: boldFont,
-    color: navy,
-  });
-
-  page.drawText("Description", {
-    x: 145,
-    y,
-    size: 10,
-    font: boldFont,
-    color: navy,
-  });
-
-  page.drawText("Amount", {
-    x: 455,
-    y,
-    size: 10,
-    font: boldFont,
-    color: navy,
-  });
-
-  y -= 16;
-
-  params.transactions.slice(0, 12).forEach((transaction) => {
-    page.drawText(safePdfText(transaction.date || "-"), {
-      x: 55,
-      y,
-      size: 9,
-      font,
-      color: navy,
+      columnX += columnWidth;
     });
 
-    page.drawText(safePdfText(transaction.description || "-"), {
-      x: 145,
-      y,
-      size: 9,
-      font,
-      color: navy,
-    });
+    y -= headerHeight;
 
-    page.drawText(safePdfText(transaction.amount || "INR 0"), {
-      x: 430,
-      y,
-      size: 9,
-      font,
-      color: navy,
-    });
+    for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+      let cellX = margin;
 
-    y -= 16;
-  });
+      columns.forEach((column) => {
+        const columnWidth = usableWidth * (column.width / 100);
 
-  y -= 26;
+        page.drawRectangle({
+          x: cellX,
+          y: y - rowHeight,
+          width: columnWidth,
+          height: rowHeight,
+          borderWidth: tableConfig.borderPreset === "none" ? 0 : 0.4,
+          borderColor: rgb(0.87, 0.85, 0.8),
+          color: rowIndex % 2 === 0 ? rgb(1, 1, 1) : rgb(0.99, 0.97, 0.94),
+        });
 
-  page.drawRectangle({
-    x: 48,
-    y: y - 18,
-    width: 500,
-    height: 22,
-    color: lightGrey,
-  });
+        const value = getFieldValue(column.fieldKey, data);
+        const textWidth = regularFont.widthOfTextAtSize(safePdfText(value), 7.5);
+        const textX =
+          column.align === "right"
+            ? cellX + columnWidth - textWidth - 5
+            : column.align === "center"
+            ? cellX + columnWidth / 2 - textWidth / 2
+            : cellX + 5;
 
-  page.drawText("Performance", {
-    x: 255,
-    y: y - 11,
-    size: 11,
-    font: boldFont,
-    color: navy,
-  });
+        page.drawText(safePdfText(value), {
+          x: Math.max(cellX + 5, textX),
+          y: y - 15,
+          size: 7.5,
+          font: regularFont,
+          color: rgb(0.07, 0.1, 0.16),
+          maxWidth: Math.max(20, columnWidth - 10),
+        });
 
-  y -= 42;
+        cellX += columnWidth;
+      });
 
-  const metrics = [
-    ["DPI", params.dpi],
-    ["TVPI", params.tvpi],
-    ["IRR", params.irr],
-  ];
+      y -= rowHeight;
+    }
 
-  metrics.forEach(([label, value], index) => {
-    const x = 65 + index * 160;
+    page.drawText(
+      safePdfText(
+        `${tableConfig.repeatRows ? "Repeats from" : "Static table from"} ${tableConfig.repeatSource} - ${columns.length} mapped columns`
+      ),
+      {
+        x: margin,
+        y: y - 12,
+        size: 7,
+        font: regularFont,
+        color: rgb(0.57, 0.43, 0.07),
+      }
+    );
 
-    page.drawText(safePdfText(label), {
-      x,
-      y,
-      size: 9,
-      font,
-      color: grey,
-    });
+    y -= 32;
+  }
 
-    page.drawText(safePdfText(value), {
-      x,
-      y: y - 18,
-      size: 15,
-      font: boldFont,
-      color: navy,
-    });
-  });
+  blocks.forEach((block) => {
+    if (block.kind === "letterhead") {
+      ensureSpace(62);
 
-  y -= 90;
+      page.drawText(data.fund_name, {
+        x: margin,
+        y,
+        size: 17,
+        font: boldFont,
+        color: rgb(0.03, 0.1, 0.23),
+      });
 
-  page.drawLine({
-    start: { x: 48, y },
-    end: { x: 548, y },
-    thickness: 0.8,
-    color: rgb(0.78, 0.78, 0.78),
-  });
+      page.drawText(safePdfText(block.content || data.fund_address), {
+        x: margin,
+        y: y - 16,
+        size: 9,
+        font: regularFont,
+        color: rgb(0.39, 0.45, 0.55),
+      });
 
-  y -= 24;
+      page.drawText("VENTIQ", {
+        x: pageSize[0] - margin - 62,
+        y,
+        size: 12,
+        font: boldFont,
+        color: rgb(0.03, 0.1, 0.23),
+      });
 
-  page.drawText(safePdfText(`For ${params.fundName}`), {
-    x: 48,
-    y,
-    size: 10,
-    font: boldFont,
-    color: navy,
-  });
+      page.drawLine({
+        start: { x: margin, y: y - 30 },
+        end: { x: pageSize[0] - margin, y: y - 30 },
+        thickness: 1.2,
+        color: rgb(0.71, 0.51, 0.08),
+      });
 
-  page.drawText("Authorized Signatory", {
-    x: 390,
-    y,
-    size: 10,
-    font: boldFont,
-    color: navy,
+      y -= 52;
+      return;
+    }
+
+    if (block.kind === "identity") {
+      sectionTitle(data.document_type);
+      drawKeyValueGrid([
+        { label: "Investor Name", value: data.investor_name },
+        { label: "Investor Code", value: data.investor_code },
+        { label: "Investor Type", value: data.investor_type },
+        { label: "Statement Period", value: data.statement_period },
+        { label: "Report Date", value: data.report_date },
+      ]);
+      return;
+    }
+
+    if (
+      block.kind === "summary" ||
+      block.kind === "transactions" ||
+      block.kind === "financial"
+    ) {
+      drawTable(block);
+      return;
+    }
+
+    if (block.kind === "performance") {
+      sectionTitle(block.title || "Performance Metrics", block.subtitle);
+      drawKeyValueGrid([
+        { label: "DPI", value: data.dpi },
+        { label: "TVPI", value: data.tvpi },
+        { label: "IRR", value: data.irr },
+        { label: "Distribution", value: data.distribution_amount },
+      ]);
+      return;
+    }
+
+    if (block.kind === "chart") {
+      sectionTitle(block.chartConfig?.title || block.title || "Performance Chart", block.subtitle);
+      ensureSpace(120);
+
+      const barValues = [42, 78, 56, 92];
+      const barWidth = 42;
+      const gap = 24;
+      const chartBaseY = y - 95;
+      const startX = margin + 80;
+
+      barValues.forEach((height, index) => {
+        page.drawRectangle({
+          x: startX + index * (barWidth + gap),
+          y: chartBaseY,
+          width: barWidth,
+          height,
+          color: index === 1 ? rgb(0.71, 0.51, 0.08) : rgb(0.12, 0.37, 0.66),
+        });
+      });
+
+      page.drawText(
+        safePdfText(`Series: ${block.chartConfig?.series || "current_nav"}`),
+        {
+          x: margin,
+          y: chartBaseY - 18,
+          size: 8,
+          font: regularFont,
+          color: rgb(0.39, 0.45, 0.55),
+        }
+      );
+
+      y -= 140;
+      return;
+    }
+
+    if (block.kind === "notes") {
+      sectionTitle(block.title || "Notes", block.subtitle);
+      ensureSpace(72);
+
+      y = drawWrappedText({
+        page,
+        text: renderTemplateText(
+          block.content ||
+            "This statement is generated based on the books and records of the Fund as on {report_date}.",
+          data
+        ),
+        x: margin,
+        y,
+        maxWidth: usableWidth,
+        size: 9,
+        font: regularFont,
+        color: rgb(0.25, 0.29, 0.36),
+        lineHeight: 13,
+      });
+
+      y -= 18;
+      return;
+    }
+
+    if (block.kind === "signature") {
+      ensureSpace(80);
+
+      page.drawLine({
+        start: { x: margin, y },
+        end: { x: pageSize[0] - margin, y },
+        thickness: 0.5,
+        color: rgb(0.84, 0.82, 0.77),
+      });
+
+      y -= 28;
+
+      page.drawText(safePdfText(`For ${data.fund_name}`), {
+        x: margin,
+        y,
+        size: 10,
+        font: boldFont,
+        color: rgb(0.07, 0.1, 0.16),
+      });
+
+      page.drawText(safePdfText(block.content || "Authorized Signatory"), {
+        x: margin,
+        y: y - 16,
+        size: 9,
+        font: regularFont,
+        color: rgb(0.39, 0.45, 0.55),
+      });
+
+      page.drawText(safePdfText(`Generated on ${data.generated_on}`), {
+        x: pageSize[0] - margin - 140,
+        y,
+        size: 9,
+        font: regularFont,
+        color: rgb(0.39, 0.45, 0.55),
+      });
+
+      y -= 58;
+    }
   });
 
   return pdfDoc.save();
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
-    const supabase = getSupabaseAdmin();
+    const { batch_id } = await request.json();
 
-    if (!supabase) {
+    if (!batch_id) {
       return NextResponse.json(
-        { error: "Supabase admin client is not configured." },
-        { status: 500 }
-      );
-    }
-
-    const body = await request.json();
-    const batchId = String(body.batch_id || "").trim();
-
-    if (!batchId) {
-      return NextResponse.json(
-        { error: "Batch ID is required to generate PDFs." },
+        { error: "batch_id is required." },
         { status: 400 }
       );
     }
 
+    const supabase = getSupabaseAdmin();
+
     const { data: batch, error: batchError } = await supabase
       .from("document_studio_generation_batches")
       .select("*")
-      .eq("id", batchId)
-      .maybeSingle();
+      .eq("id", batch_id)
+      .single<BatchRecord>();
 
-    if (batchError) {
-      return NextResponse.json({ error: batchError.message }, { status: 500 });
+    if (batchError || !batch) {
+      throw new Error(batchError?.message || "Batch not found.");
     }
 
-    if (!batch) {
-      return NextResponse.json({ error: "Batch not found." }, { status: 404 });
+    const documentType = batch.document_type || "Statement of Account (SOA)";
+
+    let templateBlocks: TemplateBlock[] = getDefaultBlocks(documentType);
+
+    if (batch.template_id) {
+      const { data: template, error: templateError } = await supabase
+        .from("document_studio_templates")
+        .select("blocks_json")
+        .eq("id", batch.template_id)
+        .maybeSingle();
+
+      if (templateError) {
+        throw new Error(templateError.message);
+      }
+
+      templateBlocks = normalizeBlocks(template?.blocks_json, documentType);
     }
 
-    const { data: generatedDocuments, error: generatedError } = await supabase
+    const { data: documents, error: documentsError } = await supabase
       .from("document_studio_generated_documents")
       .select("*")
-      .eq("batch_id", batchId)
-      .in("generation_status", ["Ready", "Generated"]);
+      .eq("batch_id", batch_id)
+      .in("generation_status", ["Ready", "Generated"])
+      .returns<GeneratedDocument[]>();
 
-    if (generatedError) {
-      return NextResponse.json(
-        { error: generatedError.message },
-        { status: 500 }
-      );
+    if (documentsError) {
+      throw new Error(documentsError.message);
     }
 
-    const documentRows = (generatedDocuments ?? []) as DataRow[];
-
-    if (documentRows.length === 0) {
+    if (!documents || documents.length === 0) {
       return NextResponse.json(
-        { error: "No queued documents found for this batch." },
+        { error: "No ready documents found for this batch." },
         { status: 404 }
       );
     }
 
-    let generatedCount = 0;
-    let failedCount = 0;
-    const generatedFiles = [];
+    const generatedDocuments: {
+      investor_code?: string | null;
+      investor_name?: string | null;
+      file_name: string;
+      file_url: string;
+    }[] = [];
 
-    for (const documentRow of documentRows) {
+    let failedDocuments = 0;
+
+    for (const document of documents) {
       try {
-        const investorId = getString(documentRow, ["investor_id"]);
-        const investorCode = getString(documentRow, ["investor_code"]);
-        const investorName = getString(documentRow, ["investor_name"]);
-        const documentType = getString(documentRow, [
-          "document_type",
-          "document_category",
-        ]);
+        const investorCode = safePdfText(document.investor_code || "INV");
+        const investorName = safePdfText(document.investor_name || "Investor");
+        const cleanDocumentType = safePdfText(documentType).replace(/\s+/g, "_");
+        const fileName =
+          document.file_name ||
+          `${investorCode}_${cleanDocumentType}_${Date.now()}.pdf`;
 
-        const investorRows = investorId
-          ? await safeSelectRows(supabase, "investor_master", {
-              eq: {
-                column: "id",
-                value: investorId,
-              },
-            })
-          : investorCode
-          ? await safeSelectRows(supabase, "investor_master", {
-              eq: {
-                column: "investor_code",
-                value: investorCode,
-              },
-            })
-          : [];
-
-        const investor = investorRows[0] ?? null;
-
-        const commitmentRows = investorId
-          ? await safeSelectRows(supabase, "fund_commitments", {
-              eq: {
-                column: "investor_id",
-                value: investorId,
-              },
-            })
-          : [];
-
-        const positionRows = investorId
-          ? await safeSelectRows(supabase, "investor_financial_positions", {
-              eq: {
-                column: "investor_id",
-                value: investorId,
-              },
-            })
-          : [];
-
-        const cashflowRows = investorId
-          ? await safeSelectRows(supabase, "investor_cashflows", {
-              eq: {
-                column: "investor_id",
-                value: investorId,
-              },
-              orderBy: "cashflow_date",
-            })
-          : [];
-
-        const commitment = commitmentRows[0] ?? null;
-        const position = positionRows[0] ?? null;
-
-        const commitmentAmount =
-          getNumber(commitment, [
-            "commitment_amount",
-            "committed_amount",
-            "commitment",
-            "amount",
-          ]) ||
-          getNumber(position, ["commitment_amount", "committed_amount"]);
-
-        const capitalCalled = getNumber(position, [
-          "capital_called_till_date",
-          "capital_called",
-          "called_capital",
-          "called_amount",
-        ]);
-
-        const uncalledCapital =
-          getNumber(position, [
-            "uncalled_capital",
-            "unfunded_commitment",
-            "remaining_commitment",
-          ]) || Math.max(commitmentAmount - capitalCalled, 0);
-
-        const currentNav = getNumber(position, [
-          "current_nav",
-          "nav",
-          "latest_nav",
-        ]);
-
-        const distributions = getNumber(position, [
-          "distributions_till_date",
-          "distributions",
-          "distributed_amount",
-        ]);
-
-        const transactions =
-          cashflowRows.length > 0
-            ? cashflowRows.slice(0, 25).map((row) => ({
-                date: getString(row, [
-                  "cashflow_date",
-                  "transaction_date",
-                  "date",
-                ]),
-                description: getString(row, [
-                  "description",
-                  "cashflow_type",
-                  "transaction_type",
-                ]),
-                amount: formatInr(
-                  getNumber(row, [
-                    "amount",
-                    "cashflow_amount",
-                    "transaction_amount",
-                  ])
-                ),
-              }))
-            : [
-                {
-                  date: "24-Apr-24",
-                  description: "Units Allotment",
-                  amount: "INR 1,98,82,000",
-                },
-                {
-                  date: "24-Apr-24",
-                  description: "Setup Fees (One-time)",
-                  amount: "INR 1,18,000",
-                },
-                {
-                  date: "02-Jul-24",
-                  description: "Quarterly Income Distribution June 2024",
-                  amount: "INR 5,91,981",
-                },
-              ];
-
-        const finalInvestorName =
-          getString(investor, ["investor_name", "name", "full_name"]) ||
-          investorName;
-
-        const finalInvestorCode =
-          getString(investor, ["investor_code", "code"]) || investorCode;
-
-        const fundName =
-          getString(commitment, ["fund_name"]) || "VENTIQ Capital Fund I";
-
-        const pdfBytes = await createInvestorPdf({
+        const pdfBytes = await createPdfForDocument({
+          document,
+          blocks: templateBlocks,
           documentType,
-          investorName: finalInvestorName,
-          investorCode: finalInvestorCode,
-          fundName,
-          commitmentAmount: formatInr(commitmentAmount),
-          capitalCalled: formatInr(capitalCalled),
-          uncalledCapital: formatInr(uncalledCapital),
-          currentNav: formatInr(currentNav),
-          distributionAmount: formatInr(distributions),
-          dpi: getString(position, ["dpi"], "0.00x"),
-          tvpi: getString(position, ["tvpi"], "0.00x"),
-          irr: getString(position, ["irr", "net_irr", "gross_irr"], "0.00%"),
-          transactions,
         });
 
-        const cleanDocumentType = cleanFilePart(documentType || "Document");
-        const cleanInvestorCode = cleanFilePart(finalInvestorCode || "INV");
-
-        const fileName = `${cleanInvestorCode}_${cleanDocumentType}.pdf`;
-        const storagePath = `document-studio/${batchId}/${fileName}`;
+        const storagePath = `${batch_id}/${document.id}/${fileName}`;
 
         const { error: uploadError } = await supabase.storage
-          .from(STORAGE_BUCKET)
-          .upload(storagePath, pdfBytes, {
+          .from(bucketName)
+          .upload(storagePath, Buffer.from(pdfBytes), {
             contentType: "application/pdf",
             upsert: true,
           });
@@ -669,83 +1031,62 @@ export async function POST(request: NextRequest) {
           throw new Error(uploadError.message);
         }
 
-        const { data: publicUrlData } = supabase.storage
-          .from(STORAGE_BUCKET)
+        const publicUrlResult = supabase.storage
+          .from(bucketName)
           .getPublicUrl(storagePath);
 
-        const publicUrl = publicUrlData.publicUrl;
-        const now = new Date().toISOString();
+        const fileUrl = publicUrlResult.data.publicUrl;
 
         const { error: updateError } = await supabase
           .from("document_studio_generated_documents")
           .update({
-            document_name: `${documentType} - ${finalInvestorName}`,
             file_name: fileName,
-            file_url: publicUrl,
-            storage_bucket: STORAGE_BUCKET,
+            file_url: fileUrl,
+            storage_bucket: bucketName,
             storage_path: storagePath,
             generation_status: "Generated",
-            portal_publish_status: "Not Published",
-            generated_at: now,
-            preview_data: {
-              investor_code: finalInvestorCode,
-              investor_name: finalInvestorName,
-              document_type: documentType,
-              fund_name: fundName,
-              commitment_amount: formatInr(commitmentAmount),
-              capital_called: formatInr(capitalCalled),
-              uncalled_capital: formatInr(uncalledCapital),
-              current_nav: formatInr(currentNav),
-              distribution_amount: formatInr(distributions),
-              transaction_count: transactions.length,
-            },
+            generated_at: new Date().toISOString(),
           })
-          .eq("id", getString(documentRow, ["id"]));
+          .eq("id", document.id);
 
         if (updateError) {
           throw new Error(updateError.message);
         }
 
-        generatedCount += 1;
-
-        generatedFiles.push({
-          investor_code: finalInvestorCode,
-          investor_name: finalInvestorName,
+        generatedDocuments.push({
+          investor_code: document.investor_code,
+          investor_name: investorName,
           file_name: fileName,
-          file_url: publicUrl,
+          file_url: fileUrl,
         });
       } catch (error) {
-        failedCount += 1;
-        console.error("Document Studio PDF generation failed:", error);
+        failedDocuments += 1;
+        console.error("Document PDF generation failed:", error);
       }
     }
 
-    const now = new Date().toISOString();
-
-    const { error: batchUpdateError } = await supabase
+    await supabase
       .from("document_studio_generation_batches")
       .update({
-        generated_count: generatedCount,
-        status: failedCount > 0 ? "Generated With Exceptions" : "Generated",
-        updated_at: now,
+        generated_count: generatedDocuments.length,
+        status: failedDocuments > 0 ? "Partially Generated" : "Generated",
+        updated_at: new Date().toISOString(),
       })
-      .eq("id", batchId);
-
-    if (batchUpdateError) {
-      return NextResponse.json(
-        { error: batchUpdateError.message },
-        { status: 500 }
-      );
-    }
+      .eq("id", batch_id);
 
     return NextResponse.json({
-      message: "PDF files generated and uploaded successfully.",
-      batch_id: batchId,
-      generatedDocuments: generatedCount,
-      failedDocuments: failedCount,
-      documents: generatedFiles,
+      message:
+        failedDocuments > 0
+          ? `${generatedDocuments.length} PDFs generated. ${failedDocuments} failed.`
+          : `${generatedDocuments.length} PDFs generated successfully.`,
+      batch_id,
+      generatedDocuments: generatedDocuments.length,
+      failedDocuments,
+      documents: generatedDocuments,
     });
   } catch (error) {
+    console.error("generate-pdfs error:", error);
+
     return NextResponse.json(
       {
         error:
