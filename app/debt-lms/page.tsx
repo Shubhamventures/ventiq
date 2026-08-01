@@ -808,6 +808,8 @@ export default function DebtLMSPage() {
   const [scheduleMessage, setScheduleMessage] = useState("");
     const [isGeneratingNotices, setIsGeneratingNotices] = useState(false);
   const [noticeMessage, setNoticeMessage] = useState("");
+    const [isQueuingEmails, setIsQueuingEmails] = useState(false);
+  const [emailQueueMessage, setEmailQueueMessage] = useState("");
 
   useEffect(() => {
     async function loadDebtLmsData() {
@@ -1240,6 +1242,101 @@ export default function DebtLMSPage() {
       );
     } finally {
       setIsGeneratingNotices(false);
+    }
+  }
+    async function queueEmailsFromGeneratedNotices() {
+    setEmailQueueMessage("");
+
+    const noticesToQueue = noticeRows.filter(
+      (notice) => notice.status === "Draft" || notice.status === "Queued"
+    );
+
+    if (noticesToQueue.length === 0) {
+      setEmailQueueMessage("No draft notices available for email queue.");
+      return;
+    }
+
+    setIsQueuingEmails(true);
+
+    try {
+      if (!isSupabaseConfigured || !supabase) {
+        setNoticeRows((currentRows) =>
+          currentRows.map((notice) =>
+            noticesToQueue.some((queuedNotice) => queuedNotice.id === notice.id)
+              ? { ...notice, status: "Queued" }
+              : notice
+          )
+        );
+
+        setEmailQueueMessage(
+          `${noticesToQueue.length} email(s) queued locally.`
+        );
+        return;
+      }
+
+      const db = supabase as any;
+
+      const payload = noticesToQueue.map((notice) => ({
+        notice_id: isUuid(notice.id) ? notice.id : null,
+        loan_id: null,
+        borrower_name: notice.borrowerName,
+        recipient_email: notice.emailTo,
+        cc_emails: [],
+        email_subject: `${notice.noticeType} - ${notice.borrowerName}`,
+        email_body: `Dear Team,\n\nPlease find the ${notice.noticeType.toLowerCase()} for repayment due on ${formatDate(
+          notice.dueDate
+        )}. Total pending amount is ${formatCurrency(
+          notice.amount
+        )}.\n\nRegards,\nFinance Team`,
+        attachment_url: "",
+        email_status: "Queued",
+      }));
+
+      const { error: emailError } = await db
+        .from("debt_lms_email_queue")
+        .insert(payload);
+
+      if (emailError) {
+        throw new Error(emailError.message);
+      }
+
+      const noticeIds = noticesToQueue
+        .map((notice) => notice.id)
+        .filter((id) => isUuid(id));
+
+      if (noticeIds.length > 0) {
+        const { error: updateError } = await db
+          .from("debt_lms_notices")
+          .update({
+            notice_status: "Queued",
+            queued_at: new Date().toISOString(),
+          })
+          .in("id", noticeIds);
+
+        if (updateError) {
+          throw new Error(updateError.message);
+        }
+      }
+
+      setNoticeRows((currentRows) =>
+        currentRows.map((notice) =>
+          noticesToQueue.some((queuedNotice) => queuedNotice.id === notice.id)
+            ? { ...notice, status: "Queued" }
+            : notice
+        )
+      );
+
+      setEmailQueueMessage(
+        `${noticesToQueue.length} email(s) added to dispatch queue.`
+      );
+    } catch (error) {
+      setEmailQueueMessage(
+        error instanceof Error
+          ? `Email queue failed: ${error.message}`
+          : "Email queue failed."
+      );
+    } finally {
+      setIsQueuingEmails(false);
     }
   }
   const selectedLoan =
@@ -2506,13 +2603,20 @@ export default function DebtLMSPage() {
 >
   {isGeneratingNotices ? "Generating..." : "Generate Reminder Notices"}
 </button>
-
-              <button className="debt-secondary" type="button">
-                Send Email Queue
-              </button>
+<button
+  className="debt-secondary"
+  disabled={isQueuingEmails}
+  onClick={queueEmailsFromGeneratedNotices}
+  type="button"
+>
+  {isQueuingEmails ? "Queuing..." : "Send Email Queue"}
+</button>
             </div>
                         {noticeMessage && (
               <p className="loan-form-message">{noticeMessage}</p>
+            )}
+                        {emailQueueMessage && (
+              <p className="loan-form-message">{emailQueueMessage}</p>
             )}
           </div>
 
@@ -2758,9 +2862,14 @@ export default function DebtLMSPage() {
                 Build Notice Template
               </a>
 
-              <button className="debt-primary" type="button">
-                Send Queued Emails
-              </button>
+              <button
+  className="debt-primary"
+  disabled={isQueuingEmails}
+  onClick={queueEmailsFromGeneratedNotices}
+  type="button"
+>
+  {isQueuingEmails ? "Queuing..." : "Queue Emails"}
+</button>
             </div>
           </div>
 
