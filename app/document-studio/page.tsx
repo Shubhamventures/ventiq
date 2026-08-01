@@ -2586,32 +2586,117 @@ function startDocumentPreset(preset: DocumentPreset) {
   }
 
   function renderPublish() {
-    return (
-      <div className="ids-workflow-page">
-        <div className="ids-library-hero">
-          <div>
-            <p className="ids-eyebrow">Publish Queue</p>
-            <h2>Publish generated investor documents to Investor Portal.</h2>
-            <p>{publishResult ? `${publishResult.publishedDocuments ?? 0} documents published.` : "Prepare batch and generate PDFs before publishing."}</p>
-          </div>
-          <div className="ids-action-row">
-            <button className="ids-secondary-btn" onClick={() => setWorkspaceTab("batch")} type="button">Back to Batch</button>
-            <button className="ids-primary-btn" disabled={apiBusy} onClick={publishQueue} type="button">Publish to Portal</button>
-          </div>
+  const generatedPdfCards = pdfGenerationResult?.documents ?? [];
+  const generatedCount =
+    pdfGenerationResult?.generatedDocuments ?? generatedPdfCards.length;
+  const failedCount = pdfGenerationResult?.failedDocuments ?? 0;
+  const publishedCount = publishResult?.publishedDocuments ?? 0;
+
+  return (
+    <div className="ids-workflow-page">
+      <div className="ids-library-hero">
+        <div>
+          <p className="ids-eyebrow">Publish Queue</p>
+          <h2>Publish generated investor documents to Investor Portal.</h2>
+          <p>
+            {publishResult
+              ? `${publishedCount} documents published to Investor Portal.`
+              : generatedCount > 0
+              ? `${generatedCount} generated PDFs are ready for portal publishing.`
+              : "Generate PDFs first, then publish them to Investor Portal."}
+          </p>
         </div>
+
+        <div className="ids-action-row">
+          <button
+            className="ids-secondary-btn"
+            onClick={() => setWorkspaceTab("batch")}
+            type="button"
+          >
+            Back to Batch
+          </button>
+
+          <button
+            className="ids-primary-btn"
+            disabled={apiBusy || !batchResult?.batch?.id}
+            onClick={publishQueue}
+            type="button"
+          >
+            {apiBusy ? "Publishing..." : "Publish to Portal"}
+          </button>
+
+          <button
+            className="ids-secondary-btn"
+            onClick={() => {
+              window.location.href = "/investor-portal";
+            }}
+            type="button"
+          >
+            Open Investor Portal
+          </button>
+        </div>
+      </div>
+
+      <div className="ids-batch-grid">
+        <div>
+          <strong>{batchResult?.batch?.total_investors ?? investors.length}</strong>
+          <span>Total investors</span>
+        </div>
+        <div>
+          <strong>{generatedCount}</strong>
+          <span>Generated PDFs</span>
+        </div>
+        <div>
+          <strong>{failedCount}</strong>
+          <span>Failed</span>
+        </div>
+        <div>
+          <strong>{publishedCount}</strong>
+          <span>Published to portal</span>
+        </div>
+      </div>
+
+      {generatedPdfCards.length === 0 ? (
+        <div className="ids-empty-card">
+          <strong>No generated PDFs available in this browser session</strong>
+          <p>
+            Go back to Batch Generation, generate PDFs, and then return here to
+            publish them to the Investor Portal.
+          </p>
+          <button
+            className="ids-primary-btn"
+            onClick={() => setWorkspaceTab("batch")}
+            type="button"
+          >
+            Go to Batch Generation
+          </button>
+        </div>
+      ) : (
         <div className="ids-publish-grid">
-          {investors.map((investor) => (
-            <div className="ids-publish-card" key={investor.code}>
-              <strong>{investor.name}</strong>
-              <span>{investor.code}</span>
-              <p>{selectedDocumentType}</p>
-              <em>{publishResult ? "Published to Portal" : "Ready to publish"}</em>
+          {generatedPdfCards.map((document) => (
+            <div
+              className="ids-publish-card"
+              key={`${document.investor_code}-${document.file_name}`}
+            >
+              <strong>{document.investor_name || "Investor"}</strong>
+              <span>{document.investor_code || "Investor code"}</span>
+              <p>{document.file_name}</p>
+              <em>
+                {publishResult ? "Published to Portal" : "Generated PDF ready"}
+              </em>
+
+              {document.file_url && (
+                <a href={document.file_url} target="_blank">
+                  Open PDF
+                </a>
+              )}
             </div>
           ))}
         </div>
-      </div>
-    );
-  }
+      )}
+    </div>
+  );
+}
 
   return (
     <main className="ids-page">
