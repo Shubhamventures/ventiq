@@ -56,6 +56,7 @@ type TemplateBlock = {
   kind: BlockKind;
   title: string;
   subtitle: string;
+  content?: string;
   repeatSource?: string;
   tableConfig?: TableBlockConfig;
 };
@@ -803,13 +804,14 @@ function normalizeSavedTemplateBlocks(value: unknown): TemplateBlock[] {
     .filter((item) => item.kind && allowedKinds.includes(item.kind))
     .map((item, index): TemplateBlock =>
       ensureTableConfigForTemplateBlock({
-        id: item.id || `saved-block-${index}`,
-        kind: item.kind as BlockKind,
-        title: item.title || "Saved template block",
-        subtitle: item.subtitle || "Loaded from saved template",
-        repeatSource: item.repeatSource,
-        tableConfig: item.tableConfig,
-      })
+  id: item.id || `saved-block-${index}`,
+  kind: item.kind as BlockKind,
+  title: item.title || "Saved template block",
+  subtitle: item.subtitle || "Loaded from saved template",
+  content: item.content,
+  repeatSource: item.repeatSource,
+  tableConfig: item.tableConfig,
+})
     );
 
   return cleanBlocks.length > 0
@@ -1057,7 +1059,7 @@ function changeTableRepeatSource(
       signature: "Signature block",
     };
 
-   const block: TemplateBlock = {
+  const block: TemplateBlock = {
   id,
   kind,
   title: titles[kind],
@@ -1067,6 +1069,12 @@ function changeTableRepeatSource(
       : kind === "financial"
       ? "Repeats from P&L line items"
       : "Inserted from VENTIQ block library",
+  content:
+    kind === "notes"
+      ? "This statement is generated based on the books and records of the Fund as on {report_date}."
+      : kind === "signature"
+      ? "Authorized Signatory"
+      : undefined,
   repeatSource:
     kind === "transactions"
       ? "transactions"
@@ -1341,7 +1349,11 @@ particulars: "Sample line item",
       `{${field.code}} inserted into ${selectedBlock?.title ?? "selected block"}.`
     );
   }
-
+function renderContentWithSampleValues(content: string) {
+  return content.replace(/\{([^}]+)\}/g, (_match, code: string) =>
+    getInvestorValue(selectedInvestor, code.trim())
+  );
+}
   function fallbackImportedBlocks(): TemplateBlock[] {
   return [
     {
@@ -2293,17 +2305,19 @@ return (
         )}
 
         {block.kind === "notes" && (
-          <div className="ids-note-block">
-            This statement is generated based on the books and records of the
-            Fund as on {getInvestorValue(selectedInvestor, "report_date")}.
-          </div>
-        )}
+  <div className="ids-note-block">
+    {renderContentWithSampleValues(
+      block.content ||
+        "This statement is generated based on the books and records of the Fund as on {report_date}."
+    )}
+  </div>
+)}
 
         {block.kind === "signature" && (
           <div className="ids-signature-block">
             <div>
               <strong>For {getInvestorValue(selectedInvestor, "fund_name")}</strong>
-              <span>Authorized Signatory</span>
+              <span>{block.content || "Authorized Signatory"}</span>
             </div>
             <div>
               <span>Generated on</span>
@@ -2377,7 +2391,34 @@ return (
     />
   </label>
 </div>
-
+{(selectedBlock?.kind === "notes" || selectedBlock?.kind === "signature") && (
+  <div className="ids-block-editor">
+    <label>
+      {selectedBlock.kind === "notes" ? "Notes content" : "Signature role"}
+      {selectedBlock.kind === "notes" ? (
+        <textarea
+          value={
+            selectedBlock.content ||
+            "This statement is generated based on the books and records of the Fund as on {report_date}."
+          }
+          onChange={(event) =>
+            updateSelectedBlock({ content: event.target.value })
+          }
+          placeholder="Enter note content"
+          rows={4}
+        />
+      ) : (
+        <input
+          value={selectedBlock.content || "Authorized Signatory"}
+          onChange={(event) =>
+            updateSelectedBlock({ content: event.target.value })
+          }
+          placeholder="Enter signature role"
+        />
+      )}
+    </label>
+  </div>
+)}
         <div className="ids-merge-tabs">
           <button
             className={mergeMode === "cell" ? "active" : ""}
