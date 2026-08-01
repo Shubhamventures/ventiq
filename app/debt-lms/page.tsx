@@ -760,6 +760,28 @@ function buildRepaymentScheduleFromLoan(loan: DebtLoan): RepaymentRow[] {
     return row;
   });
 }
+function getNoticeTypeForRepayment(row: RepaymentRow) {
+  if (row.daysPastDue >= 30) return "Default notice";
+  if (row.daysPastDue > 0 || row.status === "Overdue") return "Overdue reminder";
+  if (row.penaltyDue > 0) return "Penalty notice";
+
+  return "Pre-due reminder";
+}
+
+function buildNoticeFromRepayment(row: RepaymentRow): NoticeRow {
+  const noticeType = getNoticeTypeForRepayment(row);
+
+  return {
+    id: crypto.randomUUID(),
+    borrowerName: row.borrowerName,
+    noticeType,
+    dueDate: row.dueDate,
+    amount: row.pendingAmount || row.totalDue,
+    emailTo: "finance@borrower.com",
+    status: "Draft",
+    linkedDocument: `${noticeType} PDF`,
+  };
+}
 
 export default function DebtLMSPage() {
   const [loans, setLoans] = useState<DebtLoan[]>(sampleLoans);
@@ -784,6 +806,8 @@ export default function DebtLMSPage() {
   const [loanFormError, setLoanFormError] = useState("");
     const [isGeneratingSchedule, setIsGeneratingSchedule] = useState(false);
   const [scheduleMessage, setScheduleMessage] = useState("");
+    const [isGeneratingNotices, setIsGeneratingNotices] = useState(false);
+  const [noticeMessage, setNoticeMessage] = useState("");
 
   useEffect(() => {
     async function loadDebtLmsData() {
@@ -1129,6 +1153,93 @@ export default function DebtLMSPage() {
       );
     } finally {
       setIsGeneratingSchedule(false);
+    }
+  }
+    async function generateRepaymentNotices() {
+    setNoticeMessage("");
+
+    const rowsNeedingNotice = repaymentRows.filter(
+      (row) => row.pendingAmount > 0 && row.status !== "Received"
+    );
+
+    if (rowsNeedingNotice.length === 0) {
+      setNoticeMessage("No pending repayment rows found for notice generation.");
+      return;
+    }
+
+    setIsGeneratingNotices(true);
+
+    try {
+      const generatedNotices = rowsNeedingNotice.map(buildNoticeFromRepayment);
+
+      if (!isSupabaseConfigured || !supabase) {
+        setNoticeRows((currentRows) => [...generatedNotices, ...currentRows]);
+        setNoticeMessage(
+          `${generatedNotices.length} repayment notice(s) generated locally.`
+        );
+        return;
+      }
+
+      const db = supabase as any;
+
+      const payload = rowsNeedingNotice.map((row) => {
+        const noticeType = getNoticeTypeForRepayment(row);
+
+        return {
+          repayment_schedule_id: isUuid(row.id) ? row.id : null,
+          loan_id: isUuid(row.loanId) ? row.loanId : null,
+          borrower_name: row.borrowerName,
+          notice_type: noticeType,
+          notice_title: `${noticeType} - ${row.borrowerName}`,
+          due_date: row.dueDate,
+          principal_due: row.principalDue,
+          interest_due: row.interestDue,
+          fees_due: row.feesDue,
+          penalty_due: row.penaltyDue,
+          total_due: row.pendingAmount || row.totalDue,
+          recipient_email: "finance@borrower.com",
+          cc_emails: [],
+          email_subject: `${noticeType} for repayment due on ${formatDate(
+            row.dueDate
+          )}`,
+          email_body: `Dear Team,\n\nThis is a ${noticeType.toLowerCase()} for the repayment due on ${formatDate(
+            row.dueDate
+          )}. Total pending amount is ${formatCurrency(
+            row.pendingAmount || row.totalDue
+          )}.\n\nRegards,\nFinance Team`,
+          pdf_file_name: `${noticeType}-${row.borrowerName}.pdf`,
+          notice_status: "Draft",
+        };
+      });
+
+      const { data, error } = await db
+        .from("debt_lms_notices")
+        .insert(payload)
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const savedNotices =
+        data && data.length > 0
+          ? (data as DataRow[]).map(mapNotice)
+          : generatedNotices;
+
+      setNoticeRows((currentRows) => [...savedNotices, ...currentRows]);
+
+      setNoticeMessage(
+        `${savedNotices.length} repayment notice(s) generated and saved.`
+      );
+    } catch (error) {
+      setNoticeMessage(
+        error instanceof Error
+          ? `Notice generation failed: ${error.message}`
+          : "Notice generation failed."
+      );
+    } finally {
+      setIsGeneratingNotices(false);
     }
   }
   const selectedLoan =
@@ -2387,14 +2498,22 @@ export default function DebtLMSPage() {
             </div>
 
             <div className="debt-header-actions">
-              <button className="debt-secondary" type="button">
-                Generate Reminder Notices
-              </button>
+              <button
+  className="debt-secondary"
+  disabled={isGeneratingNotices}
+  onClick={generateRepaymentNotices}
+  type="button"
+>
+  {isGeneratingNotices ? "Generating..." : "Generate Reminder Notices"}
+</button>
 
               <button className="debt-secondary" type="button">
                 Send Email Queue
               </button>
             </div>
+                        {noticeMessage && (
+              <p className="loan-form-message">{noticeMessage}</p>
+            )}
           </div>
 
           <div className="table-wrap">
