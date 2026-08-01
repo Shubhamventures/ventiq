@@ -64,6 +64,11 @@ type GeneratedDocument = {
   document_type?: string | null;
   document_name?: string | null;
   file_name?: string | null;
+  file_url?: string | null;
+  storage_bucket?: string | null;
+  storage_path?: string | null;
+  generation_status?: string | null;
+  portal_publish_status?: string | null;
   preview_data?: Record<string, unknown> | null;
 };
 
@@ -937,7 +942,18 @@ async function createPdfForDocument(args: {
 
 export async function POST(request: Request) {
   try {
-    const { batch_id } = await request.json();
+    const body = (await request.json()) as {
+      batch_id?: string;
+      document_ids?: unknown;
+    };
+
+    const batch_id = body.batch_id;
+
+    const documentIds = Array.isArray(body.document_ids)
+      ? body.document_ids.filter(
+          (id): id is string => typeof id === "string" && id.trim().length > 0
+        )
+      : [];
 
     if (!batch_id) {
       return NextResponse.json(
@@ -976,12 +992,18 @@ export async function POST(request: Request) {
       templateBlocks = normalizeBlocks(template?.blocks_json, documentType);
     }
 
-    const { data: documents, error: documentsError } = await supabase
+    let documentsQuery = supabase
       .from("document_studio_generated_documents")
       .select("*")
       .eq("batch_id", batch_id)
-      .in("generation_status", ["Ready", "Generated"])
-      .returns<GeneratedDocument[]>();
+      .in("generation_status", ["Ready", "Generated", "Failed"]);
+
+    if (documentIds.length > 0) {
+      documentsQuery = documentsQuery.in("id", documentIds);
+    }
+
+    const { data: documents, error: documentsError } =
+      await documentsQuery.returns<GeneratedDocument[]>();
 
     if (documentsError) {
       throw new Error(documentsError.message);
@@ -989,16 +1011,27 @@ export async function POST(request: Request) {
 
     if (!documents || documents.length === 0) {
       return NextResponse.json(
-        { error: "No ready documents found for this batch." },
+        {
+          error:
+            documentIds.length > 0
+              ? "No matching selected documents found for this batch."
+              : "No ready documents found for this batch.",
+        },
         { status: 404 }
       );
     }
 
     const generatedDocuments: {
+      id: string;
       investor_code?: string | null;
       investor_name?: string | null;
+      email?: string | null;
+      document_type?: string | null;
+      document_name?: string | null;
       file_name: string;
       file_url: string;
+      generation_status: string;
+      portal_publish_status?: string | null;
     }[] = [];
 
     let failedDocuments = 0;
@@ -1008,6 +1041,7 @@ export async function POST(request: Request) {
         const investorCode = safePdfText(document.investor_code || "INV");
         const investorName = safePdfText(document.investor_name || "Investor");
         const cleanDocumentType = safePdfText(documentType).replace(/\s+/g, "_");
+
         const fileName =
           document.file_name ||
           `${investorCode}_${cleanDocumentType}_${Date.now()}.pdf`;
@@ -1054,35 +1088,89 @@ export async function POST(request: Request) {
         }
 
         generatedDocuments.push({
+          id: document.id,
           investor_code: document.investor_code,
           investor_name: investorName,
+          email: document.email,
+          document_type: document.document_type || documentType,
+          document_name: document.document_name,
           file_name: fileName,
           file_url: fileUrl,
+          generation_status: "Generated",
+          portal_publish_status: document.portal_publish_status,
         });
       } catch (error) {
         failedDocuments += 1;
+
         console.error("Document PDF generation failed:", error);
+
+        const { error: failedUpdateError } = await supabase
+          .from("document_studio_generated_documents")
+          .update({
+            generation_status: "Failed",
+          })
+          .eq("id", document.id);
+
+        if (failedUpdateError) {
+          console.error("Unable to mark document as Failed:", failedUpdateError);
+        }
       }
     }
+
+    const { count: totalDocumentsCount } = await supabase
+      .from("document_studio_generated_documents")
+      .select("id", { count: "exact", head: true })
+      .eq("batch_id", batch_id);
+
+    const { count: totalGeneratedCount } = await supabase
+      .from("document_studio_generated_documents")
+      .select("id", { count: "exact", head: true })
+      .eq("batch_id", batch_id)
+      .eq("generation_status", "Generated");
+
+    const nextBatchStatus =
+      failedDocuments > 0
+        ? "Partially Generated"
+        : totalDocumentsCount &&
+          totalGeneratedCount &&
+          totalGeneratedCount >= totalDocumentsCount
+        ? "Generated"
+        : "Partially Generated";
 
     await supabase
       .from("document_studio_generation_batches")
       .update({
-        generated_count: generatedDocuments.length,
-        status: failedDocuments > 0 ? "Partially Generated" : "Generated",
+        generated_count: totalGeneratedCount ?? generatedDocuments.length,
+        status: nextBatchStatus,
         updated_at: new Date().toISOString(),
       })
       .eq("id", batch_id);
+
+    const { data: currentDocuments, error: currentDocumentsError } =
+      await supabase
+        .from("document_studio_generated_documents")
+        .select(
+          "id, investor_code, investor_name, email, document_type, document_name, file_name, file_url, generation_status, portal_publish_status"
+        )
+        .eq("batch_id", batch_id)
+        .order("investor_name", { ascending: true });
+
+    if (currentDocumentsError) {
+      throw new Error(currentDocumentsError.message);
+    }
 
     return NextResponse.json({
       message:
         failedDocuments > 0
           ? `${generatedDocuments.length} PDFs generated. ${failedDocuments} failed.`
+          : documentIds.length > 0
+          ? `${generatedDocuments.length} selected PDF(s) generated successfully.`
           : `${generatedDocuments.length} PDFs generated successfully.`,
       batch_id,
+      requestedDocuments: documentIds.length || documents.length,
       generatedDocuments: generatedDocuments.length,
       failedDocuments,
-      documents: generatedDocuments,
+      documents: currentDocuments ?? generatedDocuments,
     });
   } catch (error) {
     console.error("generate-pdfs error:", error);
