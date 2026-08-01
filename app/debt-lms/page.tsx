@@ -643,6 +643,123 @@ function mapBankMatch(row: DataRow): BankMatchRow {
     action: getString(row, ["action_required"], "Review match"),
   };
 }
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value
+  );
+}
+
+function addMonthsToDate(value: string, months: number) {
+  const date = new Date(`${value}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  date.setMonth(date.getMonth() + months);
+
+  return date.toISOString().slice(0, 10);
+}
+
+function getFrequencyMonths(frequency: string) {
+  const value = frequency.toLowerCase();
+
+  if (value.includes("quarter")) return 3;
+  if (value.includes("semi")) return 6;
+  if (value.includes("annual")) return 12;
+  if (value.includes("bullet")) return 0;
+
+  return 1;
+}
+
+function getScheduleDates(startDate: string, maturityDate: string, frequency: string) {
+  if (!startDate || !maturityDate) return [];
+
+  if (frequency.toLowerCase().includes("bullet")) {
+    return [maturityDate];
+  }
+
+  const stepMonths = getFrequencyMonths(frequency);
+  const dates: string[] = [];
+  let currentDate = startDate;
+
+  for (let index = 0; index < 240; index += 1) {
+    if (new Date(`${currentDate}T00:00:00`) > new Date(`${maturityDate}T00:00:00`)) {
+      break;
+    }
+
+    dates.push(currentDate);
+    currentDate = addMonthsToDate(currentDate, stepMonths || 1);
+  }
+
+  if (!dates.includes(maturityDate)) {
+    dates.push(maturityDate);
+  }
+
+  return dates;
+}
+
+function buildRepaymentScheduleFromLoan(loan: DebtLoan): RepaymentRow[] {
+  const scheduleDates = getScheduleDates(
+    loan.repaymentStartDate,
+    loan.maturityDate,
+    loan.principalFrequency
+  );
+
+  if (scheduleDates.length === 0) return [];
+
+  const isBullet = loan.principalFrequency.toLowerCase().includes("bullet");
+  const principalInstallments = isBullet ? 1 : scheduleDates.length;
+  const basePrincipalDue = principalInstallments
+    ? loan.disbursedAmount / principalInstallments
+    : 0;
+
+  let openingPrincipal = loan.disbursedAmount;
+
+  return scheduleDates.map((dueDate, index) => {
+    const isLastRow = index === scheduleDates.length - 1;
+    const frequencyMonths = isBullet
+      ? Math.max(loan.tenureMonths, 1)
+      : getFrequencyMonths(loan.principalFrequency) || 1;
+
+    const principalDue = isBullet
+      ? isLastRow
+        ? openingPrincipal
+        : 0
+      : isLastRow
+        ? openingPrincipal
+        : Math.min(basePrincipalDue, openingPrincipal);
+
+    const interestDue =
+      openingPrincipal * (loan.couponRate / 100) * (frequencyMonths / 12);
+
+    const feesDue = index === 0 ? loan.processingFee : 0;
+    const penaltyDue = 0;
+    const totalDue = principalDue + interestDue + feesDue + penaltyDue;
+    const pendingAmount = totalDue;
+
+    const row: RepaymentRow = {
+      id: crypto.randomUUID(),
+      loanId: loan.id,
+      borrowerName: loan.borrowerName,
+      dueDate,
+      openingPrincipal,
+      principalDue,
+      interestDue,
+      feesDue,
+      penaltyDue,
+      totalDue,
+      receivedAmount: 0,
+      pendingAmount,
+      status: "Pending",
+      daysPastDue: 0,
+    };
+
+    openingPrincipal = Math.max(openingPrincipal - principalDue, 0);
+
+    return row;
+  });
+}
 
 export default function DebtLMSPage() {
   const [loans, setLoans] = useState<DebtLoan[]>(sampleLoans);
@@ -665,6 +782,8 @@ export default function DebtLMSPage() {
   const [isSavingLoan, setIsSavingLoan] = useState(false);
   const [loanFormMessage, setLoanFormMessage] = useState("");
   const [loanFormError, setLoanFormError] = useState("");
+    const [isGeneratingSchedule, setIsGeneratingSchedule] = useState(false);
+  const [scheduleMessage, setScheduleMessage] = useState("");
 
   useEffect(() => {
     async function loadDebtLmsData() {
@@ -916,6 +1035,102 @@ export default function DebtLMSPage() {
       setIsSavingLoan(false);
     }
   }
+    async function generateRepaymentScheduleForSelectedLoan() {
+    setScheduleMessage("");
+
+    if (!selectedLoan) {
+      setScheduleMessage("No loan selected.");
+      return;
+    }
+
+    const generatedSchedule = buildRepaymentScheduleFromLoan(selectedLoan);
+
+    if (generatedSchedule.length === 0) {
+      setScheduleMessage(
+        "Unable to generate schedule. Please check repayment start date, maturity date and principal frequency."
+      );
+      return;
+    }
+
+    setIsGeneratingSchedule(true);
+
+    try {
+      const canSaveToSupabase =
+        isSupabaseConfigured && supabase && isUuid(selectedLoan.id);
+
+      if (!canSaveToSupabase) {
+        setRepaymentRows((currentRows) => [
+          ...generatedSchedule,
+          ...currentRows.filter((row) => row.loanId !== selectedLoan.id),
+        ]);
+
+        setScheduleMessage(
+          "Repayment schedule generated locally. Save a real Supabase loan to persist it."
+        );
+        return;
+      }
+
+      const db = supabase as any;
+
+      const payload = generatedSchedule.map((row, index) => ({
+        loan_id: selectedLoan.id,
+        borrower_name: selectedLoan.borrowerName,
+        installment_number: index + 1,
+        due_date: row.dueDate,
+        opening_principal: row.openingPrincipal,
+        principal_due: row.principalDue,
+        interest_due: row.interestDue,
+        fees_due: row.feesDue,
+        penalty_due: row.penaltyDue,
+        total_due: row.totalDue,
+        amount_received: 0,
+        pending_amount: row.pendingAmount,
+        collection_status: "Upcoming",
+        days_past_due: 0,
+        penalty_applied: false,
+        penalty_waived: false,
+        notice_status: "Not Sent",
+        schedule_source: "Generated from Debt LMS",
+      }));
+
+      await db
+        .from("debt_lms_repayment_schedule")
+        .delete()
+        .eq("loan_id", selectedLoan.id);
+
+      const { data, error } = await db
+        .from("debt_lms_repayment_schedule")
+        .insert(payload)
+        .select("*")
+        .order("due_date", { ascending: true });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const savedSchedule =
+        data && data.length > 0
+          ? (data as DataRow[]).map(mapRepayment)
+          : generatedSchedule;
+
+      setRepaymentRows((currentRows) => [
+        ...savedSchedule,
+        ...currentRows.filter((row) => row.loanId !== selectedLoan.id),
+      ]);
+
+      setScheduleMessage(
+        `${savedSchedule.length} repayment schedule row(s) generated and saved.`
+      );
+    } catch (error) {
+      setScheduleMessage(
+        error instanceof Error
+          ? `Schedule generation failed: ${error.message}`
+          : "Schedule generation failed."
+      );
+    } finally {
+      setIsGeneratingSchedule(false);
+    }
+  }
   const selectedLoan =
     loans.find((loan) => loan.id === selectedLoanId) ?? loans[0] ?? sampleLoans[0];
   const summary = useMemo(() => {
@@ -1078,11 +1293,15 @@ export default function DebtLMSPage() {
           line-height: 1.45;
         }
 
-        .debt-grid {
+                .debt-grid {
           display: grid;
-          grid-template-columns: 1.15fr 0.85fr;
+          grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
           gap: 18px;
           margin-bottom: 18px;
+        }
+
+        .debt-grid > * {
+          min-width: 0;
         }
 
         .debt-panel {
@@ -1237,7 +1456,64 @@ export default function DebtLMSPage() {
           color: #dbeafe;
           line-height: 1.55;
         }
+        .schedule-scroll-panel {
+          max-height: 520px;
+          overflow-y: auto;
+          padding-right: 6px;
+          display: grid;
+          gap: 10px;
+        }
 
+        .schedule-compact-card {
+          border: 1px solid rgba(245, 200, 91, 0.20);
+          background: rgba(245, 200, 91, 0.07);
+          border-radius: 18px;
+          padding: 12px;
+        }
+
+        .schedule-compact-top {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 10px;
+          margin-bottom: 10px;
+        }
+
+        .schedule-compact-top h3 {
+          margin: 0;
+          font-size: 17px;
+          line-height: 1.15;
+          letter-spacing: -0.03em;
+        }
+
+                .schedule-compact-grid {
+          display: grid;
+          gap: 7px;
+        }
+
+        .schedule-compact-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          border: 1px solid rgba(147, 197, 253, 0.10);
+          background: rgba(2, 6, 23, 0.26);
+          border-radius: 12px;
+          padding: 8px 10px;
+        }
+
+        .schedule-compact-row span {
+          color: #8ea4c8;
+          font-size: 11px;
+          font-weight: 900;
+        }
+
+        .schedule-compact-row strong {
+          color: #ffffff;
+          font-size: 13px;
+          line-height: 1.2;
+          text-align: right;
+        }
         .detail-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2028,7 +2304,7 @@ export default function DebtLMSPage() {
             </div>
 
             <div className="selected-loan-box">
-              <div className="selected-loan-main">
+                           <div className="selected-loan-main">
                 <h3>{selectedLoan.borrowerName}</h3>
                 <p>
                   {selectedLoan.instrument} facility of{" "}
@@ -2036,6 +2312,23 @@ export default function DebtLMSPage() {
                   {selectedLoan.moratoriumMonths} month moratorium from{" "}
                   {selectedLoan.moratoriumStart.toLowerCase()}.
                 </p>
+
+                <div className="notice-actions">
+                  <button
+                    className="small-action"
+                    disabled={isGeneratingSchedule}
+                    onClick={generateRepaymentScheduleForSelectedLoan}
+                    type="button"
+                  >
+                    {isGeneratingSchedule
+                      ? "Generating..."
+                      : "Generate Repayment Schedule"}
+                  </button>
+                </div>
+
+                {scheduleMessage && (
+                  <p className="loan-form-message">{scheduleMessage}</p>
+                )}
               </div>
 
               <div className="detail-grid">
@@ -2210,21 +2503,39 @@ export default function DebtLMSPage() {
               </div>
             </div>
 
-            {selectedSchedule.length > 0 ? (
-              selectedSchedule.map((row) => (
-                <div className="selected-loan-main" key={row.id}>
-                  <h3>{formatDate(row.dueDate)}</h3>
-                  <p>
-                    Total due {formatCurrency(row.totalDue)} · received{" "}
-                    {formatCurrency(row.receivedAmount)} · pending{" "}
-                    {formatCurrency(row.pendingAmount)}
-                  </p>
+                       {selectedSchedule.length > 0 ? (
+              <div className="schedule-scroll-panel">
+                {selectedSchedule.map((row) => (
+                  <div className="schedule-compact-card" key={row.id}>
+                    <div className="schedule-compact-top">
+                      <h3>{formatDate(row.dueDate)}</h3>
 
-                  <span className={`status-pill status-${statusClass(row.status)}`}>
-                    {row.status}
-                  </span>
-                </div>
-              ))
+                      <span
+                        className={`status-pill status-${statusClass(row.status)}`}
+                      >
+                        {row.status}
+                      </span>
+                    </div>
+
+                                       <div className="schedule-compact-grid">
+                      <div className="schedule-compact-row">
+                        <span>Total Due</span>
+                        <strong>{formatCurrency(row.totalDue)}</strong>
+                      </div>
+
+                      <div className="schedule-compact-row">
+                        <span>Received</span>
+                        <strong>{formatCurrency(row.receivedAmount)}</strong>
+                      </div>
+
+                      <div className="schedule-compact-row">
+                        <span>Pending</span>
+                        <strong>{formatCurrency(row.pendingAmount)}</strong>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : (
               <div className="selected-loan-main">
                 <h3>No active repayment row</h3>
