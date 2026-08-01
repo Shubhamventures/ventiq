@@ -203,6 +203,24 @@ type PageSettings = {
   showSampleValues: boolean;
   zoom: number;
 };
+type DocumentPresetBlock = {
+  kind: BlockKind;
+  title?: string;
+  subtitle?: string;
+  content?: string;
+  repeatSource?: TableBlockConfig["repeatSource"];
+  chartConfig?: ChartConfig;
+};
+
+type DocumentPreset = {
+  id: string;
+  name: string;
+  documentType: string;
+  templateName: string;
+  description: string;
+  bestFor: string;
+  blocks: DocumentPresetBlock[];
+};
 
 const investors: InvestorProfile[] = [
   {
@@ -570,6 +588,297 @@ const documentTypes = [
   "Form 64D",
   "Annual Income Report",
 ];
+const documentPresets: DocumentPreset[] = [
+  {
+    id: "statement-of-account",
+    name: "Statement of Account",
+    documentType: "Statement of Account (SOA)",
+    templateName: "SOA - Smart Investor Statement",
+    description:
+      "Investor identity, capital account, transactions, financial statement, performance, notes and signature.",
+    bestFor: "Quarterly investor reporting",
+    blocks: [
+      { kind: "letterhead" },
+      { kind: "identity" },
+      {
+        kind: "summary",
+        title: "Capital account summary",
+        subtitle: "Commitment, capital called, uncalled capital and NAV",
+        repeatSource: "capitalAccount",
+      },
+      {
+        kind: "transactions",
+        title: "Investor transaction statement",
+        subtitle: "Capital calls, distributions, units and NAV movements",
+        repeatSource: "transactions",
+      },
+      {
+        kind: "financial",
+        title: "Statement of income and distribution",
+        subtitle: "Income, expenses, net income and payout",
+        repeatSource: "pnl",
+      },
+      { kind: "performance" },
+      { kind: "notes" },
+      { kind: "signature" },
+    ],
+  },
+  {
+    id: "capital-call-notice",
+    name: "Capital Call Notice",
+    documentType: "Capital Call Notice",
+    templateName: "Capital Call Notice Template",
+    description:
+      "Notice format for drawdown amount, investor commitment, due date, bank details and authorized signatory.",
+    bestFor: "Drawdown communication",
+    blocks: [
+      { kind: "letterhead" },
+      { kind: "identity" },
+      {
+        kind: "notes",
+        title: "Capital call notice text",
+        subtitle: "Purpose, amount due and due date wording",
+        content:
+          "Dear {investor_name}, this is to notify you of a capital call for {fund_name}. Please remit the called amount as per the fund records on or before the due date mentioned in this notice.",
+      },
+      {
+        kind: "summary",
+        title: "Capital call summary",
+        subtitle: "Commitment, called capital and uncalled capital",
+        repeatSource: "capitalAccount",
+      },
+      {
+        kind: "transactions",
+        title: "Drawdown schedule",
+        subtitle: "Capital call and payment movement",
+        repeatSource: "transactions",
+      },
+      { kind: "signature" },
+    ],
+  },
+  {
+    id: "distribution-notice",
+    name: "Distribution Notice",
+    documentType: "Distribution Notice",
+    templateName: "Distribution Notice Template",
+    description:
+      "Distribution communication with gross distribution, tax withheld, net payout and investor details.",
+    bestFor: "Investor payout communication",
+    blocks: [
+      { kind: "letterhead" },
+      { kind: "identity" },
+      {
+        kind: "notes",
+        title: "Distribution notice text",
+        subtitle: "Distribution communication wording",
+        content:
+          "Dear {investor_name}, we are pleased to inform you that a distribution has been approved for {fund_name}. The distribution details are provided below.",
+      },
+      {
+        kind: "financial",
+        title: "Distribution breakup",
+        subtitle: "Gross distribution, tax withheld and net distribution",
+        repeatSource: "distributionDetails",
+      },
+      { kind: "signature" },
+    ],
+  },
+  {
+    id: "unit-allotment-letter",
+    name: "Unit Allotment Letter",
+    documentType: "Unit Allotment Letter",
+    templateName: "Unit Allotment Letter Template",
+    description:
+      "Allotment confirmation with investor details, units allotted, NAV and capital contribution.",
+    bestFor: "Post drawdown unit allotment",
+    blocks: [
+      { kind: "letterhead" },
+      { kind: "identity" },
+      {
+        kind: "notes",
+        title: "Unit allotment confirmation",
+        subtitle: "Allotment confirmation wording",
+        content:
+          "This is to confirm that units have been allotted to {investor_name} in {fund_name} based on the capital contribution received.",
+      },
+      {
+        kind: "financial",
+        title: "Unit allotment schedule",
+        subtitle: "Units added, opening units and closing units",
+        repeatSource: "unitMovements",
+      },
+      { kind: "signature" },
+    ],
+  },
+  {
+    id: "unit-statement",
+    name: "Unit Statement",
+    documentType: "Unit Statement",
+    templateName: "Unit Statement Template",
+    description:
+      "Investor-wise unit holding statement with opening units, additions, redemptions and closing units.",
+    bestFor: "Unit balance reporting",
+    blocks: [
+      { kind: "letterhead" },
+      { kind: "identity" },
+      {
+        kind: "summary",
+        title: "Unit holding summary",
+        subtitle: "Investor holding and NAV summary",
+        repeatSource: "capitalAccount",
+      },
+      {
+        kind: "financial",
+        title: "Unit movement schedule",
+        subtitle: "Opening units, units added, redeemed and closing units",
+        repeatSource: "unitMovements",
+      },
+      { kind: "signature" },
+    ],
+  },
+  {
+    id: "advance-tax-data",
+    name: "Advance Tax Data Points",
+    documentType: "Advance Tax Data Points",
+    templateName: "Advance Tax Data Points Template",
+    description:
+      "Tax-related investor data points including income nature, gross income, TDS and net income.",
+    bestFor: "Investor tax communication",
+    blocks: [
+      { kind: "letterhead" },
+      { kind: "identity" },
+      {
+        kind: "financial",
+        title: "Advance tax data points",
+        subtitle: "Income head, gross income, TDS and net income",
+        repeatSource: "taxBreakup",
+      },
+      {
+        kind: "notes",
+        title: "Tax note",
+        subtitle: "Investor tax note",
+        content:
+          "The above data points are provided for tax estimation purposes based on fund records as on {report_date}. Investors should consult their tax advisors before relying on this information.",
+      },
+      { kind: "signature" },
+    ],
+  },
+  {
+    id: "drawdown-reminder",
+    name: "Drawdown Reminder",
+    documentType: "Drawdown Reminder",
+    templateName: "Drawdown Reminder Template",
+    description:
+      "Reminder format for pending drawdown or capital call payment.",
+    bestFor: "Pending capital call follow-up",
+    blocks: [
+      { kind: "letterhead" },
+      { kind: "identity" },
+      {
+        kind: "notes",
+        title: "Drawdown reminder text",
+        subtitle: "Reminder wording",
+        content:
+          "Dear {investor_name}, this is a reminder for the pending drawdown obligation in respect of {fund_name}. Kindly complete the remittance as per the capital call notice.",
+      },
+      {
+        kind: "summary",
+        title: "Pending drawdown summary",
+        subtitle: "Commitment, capital called and uncalled capital",
+        repeatSource: "capitalAccount",
+      },
+      { kind: "signature" },
+    ],
+  },
+  {
+    id: "form-64c",
+    name: "Form 64C",
+    documentType: "Form 64C",
+    templateName: "Form 64C Template",
+    description:
+      "Investor-wise income and tax breakup format for AIF tax reporting.",
+    bestFor: "AIF tax reporting to investors",
+    blocks: [
+      { kind: "letterhead" },
+      { kind: "identity" },
+      {
+        kind: "financial",
+        title: "Form 64C income breakup",
+        subtitle: "Nature of income, gross income, TDS and net income",
+        repeatSource: "taxBreakup",
+      },
+      {
+        kind: "notes",
+        title: "Form 64C note",
+        subtitle: "Tax reporting note",
+        content:
+          "This statement provides income and tax information as per the records of {fund_name}. Investors should refer to the final signed Form 64C for statutory purposes.",
+      },
+      { kind: "signature" },
+    ],
+  },
+  {
+    id: "form-64d",
+    name: "Form 64D",
+    documentType: "Form 64D",
+    templateName: "Form 64D Template",
+    description:
+      "Fund-level tax reporting support format with income breakup and certification section.",
+    bestFor: "Fund-level AIF tax reporting",
+    blocks: [
+      { kind: "letterhead" },
+      {
+        kind: "financial",
+        title: "Form 64D income breakup",
+        subtitle: "Income head, gross income, TDS and net income",
+        repeatSource: "taxBreakup",
+      },
+      {
+        kind: "notes",
+        title: "Form 64D note",
+        subtitle: "Fund-level reporting note",
+        content:
+          "This document captures fund-level income and tax data points for reporting and review purposes.",
+      },
+      { kind: "signature" },
+    ],
+  },
+  {
+    id: "annual-income-report",
+    name: "Annual Income Report",
+    documentType: "Annual Income Report",
+    templateName: "Annual Income Report Template",
+    description:
+      "Annual investor income report with capital account, P&L, performance and tax breakup sections.",
+    bestFor: "Year-end investor reporting",
+    blocks: [
+      { kind: "letterhead" },
+      { kind: "identity" },
+      {
+        kind: "summary",
+        title: "Annual capital account summary",
+        subtitle: "Opening capital, contribution, income allocation, distribution and closing capital",
+        repeatSource: "capitalAccount",
+      },
+      {
+        kind: "financial",
+        title: "Annual income statement",
+        subtitle: "Annual income, expenses, tax and payout",
+        repeatSource: "pnl",
+      },
+      {
+        kind: "transactions",
+        title: "Annual transaction statement",
+        subtitle: "Full year capital calls, distributions and unit movements",
+        repeatSource: "transactions",
+      },
+      { kind: "performance" },
+      { kind: "chart" },
+      { kind: "notes" },
+      { kind: "signature" },
+    ],
+  },
+];
 
 function getInvestorValue(investor: InvestorProfile, code: string) {
   const values: Record<string, string> = {
@@ -746,6 +1055,9 @@ export default function DocumentStudioPage() {
   const [templateName, setTemplateName] = useState("AIF Statement Template");
   const [selectedInvestorId, setSelectedInvestorId] = useState("aarav");
   const [selectedDocumentType, setSelectedDocumentType] = useState("Statement of Account (SOA)");
+  const [selectedDocumentPresetId, setSelectedDocumentPresetId] = useState(
+  documentPresets[0]?.id || "statement-of-account"
+);
   const [blocks, setBlocks] = useState<TemplateBlock[]>(starterBlocks.map(ensureTableConfigForTemplateBlock));
   const [selectedBlockId, setSelectedBlockId] = useState(starterBlocks[2]?.id || "");
   const [selectedColumnSource, setSelectedColumnSource] = useState<TableBlockConfig["repeatSource"]>("transactions");
@@ -778,6 +1090,10 @@ export default function DocumentStudioPage() {
 
   const activeColumnSource =
     columnSources.find((source) => source.id === selectedColumnSource) ?? columnSources[0];
+    const selectedDocumentPreset =
+  documentPresets.find((preset) => preset.id === selectedDocumentPresetId) ??
+  documentPresets[0] ??
+  null;
 
   const selectedTableConfig = isConfigurableTableBlock(selectedBlock)
     ? selectedBlock.tableConfig || createTableConfig(getDefaultRepeatSourceForBlock(selectedBlock))
@@ -827,7 +1143,48 @@ export default function DocumentStudioPage() {
     setWorkspaceTab("builder");
     setStatusMessage(blank ? "New blank template created. Use Insert tools to add sections." : "Existing VENTIQ starter template loaded.");
   }
+function createPresetBlock(presetBlock: DocumentPresetBlock): TemplateBlock {
+  const baseBlock = ensureTableConfigForTemplateBlock(createBlock(presetBlock.kind));
 
+  const repeatSource =
+    presetBlock.repeatSource ||
+    baseBlock.tableConfig?.repeatSource ||
+    baseBlock.repeatSource;
+
+  return ensureTableConfigForTemplateBlock({
+    ...baseBlock,
+    title: presetBlock.title || baseBlock.title,
+    subtitle: presetBlock.subtitle || baseBlock.subtitle,
+    content: presetBlock.content ?? baseBlock.content,
+    repeatSource,
+    tableConfig: repeatSource ? createTableConfig(repeatSource) : baseBlock.tableConfig,
+    chartConfig: presetBlock.chartConfig || baseBlock.chartConfig,
+  });
+}
+
+function startDocumentPreset(preset: DocumentPreset) {
+  const nextBlocks = preset.blocks.map(createPresetBlock);
+
+  setActiveTemplateId("");
+  setTemplateName(preset.templateName);
+  setSelectedDocumentType(preset.documentType);
+  setSelectedDocumentPresetId(preset.id);
+  setBlocks(nextBlocks);
+  setSelectedBlockId(nextBlocks[0]?.id || "");
+  setSelectedColumnId(
+    nextBlocks.find((block) => block.tableConfig)?.tableConfig?.columns[0]?.id ||
+      ""
+  );
+  setImportDone(false);
+  setImportResult(null);
+  resetRuntimeResults();
+  setRibbonTab("insert");
+  setMergeMode("cell");
+  setWorkspaceTab("builder");
+  setStatusMessage(
+    `${preset.name} kit loaded. You can now edit blocks, fields, tables, notes and signature before saving.`
+  );
+}
   function openSavedTemplate(template: SavedTemplate) {
     const savedBlocks = normalizeSavedTemplateBlocks(template.blocks_json);
     const importInfo = getSavedTemplateImportResult(template);
@@ -1450,14 +1807,41 @@ export default function DocumentStudioPage() {
           </button>
         </div>
 
-        <div className="ids-start-actions">
-          <button className="ids-secondary-btn" onClick={() => startNewTemplate(false)} type="button">
-            Load full SOA starter template
-          </button>
-          <button className="ids-secondary-btn" onClick={() => setWorkspaceTab("library")} type="button">
-            Open Template Library
-          </button>
-        </div>
+      <div className="ids-start-actions">
+  <button className="ids-secondary-btn" onClick={() => startNewTemplate(false)} type="button">
+    Load full SOA starter template
+  </button>
+  <button className="ids-secondary-btn" onClick={() => setWorkspaceTab("library")} type="button">
+    Open Template Library
+  </button>
+</div>
+
+<div className="ids-document-kit-section">
+  <div>
+    <p className="ids-eyebrow">Ready Document Kits</p>
+    <h2>Create any AIF investor document from a preset</h2>
+    <p>
+      Each kit loads the right blocks, table sources, merge fields, notes and
+      signature section for that document type.
+    </p>
+  </div>
+
+  <div className="ids-document-kit-grid">
+    {documentPresets.map((preset) => (
+      <button
+        className="ids-document-kit-card"
+        key={preset.id}
+        onClick={() => startDocumentPreset(preset)}
+        type="button"
+      >
+        <span>{preset.documentType}</span>
+        <strong>{preset.name}</strong>
+        <p>{preset.description}</p>
+        <em>{preset.bestFor}</em>
+      </button>
+    ))}
+  </div>
+</div>
       </div>
     );
   }
@@ -1569,6 +1953,34 @@ export default function DocumentStudioPage() {
     if (ribbonTab === "insert") {
       return (
         <div className="ids-ribbon-grid compact">
+          <div className="ids-ribbon-group wide">
+  <select
+    className="ids-select"
+    value={selectedDocumentPresetId}
+    onChange={(event) => setSelectedDocumentPresetId(event.target.value)}
+  >
+    {documentPresets.map((preset) => (
+      <option key={preset.id} value={preset.id}>
+        {preset.name}
+      </option>
+    ))}
+  </select>
+
+  <button
+    className="ids-soft-btn"
+    disabled={!selectedDocumentPreset}
+    onClick={() => {
+      if (selectedDocumentPreset) {
+        startDocumentPreset(selectedDocumentPreset);
+      }
+    }}
+    type="button"
+  >
+    Load document kit
+  </button>
+
+  <div className="ids-group-label">Document Kits</div>
+</div>
           <div className="ids-ribbon-group wide">
             <div className="ids-tile-row">
               <button onClick={() => addBlock("summary")} type="button">📋<span>Summary Table</span></button>
@@ -1836,7 +2248,7 @@ export default function DocumentStudioPage() {
                     {tableConfig.repeatRows ? "↻ Repeats from" : "Static table from"} {tableConfig.repeatSource} · {tableConfig.columns.length} mapped columns
                   </span>
                 </td>
-              </tr>/* Compact smart editor ribbon */
+          </tr>
             </tbody>
           </table>
         )}
@@ -3514,6 +3926,82 @@ export default function DocumentStudioPage() {
   min-height: 30px !important;
   padding: 5px 10px !important;
   font-size: 11px !important;
+}.ids-document-kit-section {
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid #e4dac9;
+}
+
+.ids-document-kit-section h2 {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: -0.03em;
+}
+
+.ids-document-kit-section p {
+  color: #64748b;
+  max-width: 880px;
+}
+
+.ids-document-kit-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.ids-document-kit-card {
+  text-align: left;
+  border: 1px solid #e4dac9;
+  background: #fffdf8;
+  border-radius: 16px;
+  padding: 14px;
+  cursor: pointer;
+  color: #071a3a;
+  min-height: 170px;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.ids-document-kit-card:hover {
+  transform: translateY(-2px);
+  border-color: #b48314;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
+}
+
+.ids-document-kit-card span {
+  color: #9a7312;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ids-document-kit-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 15px;
+}
+
+.ids-document-kit-card p {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #64748b;
+}
+
+.ids-document-kit-card em {
+  display: inline-block;
+  margin-top: 10px;
+  color: #9a7312;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+@media (max-width: 1300px) {
+  .ids-document-kit-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
       `}</style>
     </main>
