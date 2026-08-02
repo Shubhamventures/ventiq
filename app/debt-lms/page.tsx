@@ -88,6 +88,25 @@ type BankMatchRow = {
   matchStatus: "Matched" | "Partial Match" | "Unmatched";
   action: string;
 };
+
+type BankReconReceipt = {
+  id: string;
+  borrowerName: string;
+  loanId: string;
+  repaymentScheduleId: string;
+  dueDate: string;
+  receiptDate: string;
+  bankReference: string;
+  bankNarration: string;
+  principalReceived: number;
+  interestReceived: number;
+  feesReceived: number;
+  penaltyReceived: number;
+  otherReceived: number;
+  matchStatus: "Approved" | "Review" | "Rejected";
+  syncStatus: "Ready" | "Synced" | "Ignored";
+  confidence: number;
+};
 type NewLoanForm = {
   borrowerName: string;
   borrowerEmail: string;
@@ -456,6 +475,45 @@ const sampleBankMatches: BankMatchRow[] = [
   },
 ];
 
+const sampleBankReconReceipts: BankReconReceipt[] = [
+  {
+    id: "bank-recon-sync-001",
+    borrowerName: "Alpha Fintech Pvt Ltd",
+    loanId: "loan-001",
+    repaymentScheduleId: "repay-001",
+    dueDate: "2026-08-15",
+    receiptDate: "2026-08-15",
+    bankReference: "UTR-BANKRECON-001",
+    bankNarration: "NEFT ALPHA FINTECH REPAYMENT AUG",
+    principalReceived: 2500000,
+    interestReceived: 1125000,
+    feesReceived: 0,
+    penaltyReceived: 0,
+    otherReceived: 0,
+    matchStatus: "Approved",
+    syncStatus: "Ready",
+    confidence: 98,
+  },
+  {
+    id: "bank-recon-sync-002",
+    borrowerName: "Nova Health Systems",
+    loanId: "loan-002",
+    repaymentScheduleId: "repay-002",
+    dueDate: "2026-08-05",
+    receiptDate: "2026-08-06",
+    bankReference: "UTR-BANKRECON-002",
+    bankNarration: "NEFT NOVA HEALTH SYSTEMS INSTL AUG",
+    principalReceived: 2000000,
+    interestReceived: 980000,
+    feesReceived: 0,
+    penaltyReceived: 0,
+    otherReceived: 0,
+    matchStatus: "Approved",
+    syncStatus: "Ready",
+    confidence: 94,
+  },
+];
+
 function formatCurrency(value: number) {
   if (!Number.isFinite(value)) return "₹0";
 
@@ -691,6 +749,137 @@ function mapBankMatch(row: DataRow): BankMatchRow {
     action: getString(row, ["action_required"], "Review match"),
   };
 }
+
+function normalizeBankReconStatus(value: string): BankReconReceipt["matchStatus"] {
+  const status = value.toLowerCase();
+
+  if (status.includes("reject")) return "Rejected";
+  if (status.includes("review")) return "Review";
+
+  return "Approved";
+}
+
+function normalizeBankReconSyncStatus(value: string): BankReconReceipt["syncStatus"] {
+  const status = value.toLowerCase();
+
+  if (status.includes("sync")) return "Synced";
+  if (status.includes("ignore")) return "Ignored";
+
+  return "Ready";
+}
+
+function mapBankReconReceipt(row: DataRow): BankReconReceipt {
+  return {
+    id: getString(row, ["id"], crypto.randomUUID()),
+    borrowerName: getString(row, ["borrower_name"], "Borrower"),
+    loanId: getString(row, ["loan_id"], ""),
+    repaymentScheduleId: getString(row, ["repayment_schedule_id"], ""),
+    dueDate: getDateString(row, ["due_date"], "2026-01-01"),
+    receiptDate: getDateString(row, ["receipt_date"], "2026-01-01"),
+    bankReference: getString(row, ["bank_reference"], ""),
+    bankNarration: getString(row, ["bank_narration"], "Bank reconciliation receipt"),
+    principalReceived: getNumber(row, ["principal_received"]),
+    interestReceived: getNumber(row, ["interest_received"]),
+    feesReceived: getNumber(row, ["fees_received"]),
+    penaltyReceived: getNumber(row, ["penalty_received"]),
+    otherReceived: getNumber(row, ["other_received"]),
+    matchStatus: normalizeBankReconStatus(getString(row, ["match_status"], "Approved")),
+    syncStatus: normalizeBankReconSyncStatus(getString(row, ["sync_status"], "Ready")),
+    confidence: getNumber(row, ["confidence"]),
+  };
+}
+
+function getBankReconReceiptTotal(receipt: BankReconReceipt) {
+  return (
+    receipt.principalReceived +
+    receipt.interestReceived +
+    receipt.feesReceived +
+    receipt.penaltyReceived +
+    receipt.otherReceived
+  );
+}
+
+function findScheduleRowForBankReconReceipt(
+  receipt: BankReconReceipt,
+  rows: RepaymentRow[]
+) {
+  const byScheduleId = rows.find(
+    (row) => receipt.repaymentScheduleId && row.id === receipt.repaymentScheduleId
+  );
+
+  if (byScheduleId) return byScheduleId;
+
+  const byLoanAndDate = rows.find(
+    (row) =>
+      receipt.loanId &&
+      row.loanId === receipt.loanId &&
+      row.dueDate === receipt.dueDate
+  );
+
+  if (byLoanAndDate) return byLoanAndDate;
+
+  const byBorrowerAndDate = rows.find(
+    (row) =>
+      row.borrowerName.toLowerCase() === receipt.borrowerName.toLowerCase() &&
+      row.dueDate === receipt.dueDate
+  );
+
+  if (byBorrowerAndDate) return byBorrowerAndDate;
+
+  return rows.find(
+    (row) =>
+      row.borrowerName.toLowerCase() === receipt.borrowerName.toLowerCase() &&
+      row.status !== "Received"
+  );
+}
+
+function applyBankReconReceiptToRepaymentRow(
+  row: RepaymentRow,
+  receipt: BankReconReceipt
+): RepaymentRow {
+  const receivedAmount = getBankReconReceiptTotal(receipt);
+  const pendingAmount = Math.max(row.totalDue - receivedAmount, 0);
+  const nextStatus = getCollectionStatusFromAmounts(
+    row.dueDate,
+    row.totalDue,
+    receivedAmount
+  );
+
+  return {
+    ...row,
+    receivedAmount,
+    principalReceived: receipt.principalReceived,
+    interestReceived: receipt.interestReceived,
+    feesReceived: receipt.feesReceived,
+    penaltyReceived: receipt.penaltyReceived,
+    otherReceived: receipt.otherReceived,
+    pendingAmount,
+    status: nextStatus,
+    daysPastDue: getDaysPastDue(row.dueDate),
+  };
+}
+
+function buildBankMatchFromBankReconReceipt(
+  receipt: BankReconReceipt,
+  row: RepaymentRow
+): BankMatchRow {
+  const receivedAmount = getBankReconReceiptTotal(receipt);
+  const pendingAmount = Math.max(row.totalDue - receivedAmount, 0);
+
+  return {
+    id: crypto.randomUUID(),
+    borrowerName: row.borrowerName,
+    expectedAmount: row.totalDue,
+    receivedAmount,
+    bankNarration: receipt.bankNarration || receipt.bankReference,
+    matchStatus:
+      pendingAmount <= 0 ? "Matched" : receivedAmount > 0 ? "Partial Match" : "Unmatched",
+    action:
+      pendingAmount <= 0
+        ? "Synced from Bank Reconciliation"
+        : "Partial receipt synced. Pending amount remains open.",
+  };
+}
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value
@@ -890,6 +1079,9 @@ export default function DebtLMSPage() {
     useState<ReceiptUpdateForm>(emptyReceiptForm);
   const [isSavingReceipt, setIsSavingReceipt] = useState(false);
   const [receiptMessage, setReceiptMessage] = useState("");
+
+  const [isSyncingBankRecon, setIsSyncingBankRecon] = useState(false);
+  const [bankReconSyncMessage, setBankReconSyncMessage] = useState("");
 
   useEffect(() => {
     async function loadDebtLmsData() {
@@ -1546,6 +1738,171 @@ export default function DebtLMSPage() {
       );
     } finally {
       setIsSavingReceipt(false);
+    }
+  }
+
+  async function syncReceiptsFromBankReconciliation() {
+    setBankReconSyncMessage("");
+    setIsSyncingBankRecon(true);
+
+    try {
+      let receiptsToSync = sampleBankReconReceipts.filter(
+        (receipt) => receipt.matchStatus === "Approved" && receipt.syncStatus === "Ready"
+      );
+
+      if (isSupabaseConfigured && supabase) {
+        const db = supabase as any;
+
+        const { data, error } = await db
+          .from("bank_reconciliation_debt_receipts")
+          .select("*")
+          .eq("match_status", "Approved")
+          .eq("sync_status", "Ready")
+          .order("receipt_date", { ascending: false });
+
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        receiptsToSync = data && data.length > 0 ? (data as DataRow[]).map(mapBankReconReceipt) : [];
+      }
+
+      if (receiptsToSync.length === 0) {
+        setBankReconSyncMessage(
+          "No approved Bank Reconciliation receipts are ready to sync."
+        );
+        return;
+      }
+
+      const nextRepaymentRows = [...repaymentRows];
+      const nextBankMatches: BankMatchRow[] = [];
+      const syncedReceiptIds: string[] = [];
+      const updatedScheduleRows: RepaymentRow[] = [];
+
+      receiptsToSync.forEach((receipt) => {
+        const existingRow = findScheduleRowForBankReconReceipt(
+          receipt,
+          nextRepaymentRows
+        );
+
+        if (!existingRow) return;
+
+        const updatedRow = applyBankReconReceiptToRepaymentRow(existingRow, receipt);
+        const rowIndex = nextRepaymentRows.findIndex((row) => row.id === existingRow.id);
+
+        if (rowIndex >= 0) {
+          nextRepaymentRows[rowIndex] = updatedRow;
+          updatedScheduleRows.push(updatedRow);
+          nextBankMatches.push(buildBankMatchFromBankReconReceipt(receipt, updatedRow));
+          syncedReceiptIds.push(receipt.id);
+        }
+      });
+
+      if (updatedScheduleRows.length === 0) {
+        setBankReconSyncMessage(
+          "Bank Reconciliation receipts were found, but no matching Debt LMS schedule row was available."
+        );
+        return;
+      }
+
+      if (isSupabaseConfigured && supabase) {
+        const db = supabase as any;
+
+        const scheduleUpdates = updatedScheduleRows
+          .filter((row) => isUuid(row.id))
+          .map((row) =>
+            db
+              .from("debt_lms_repayment_schedule")
+              .update({
+                principal_received: row.principalReceived || 0,
+                interest_received: row.interestReceived || 0,
+                fees_received: row.feesReceived || 0,
+                penalty_received: row.penaltyReceived || 0,
+                other_received: row.otherReceived || 0,
+                amount_received: row.receivedAmount,
+                pending_amount: row.pendingAmount,
+                collection_status: row.status,
+                days_past_due: row.daysPastDue,
+                receipt_date: new Date().toISOString().slice(0, 10),
+              })
+              .eq("id", row.id)
+          );
+
+        if (scheduleUpdates.length > 0) {
+          const updateResults = await Promise.all(scheduleUpdates);
+          const updateError = updateResults.find((result) => result.error)?.error;
+
+          if (updateError) {
+            throw new Error(updateError.message);
+          }
+        }
+
+        if (nextBankMatches.length > 0) {
+          const bankMatchPayload = nextBankMatches.map((match) => ({
+            borrower_name: match.borrowerName,
+            expected_amount: match.expectedAmount,
+            received_amount: match.receivedAmount,
+            pending_amount: Math.max(match.expectedAmount - match.receivedAmount, 0),
+            bank_narration: match.bankNarration,
+            match_status: match.matchStatus,
+            match_confidence:
+              match.matchStatus === "Matched"
+                ? 95
+                : match.matchStatus === "Partial Match"
+                  ? 70
+                  : 35,
+            action_required: match.action,
+          }));
+
+          const { data: savedBankMatches, error: bankMatchError } = await db
+            .from("debt_lms_bank_matches")
+            .insert(bankMatchPayload)
+            .select("*")
+            .order("created_at", { ascending: false });
+
+          if (bankMatchError) {
+            throw new Error(bankMatchError.message);
+          }
+
+          if (savedBankMatches && savedBankMatches.length > 0) {
+            nextBankMatches.splice(
+              0,
+              nextBankMatches.length,
+              ...(savedBankMatches as DataRow[]).map(mapBankMatch)
+            );
+          }
+        }
+
+        const validReceiptIds = syncedReceiptIds.filter((id) => isUuid(id));
+
+        if (validReceiptIds.length > 0) {
+          const { error: syncError } = await db
+            .from("bank_reconciliation_debt_receipts")
+            .update({
+              sync_status: "Synced",
+              synced_at: new Date().toISOString(),
+            })
+            .in("id", validReceiptIds);
+
+          if (syncError) {
+            throw new Error(syncError.message);
+          }
+        }
+      }
+
+      setRepaymentRows(nextRepaymentRows);
+      setBankMatches((currentMatches) => [...nextBankMatches, ...currentMatches]);
+      setBankReconSyncMessage(
+        `${updatedScheduleRows.length} receipt(s) synced from Bank Reconciliation.`
+      );
+    } catch (error) {
+      setBankReconSyncMessage(
+        error instanceof Error
+          ? `Bank Reconciliation sync failed: ${error.message}`
+          : "Bank Reconciliation sync failed."
+      );
+    } finally {
+      setIsSyncingBankRecon(false);
     }
   }
 
@@ -3103,10 +3460,25 @@ export default function DebtLMSPage() {
                 </p>
               </div>
 
-              <a className="debt-secondary" href="/bank-reconciliation">
-                Sync from Bank Reconciliation
-              </a>
+              <div className="debt-header-actions">
+                <button
+                  className="debt-primary"
+                  disabled={isSyncingBankRecon}
+                  onClick={syncReceiptsFromBankReconciliation}
+                  type="button"
+                >
+                  {isSyncingBankRecon ? "Syncing..." : "Sync from Bank Reconciliation"}
+                </button>
+
+                <a className="debt-secondary" href="/bank-reconciliation">
+                  Open Bank Recon
+                </a>
+              </div>
             </div>
+
+            {bankReconSyncMessage && (
+              <p className="loan-form-message">{bankReconSyncMessage}</p>
+            )}
 
             <div className="table-wrap">
               <table>
