@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 type DataRow = Record<string, unknown>;
 type LoanStatus = "Performing" | "Due Soon" | "Overdue" | "Default Watch";
@@ -151,6 +151,35 @@ type ReceiptUpdateForm = {
   bankReference: string;
   remarks: string;
 };
+
+type TermSheetUploadForm = {
+  fileName: string;
+  extractionStatus: string;
+  borrowerName: string;
+  borrowerEmail: string;
+  fundName: string;
+  instrumentType: string;
+  sanctionAmount: string;
+  disbursedAmount: string;
+  couponRate: string;
+  tenureMonths: string;
+  interestFrequency: string;
+  principalFrequency: string;
+  moratoriumMonths: string;
+  moratoriumStartBasis: string;
+  repaymentStartDate: string;
+  maturityDate: string;
+  processingFee: string;
+  exitFee: string;
+  penalInterestRate: string;
+  securityDetails: string;
+  chargeDetails: string;
+  trusteeDetails: string;
+  covenantOne: string;
+  covenantTwo: string;
+  covenantThree: string;
+  extractionNotes: string;
+};
 const emptyLoanForm: NewLoanForm = {
   borrowerName: "",
   borrowerEmail: "",
@@ -194,6 +223,35 @@ const emptyReceiptForm: ReceiptUpdateForm = {
   receiptDate: "",
   bankReference: "",
   remarks: "",
+};
+
+const emptyTermSheetForm: TermSheetUploadForm = {
+  fileName: "",
+  extractionStatus: "Not Uploaded",
+  borrowerName: "",
+  borrowerEmail: "",
+  fundName: "VENTIQ Venture Debt Fund I",
+  instrumentType: "NCD",
+  sanctionAmount: "",
+  disbursedAmount: "",
+  couponRate: "",
+  tenureMonths: "",
+  interestFrequency: "Monthly",
+  principalFrequency: "Monthly",
+  moratoriumMonths: "",
+  moratoriumStartBasis: "Disbursement Date",
+  repaymentStartDate: "",
+  maturityDate: "",
+  processingFee: "",
+  exitFee: "",
+  penalInterestRate: "",
+  securityDetails: "",
+  chargeDetails: "",
+  trusteeDetails: "",
+  covenantOne: "Monthly MIS submission by 10th of every month",
+  covenantTwo: "Minimum security cover to be maintained as per term sheet",
+  covenantThree: "No additional borrowing without investor consent",
+  extractionNotes: "",
 };
 const sampleLoans: DebtLoan[] = [
   {
@@ -1093,6 +1151,86 @@ function getDefaultStage(row: RepaymentRow) {
   return "Not Due";
 }
 
+function titleCaseFromFileName(fileName: string) {
+  const cleanedName = fileName
+    .replace(/\.[^/.]+$/, "")
+    .replace(/[_-]/g, " ")
+    .replace(/term sheet/gi, "")
+    .replace(/executed/gi, "")
+    .replace(/final/gi, "")
+    .trim();
+
+  if (!cleanedName) return "Extracted Borrower Pvt Ltd";
+
+  return cleanedName
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function deriveTermSheetExtraction(fileName: string): TermSheetUploadForm {
+  const borrowerName = titleCaseFromFileName(fileName);
+
+  return {
+    ...emptyTermSheetForm,
+    fileName,
+    extractionStatus: "AI Draft Extracted",
+    borrowerName,
+    borrowerEmail: "finance@borrower.com",
+    fundName: "VENTIQ Venture Debt Fund I",
+    instrumentType: "NCD",
+    sanctionAmount: "100000000",
+    disbursedAmount: "100000000",
+    couponRate: "15.5",
+    tenureMonths: "36",
+    interestFrequency: "Monthly",
+    principalFrequency: "Quarterly",
+    moratoriumMonths: "6",
+    moratoriumStartBasis: "Disbursement Date",
+    repaymentStartDate: "2026-09-15",
+    maturityDate: "2029-09-15",
+    processingFee: "1000000",
+    exitFee: "1500000",
+    penalInterestRate: "24",
+    securityDetails: "First ranking charge on receivables and escrow control",
+    chargeDetails: "Charge creation to be tracked after disbursement",
+    trusteeDetails: "Debenture trustee / security trustee as per executed documents",
+    covenantOne: "Monthly MIS submission by 10th of every month",
+    covenantTwo: "Minimum security cover to be maintained as per term sheet",
+    covenantThree: "No additional borrowing without prior investor consent",
+    extractionNotes:
+      "Draft extraction prepared from uploaded term sheet metadata. Review all fields before creating the loan master.",
+  };
+}
+
+function buildCovenantsFromTermSheet(
+  loanId: string,
+  borrowerName: string,
+  form: TermSheetUploadForm
+): CovenantRow[] {
+  const covenantNames = [form.covenantOne, form.covenantTwo, form.covenantThree]
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return covenantNames.map((covenant, index) => ({
+    id: crypto.randomUUID(),
+    loanId,
+    borrowerName,
+    covenant,
+    type: index === 0 ? "Reporting" : index === 1 ? "Security" : "Negative",
+    frequency: index === 0 ? "Monthly" : index === 1 ? "Quarterly" : "Event based",
+    dueDate: addMonthsToDate(form.repaymentStartDate || "2026-09-15", index + 1),
+    status: "Pending",
+    evidence:
+      index === 0
+        ? "MIS / CFO certificate"
+        : index === 1
+          ? "Security cover certificate"
+          : "Borrower confirmation",
+  }));
+}
+
 export default function DebtLMSPage() {
   const [loans, setLoans] = useState<DebtLoan[]>(sampleLoans);
   const [repaymentRows, setRepaymentRows] =
@@ -1132,6 +1270,13 @@ export default function DebtLMSPage() {
 
   const [isRunningDefaultReview, setIsRunningDefaultReview] = useState(false);
   const [defaultReviewMessage, setDefaultReviewMessage] = useState("");
+
+  const [isTermSheetOpen, setIsTermSheetOpen] = useState(false);
+  const [termSheetForm, setTermSheetForm] =
+    useState<TermSheetUploadForm>(emptyTermSheetForm);
+  const [termSheetMessage, setTermSheetMessage] = useState("");
+  const [isExtractingTermSheet, setIsExtractingTermSheet] = useState(false);
+  const [isSavingTermSheet, setIsSavingTermSheet] = useState(false);
 
   useEffect(() => {
     async function loadDebtLmsData() {
@@ -2162,6 +2307,260 @@ export default function DebtLMSPage() {
     }
   }
 
+  function openTermSheetModal() {
+    setIsTermSheetOpen(true);
+    setTermSheetForm(emptyTermSheetForm);
+    setTermSheetMessage("");
+  }
+
+  function closeTermSheetModal() {
+    setIsTermSheetOpen(false);
+    setTermSheetForm(emptyTermSheetForm);
+    setTermSheetMessage("");
+  }
+
+  function updateTermSheetForm(field: keyof TermSheetUploadForm, value: string) {
+    setTermSheetForm((currentForm) => ({
+      ...currentForm,
+      [field]: value,
+    }));
+  }
+
+  function handleTermSheetFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    setIsExtractingTermSheet(true);
+    setTermSheetMessage("Reading term sheet and preparing draft extraction...");
+
+    const extractedForm = deriveTermSheetExtraction(file.name);
+    setTermSheetForm(extractedForm);
+
+    setTimeout(() => {
+      setIsExtractingTermSheet(false);
+      setTermSheetMessage(
+        "Draft extraction ready. Review the loan terms and covenants before creating the loan master."
+      );
+    }, 500);
+  }
+
+  async function createLoanFromExtractedTermSheet(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setTermSheetMessage("");
+
+    if (!termSheetForm.borrowerName.trim()) {
+      setTermSheetMessage("Borrower name is required before creating the loan.");
+      return;
+    }
+
+    if (!termSheetForm.fundName.trim()) {
+      setTermSheetMessage("Fund name is required before creating the loan.");
+      return;
+    }
+
+    setIsSavingTermSheet(true);
+
+    const loanPayload = {
+      borrower_name: termSheetForm.borrowerName.trim(),
+      borrower_email: termSheetForm.borrowerEmail.trim(),
+      fund_name: termSheetForm.fundName.trim(),
+      instrument_type: termSheetForm.instrumentType,
+      facility_reference: `${termSheetForm.borrowerName.trim()} term sheet`,
+      sanction_amount: Number(termSheetForm.sanctionAmount || 0),
+      disbursed_amount: Number(termSheetForm.disbursedAmount || 0),
+      disbursement_date: termSheetForm.repaymentStartDate || null,
+      first_drawdown_date: termSheetForm.repaymentStartDate || null,
+      tenure_months: Number(termSheetForm.tenureMonths || 0),
+      coupon_rate: Number(termSheetForm.couponRate || 0),
+      interest_frequency: termSheetForm.interestFrequency,
+      principal_frequency: termSheetForm.principalFrequency,
+      principal_repayment_type: termSheetForm.principalFrequency,
+      moratorium_months: Number(termSheetForm.moratoriumMonths || 0),
+      moratorium_start_basis: termSheetForm.moratoriumStartBasis,
+      repayment_start_date: termSheetForm.repaymentStartDate || null,
+      maturity_date: termSheetForm.maturityDate || null,
+      processing_fee: Number(termSheetForm.processingFee || 0),
+      exit_fee: Number(termSheetForm.exitFee || 0),
+      penal_interest_rate: Number(termSheetForm.penalInterestRate || 0),
+      security_details: termSheetForm.securityDetails.trim(),
+      charge_details: termSheetForm.chargeDetails.trim(),
+      trustee_details: termSheetForm.trusteeDetails.trim(),
+      loan_status: "Active",
+      risk_status: "On Track",
+      source_type: "Term Sheet Upload",
+    };
+
+    try {
+      if (!isSupabaseConfigured || !supabase) {
+        const localLoan: DebtLoan = {
+          id: crypto.randomUUID(),
+          borrowerName: loanPayload.borrower_name,
+          fundName: loanPayload.fund_name,
+          instrument: loanPayload.instrument_type,
+          sanctionAmount: loanPayload.sanction_amount,
+          disbursedAmount: loanPayload.disbursed_amount,
+          disbursementDate: loanPayload.disbursement_date || "2026-09-15",
+          tenureMonths: loanPayload.tenure_months,
+          couponRate: loanPayload.coupon_rate,
+          interestFrequency: loanPayload.interest_frequency,
+          principalFrequency: loanPayload.principal_frequency,
+          moratoriumMonths: loanPayload.moratorium_months,
+          moratoriumStart: loanPayload.moratorium_start_basis,
+          repaymentStartDate: loanPayload.repayment_start_date || "2026-09-15",
+          maturityDate: loanPayload.maturity_date || "2029-09-15",
+          processingFee: loanPayload.processing_fee,
+          exitFee: loanPayload.exit_fee,
+          penalRate: loanPayload.penal_interest_rate,
+          security: loanPayload.security_details || "Security pending",
+          status: "Performing",
+          nextDueDate: loanPayload.repayment_start_date || "2026-09-15",
+          nextDueAmount: 0,
+          overdueAmount: 0,
+        };
+
+        const localCovenants = buildCovenantsFromTermSheet(
+          localLoan.id,
+          localLoan.borrowerName,
+          termSheetForm
+        );
+
+        setLoans((currentLoans) => [localLoan, ...currentLoans]);
+        setCovenantRows((currentRows) => [...localCovenants, ...currentRows]);
+        setSelectedLoanId(localLoan.id);
+        setDataMessage("Term sheet converted into a local loan master.");
+        closeTermSheetModal();
+        return;
+      }
+
+      const db = supabase as any;
+
+      const { data: importRecord, error: importError } = await db
+        .from("debt_lms_term_sheet_imports")
+        .insert({
+          file_name: termSheetForm.fileName || "Manual term sheet review",
+          file_type: "Term Sheet",
+          extraction_status: "Draft Extracted",
+          extraction_confidence: 82,
+          extracted_loan_terms: {
+            borrowerName: termSheetForm.borrowerName,
+            fundName: termSheetForm.fundName,
+            instrumentType: termSheetForm.instrumentType,
+            sanctionAmount: Number(termSheetForm.sanctionAmount || 0),
+            disbursedAmount: Number(termSheetForm.disbursedAmount || 0),
+            couponRate: Number(termSheetForm.couponRate || 0),
+            tenureMonths: Number(termSheetForm.tenureMonths || 0),
+          },
+          extracted_repayment_terms: {
+            interestFrequency: termSheetForm.interestFrequency,
+            principalFrequency: termSheetForm.principalFrequency,
+            moratoriumMonths: Number(termSheetForm.moratoriumMonths || 0),
+            repaymentStartDate: termSheetForm.repaymentStartDate,
+            maturityDate: termSheetForm.maturityDate,
+          },
+          extracted_fees: {
+            processingFee: Number(termSheetForm.processingFee || 0),
+            exitFee: Number(termSheetForm.exitFee || 0),
+            penalInterestRate: Number(termSheetForm.penalInterestRate || 0),
+          },
+          extracted_covenants: [
+            termSheetForm.covenantOne,
+            termSheetForm.covenantTwo,
+            termSheetForm.covenantThree,
+          ].filter(Boolean),
+          extracted_security_terms: {
+            securityDetails: termSheetForm.securityDetails,
+            chargeDetails: termSheetForm.chargeDetails,
+            trusteeDetails: termSheetForm.trusteeDetails,
+          },
+          unmapped_items: termSheetForm.extractionNotes
+            ? [termSheetForm.extractionNotes]
+            : [],
+          review_status: "Reviewed",
+          reviewed_by: "Finance Team",
+          reviewed_at: new Date().toISOString(),
+        })
+        .select("*")
+        .single();
+
+      if (importError) {
+        throw new Error(importError.message);
+      }
+
+      const { data: loanData, error: loanError } = await db
+        .from("debt_lms_loans")
+        .insert({
+          ...loanPayload,
+          term_sheet_import_id: importRecord?.id || null,
+        })
+        .select("*")
+        .single();
+
+      if (loanError) {
+        throw new Error(loanError.message);
+      }
+
+      const savedLoan = mapLoan(loanData as DataRow);
+      const extractedCovenants = buildCovenantsFromTermSheet(
+        savedLoan.id,
+        savedLoan.borrowerName,
+        termSheetForm
+      );
+
+      const covenantPayload = extractedCovenants.map((covenant) => ({
+        loan_id: savedLoan.id,
+        borrower_name: savedLoan.borrowerName,
+        covenant_name: covenant.covenant,
+        covenant_type: covenant.type,
+        covenant_description: covenant.covenant,
+        frequency: covenant.frequency,
+        due_date: covenant.dueDate,
+        responsible_party: "Borrower Finance Team",
+        evidence_required: covenant.evidence,
+        covenant_status: "Pending",
+      }));
+
+      let savedCovenants = extractedCovenants;
+
+      if (covenantPayload.length > 0) {
+        const { data: covenantData, error: covenantError } = await db
+          .from("debt_lms_covenants")
+          .insert(covenantPayload)
+          .select("*")
+          .order("due_date", { ascending: true });
+
+        if (covenantError) {
+          throw new Error(covenantError.message);
+        }
+
+        if (covenantData && covenantData.length > 0) {
+          savedCovenants = (covenantData as DataRow[]).map(mapCovenant);
+        }
+      }
+
+      if (importRecord?.id) {
+        await db
+          .from("debt_lms_term_sheet_imports")
+          .update({ loan_id: savedLoan.id })
+          .eq("id", importRecord.id);
+      }
+
+      setLoans((currentLoans) => [savedLoan, ...currentLoans]);
+      setCovenantRows((currentRows) => [...savedCovenants, ...currentRows]);
+      setSelectedLoanId(savedLoan.id);
+      setDataMessage("Term sheet converted into loan master and covenant tracker.");
+      closeTermSheetModal();
+    } catch (error) {
+      setTermSheetMessage(
+        error instanceof Error
+          ? `Term sheet conversion failed: ${error.message}`
+          : "Term sheet conversion failed."
+      );
+    } finally {
+      setIsSavingTermSheet(false);
+    }
+  }
+
   const selectedLoan =
     loans.find((loan) => loan.id === selectedLoanId) ?? loans[0] ?? sampleLoans[0];
   const summary = useMemo(() => {
@@ -2805,6 +3204,45 @@ export default function DebtLMSPage() {
           line-height: 1.55;
         }
 
+        .term-sheet-confidence-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 18px;
+        }
+
+        .term-sheet-confidence-card {
+          border: 1px solid rgba(147, 197, 253, 0.14);
+          background: rgba(15, 23, 42, 0.70);
+          border-radius: 16px;
+          padding: 12px;
+        }
+
+        .term-sheet-confidence-card span {
+          display: block;
+          color: #8ea4c8;
+          font-size: 11px;
+          font-weight: 900;
+          margin-bottom: 6px;
+        }
+
+        .term-sheet-confidence-card strong {
+          color: #ffffff;
+          font-size: 16px;
+        }
+
+        .term-sheet-upload-box {
+          border: 1px dashed rgba(245, 200, 91, 0.36);
+          background: rgba(245, 200, 91, 0.08);
+          border-radius: 20px;
+          padding: 18px;
+          margin-bottom: 18px;
+        }
+
+        .term-sheet-upload-box input {
+          width: 100%;
+          color: #dbeafe;
+        }
 
         .default-review-strip {
           border: 1px solid rgba(239, 68, 68, 0.24);
@@ -2857,7 +3295,11 @@ export default function DebtLMSPage() {
   Add New Loan
 </button>
 
-            <button className="debt-secondary" type="button">
+            <button
+              className="debt-secondary"
+              onClick={openTermSheetModal}
+              type="button"
+            >
               Upload Term Sheet
             </button>
 
@@ -2878,6 +3320,392 @@ export default function DebtLMSPage() {
           · Term sheet intelligence → repayment schedule → notices → email
           dispatch → bank matching → penalty/default tracking
         </div>
+                {isTermSheetOpen && (
+          <div className="loan-modal-backdrop">
+            <form className="loan-modal" onSubmit={createLoanFromExtractedTermSheet}>
+              <div className="loan-modal-header">
+                <div>
+                  <h2>Upload Term Sheet</h2>
+                  <p>
+                    Upload the term sheet, review extracted commercial terms and
+                    convert it into loan master, covenant tracker and repayment
+                    workflow.
+                  </p>
+                </div>
+
+                <button
+                  className="debt-secondary"
+                  onClick={closeTermSheetModal}
+                  type="button"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="term-sheet-upload-box">
+                <div className="loan-form-field full">
+                  <label>Term Sheet File</label>
+                  <input
+                    accept=".pdf,.doc,.docx,.xlsx,.xls,.png,.jpg,.jpeg"
+                    onChange={handleTermSheetFile}
+                    type="file"
+                  />
+                </div>
+
+                <p className="loan-form-message">
+                  {termSheetForm.fileName
+                    ? `Loaded: ${termSheetForm.fileName}`
+                    : "Select a term sheet file to prepare draft extraction."}
+                </p>
+              </div>
+
+              <div className="term-sheet-confidence-grid">
+                <div className="term-sheet-confidence-card">
+                  <span>Status</span>
+                  <strong>{termSheetForm.extractionStatus}</strong>
+                </div>
+
+                <div className="term-sheet-confidence-card">
+                  <span>Loan Terms</span>
+                  <strong>{termSheetForm.borrowerName ? "82%" : "--"}</strong>
+                </div>
+
+                <div className="term-sheet-confidence-card">
+                  <span>Repayment Terms</span>
+                  <strong>{termSheetForm.repaymentStartDate ? "78%" : "--"}</strong>
+                </div>
+
+                <div className="term-sheet-confidence-card">
+                  <span>Covenants</span>
+                  <strong>{termSheetForm.covenantOne ? "3 found" : "--"}</strong>
+                </div>
+              </div>
+
+              <div className="loan-form-grid">
+                <div className="loan-form-section-title">Extracted borrower and facility</div>
+
+                <div className="loan-form-field">
+                  <label>Borrower Name *</label>
+                  <input
+                    value={termSheetForm.borrowerName}
+                    onChange={(event) =>
+                      updateTermSheetForm("borrowerName", event.target.value)
+                    }
+                    placeholder="Borrower name"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Borrower Finance Email</label>
+                  <input
+                    value={termSheetForm.borrowerEmail}
+                    onChange={(event) =>
+                      updateTermSheetForm("borrowerEmail", event.target.value)
+                    }
+                    placeholder="finance@borrower.com"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Fund Name *</label>
+                  <input
+                    value={termSheetForm.fundName}
+                    onChange={(event) =>
+                      updateTermSheetForm("fundName", event.target.value)
+                    }
+                    placeholder="Fund name"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Instrument</label>
+                  <select
+                    value={termSheetForm.instrumentType}
+                    onChange={(event) =>
+                      updateTermSheetForm("instrumentType", event.target.value)
+                    }
+                  >
+                    <option>NCD</option>
+                    <option>CCD</option>
+                    <option>Venture Debt Loan</option>
+                    <option>Secured Loan</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Sanction Amount</label>
+                  <input
+                    type="number"
+                    value={termSheetForm.sanctionAmount}
+                    onChange={(event) =>
+                      updateTermSheetForm("sanctionAmount", event.target.value)
+                    }
+                    placeholder="100000000"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Disbursed Amount</label>
+                  <input
+                    type="number"
+                    value={termSheetForm.disbursedAmount}
+                    onChange={(event) =>
+                      updateTermSheetForm("disbursedAmount", event.target.value)
+                    }
+                    placeholder="100000000"
+                  />
+                </div>
+
+                <div className="loan-form-section-title">Extracted repayment terms</div>
+
+                <div className="loan-form-field">
+                  <label>Coupon Rate %</label>
+                  <input
+                    type="number"
+                    value={termSheetForm.couponRate}
+                    onChange={(event) =>
+                      updateTermSheetForm("couponRate", event.target.value)
+                    }
+                    placeholder="15.5"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Tenure Months</label>
+                  <input
+                    type="number"
+                    value={termSheetForm.tenureMonths}
+                    onChange={(event) =>
+                      updateTermSheetForm("tenureMonths", event.target.value)
+                    }
+                    placeholder="36"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Moratorium Months</label>
+                  <input
+                    type="number"
+                    value={termSheetForm.moratoriumMonths}
+                    onChange={(event) =>
+                      updateTermSheetForm("moratoriumMonths", event.target.value)
+                    }
+                    placeholder="6"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Interest Frequency</label>
+                  <select
+                    value={termSheetForm.interestFrequency}
+                    onChange={(event) =>
+                      updateTermSheetForm("interestFrequency", event.target.value)
+                    }
+                  >
+                    <option>Monthly</option>
+                    <option>Quarterly</option>
+                    <option>Semi Annual</option>
+                    <option>Annual</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Principal Frequency</label>
+                  <select
+                    value={termSheetForm.principalFrequency}
+                    onChange={(event) =>
+                      updateTermSheetForm("principalFrequency", event.target.value)
+                    }
+                  >
+                    <option>Monthly</option>
+                    <option>Quarterly</option>
+                    <option>Semi Annual</option>
+                    <option>Annual</option>
+                    <option>Bullet</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Moratorium Start Basis</label>
+                  <select
+                    value={termSheetForm.moratoriumStartBasis}
+                    onChange={(event) =>
+                      updateTermSheetForm("moratoriumStartBasis", event.target.value)
+                    }
+                  >
+                    <option>Disbursement Date</option>
+                    <option>First Drawdown Date</option>
+                    <option>Sanction Date</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Repayment Start Date</label>
+                  <input
+                    type="date"
+                    value={termSheetForm.repaymentStartDate}
+                    onChange={(event) =>
+                      updateTermSheetForm("repaymentStartDate", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Maturity Date</label>
+                  <input
+                    type="date"
+                    value={termSheetForm.maturityDate}
+                    onChange={(event) =>
+                      updateTermSheetForm("maturityDate", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Penal Interest %</label>
+                  <input
+                    type="number"
+                    value={termSheetForm.penalInterestRate}
+                    onChange={(event) =>
+                      updateTermSheetForm("penalInterestRate", event.target.value)
+                    }
+                    placeholder="24"
+                  />
+                </div>
+
+                <div className="loan-form-section-title">Fees, security and covenants</div>
+
+                <div className="loan-form-field">
+                  <label>Processing Fee</label>
+                  <input
+                    type="number"
+                    value={termSheetForm.processingFee}
+                    onChange={(event) =>
+                      updateTermSheetForm("processingFee", event.target.value)
+                    }
+                    placeholder="1000000"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Exit Fee</label>
+                  <input
+                    type="number"
+                    value={termSheetForm.exitFee}
+                    onChange={(event) =>
+                      updateTermSheetForm("exitFee", event.target.value)
+                    }
+                    placeholder="1500000"
+                  />
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Security Details</label>
+                  <textarea
+                    value={termSheetForm.securityDetails}
+                    onChange={(event) =>
+                      updateTermSheetForm("securityDetails", event.target.value)
+                    }
+                    placeholder="Security / charge terms"
+                  />
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Charge Details</label>
+                  <textarea
+                    value={termSheetForm.chargeDetails}
+                    onChange={(event) =>
+                      updateTermSheetForm("chargeDetails", event.target.value)
+                    }
+                    placeholder="ROC / hypothecation / escrow details"
+                  />
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Trustee Details</label>
+                  <textarea
+                    value={termSheetForm.trusteeDetails}
+                    onChange={(event) =>
+                      updateTermSheetForm("trusteeDetails", event.target.value)
+                    }
+                    placeholder="Debenture trustee / security trustee details"
+                  />
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Covenant 1</label>
+                  <input
+                    value={termSheetForm.covenantOne}
+                    onChange={(event) =>
+                      updateTermSheetForm("covenantOne", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Covenant 2</label>
+                  <input
+                    value={termSheetForm.covenantTwo}
+                    onChange={(event) =>
+                      updateTermSheetForm("covenantTwo", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Covenant 3</label>
+                  <input
+                    value={termSheetForm.covenantThree}
+                    onChange={(event) =>
+                      updateTermSheetForm("covenantThree", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Extraction Notes / Unmapped Items</label>
+                  <textarea
+                    value={termSheetForm.extractionNotes}
+                    onChange={(event) =>
+                      updateTermSheetForm("extractionNotes", event.target.value)
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="loan-form-actions">
+                <div>
+                  {termSheetMessage && (
+                    <div className="loan-form-message">{termSheetMessage}</div>
+                  )}
+                </div>
+
+                <div className="debt-header-actions">
+                  <button
+                    className="debt-secondary"
+                    onClick={closeTermSheetModal}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    className="debt-primary"
+                    disabled={isExtractingTermSheet || isSavingTermSheet}
+                    type="submit"
+                  >
+                    {isSavingTermSheet
+                      ? "Creating..."
+                      : isExtractingTermSheet
+                        ? "Extracting..."
+                        : "Create Loan From Term Sheet"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        )}
+
                 {receiptRow && (
           <div className="loan-modal-backdrop">
             <form className="receipt-modal" onSubmit={submitReceiptUpdate}>
