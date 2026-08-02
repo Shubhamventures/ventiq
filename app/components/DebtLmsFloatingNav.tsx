@@ -11,9 +11,11 @@ const allowedRoutes = [
   "/document-studio",
   "/managing-partner-ai",
   "/investment-team-ai",
+  "/debt-lms",
 ];
 
 function getContextLabel(pathname: string) {
+  if (pathname.startsWith("/debt-lms")) return "Debt LMS";
   if (pathname.startsWith("/finance-head-ai")) return "Finance Head";
   if (pathname.startsWith("/finance")) return "Finance Workspace";
   if (pathname.startsWith("/portfolio-intelligence")) {
@@ -34,24 +36,34 @@ export default function DebtLmsFloatingNav() {
 
   const shouldShow = allowedRoutes.some((route) => pathname.startsWith(route));
 
-  if (!shouldShow || pathname.startsWith("/debt-lms")) {
+  if (!shouldShow || pathname.startsWith("/debt-lms/commercial-readiness")) {
     return null;
   }
 
   const contextLabel = getContextLabel(pathname);
+  const isDebtLmsPage = pathname.startsWith("/debt-lms");
 
   return (
     <>
       <div className="debt-lms-floating-nav">
         <div>
           <span>Connected Workflow</span>
-          <strong>Debt LMS</strong>
-          <p>{contextLabel} → loan monitoring, receipts, notices and covenants</p>
+          <strong>{isDebtLmsPage ? "Commercial Pack" : "Debt LMS"}</strong>
+          <p>
+            {isDebtLmsPage
+              ? "Client setup, operating modes and sellable module packaging"
+              : `${contextLabel} → loan monitoring, receipts, notices and covenants`}
+          </p>
         </div>
 
         <div className="debt-lms-floating-actions">
-          <Link href="/debt-lms">Open Debt LMS</Link>
-          <Link href="/debt-lms">Sync / Review</Link>
+          <Link href={isDebtLmsPage ? "/debt-lms/commercial-readiness" : "/debt-lms"}>
+            {isDebtLmsPage ? "Open Pack" : "Open Debt LMS"}
+          </Link>
+
+          <Link href="/debt-lms/commercial-readiness">
+            {isDebtLmsPage ? "QA Checklist" : "Commercial Pack"}
+          </Link>
         </div>
       </div>
 
@@ -61,7 +73,7 @@ export default function DebtLmsFloatingNav() {
           right: 22px;
           bottom: 22px;
           z-index: 80;
-          width: min(390px, calc(100vw - 44px));
+          width: min(410px, calc(100vw - 44px));
           display: flex;
           justify-content: space-between;
           gap: 16px;
