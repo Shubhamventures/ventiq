@@ -46,6 +46,11 @@ type RepaymentRow = {
   penaltyDue: number;
   totalDue: number;
   receivedAmount: number;
+  principalReceived?: number;
+  interestReceived?: number;
+  feesReceived?: number;
+  penaltyReceived?: number;
+  otherReceived?: number;
   pendingAmount: number;
   status: CollectionStatus;
   daysPastDue: number;
@@ -116,6 +121,17 @@ type NewLoanForm = {
   trusteeDetails: string;
   bankAccountDetails: string;
 };
+
+type ReceiptUpdateForm = {
+  principalReceived: string;
+  interestReceived: string;
+  feesReceived: string;
+  penaltyReceived: string;
+  otherReceived: string;
+  receiptDate: string;
+  bankReference: string;
+  remarks: string;
+};
 const emptyLoanForm: NewLoanForm = {
   borrowerName: "",
   borrowerEmail: "",
@@ -148,6 +164,17 @@ const emptyLoanForm: NewLoanForm = {
   chargeDetails: "",
   trusteeDetails: "",
   bankAccountDetails: "",
+};
+
+const emptyReceiptForm: ReceiptUpdateForm = {
+  principalReceived: "",
+  interestReceived: "",
+  feesReceived: "",
+  penaltyReceived: "",
+  otherReceived: "",
+  receiptDate: "",
+  bankReference: "",
+  remarks: "",
 };
 const sampleLoans: DebtLoan[] = [
   {
@@ -583,7 +610,23 @@ function mapLoan(row: DataRow): DebtLoan {
 
 function mapRepayment(row: DataRow): RepaymentRow {
   const totalDue = getNumber(row, ["total_due"]);
-  const receivedAmount = getNumber(row, ["amount_received"]);
+
+  const principalReceived = getNumber(row, ["principal_received"]);
+  const interestReceived = getNumber(row, ["interest_received"]);
+  const feesReceived = getNumber(row, ["fees_received"]);
+  const penaltyReceived = getNumber(row, ["penalty_received"]);
+  const otherReceived = getNumber(row, ["other_received"]);
+
+  const componentReceived =
+    principalReceived +
+    interestReceived +
+    feesReceived +
+    penaltyReceived +
+    otherReceived;
+
+  const receivedAmount =
+    getNumber(row, ["amount_received"]) || componentReceived;
+
   const pendingAmount =
     getNumber(row, ["pending_amount"]) || Math.max(totalDue - receivedAmount, 0);
 
@@ -599,6 +642,11 @@ function mapRepayment(row: DataRow): RepaymentRow {
     penaltyDue: getNumber(row, ["penalty_due"]),
     totalDue,
     receivedAmount,
+    principalReceived,
+    interestReceived,
+    feesReceived,
+    penaltyReceived,
+    otherReceived,
     pendingAmount,
     status: normalizeCollectionStatus(getString(row, ["collection_status"], "Pending")),
     daysPastDue: getNumber(row, ["days_past_due"]),
@@ -783,6 +831,32 @@ function buildNoticeFromRepayment(row: RepaymentRow): NoticeRow {
   };
 }
 
+function getDaysPastDue(dueDate: string) {
+  const due = new Date(`${dueDate}T00:00:00`);
+  const today = new Date();
+
+  if (Number.isNaN(due.getTime())) return 0;
+
+  const difference = today.getTime() - due.getTime();
+  const days = Math.floor(difference / (1000 * 60 * 60 * 24));
+
+  return Math.max(days, 0);
+}
+
+function getCollectionStatusFromAmounts(
+  dueDate: string,
+  totalDue: number,
+  receivedAmount: number
+): CollectionStatus {
+  const pendingAmount = Math.max(totalDue - receivedAmount, 0);
+
+  if (pendingAmount <= 0 && totalDue > 0) return "Received";
+  if (receivedAmount > 0 && pendingAmount > 0) return "Partial";
+  if (getDaysPastDue(dueDate) > 0 && pendingAmount > 0) return "Overdue";
+
+  return "Pending";
+}
+
 export default function DebtLMSPage() {
   const [loans, setLoans] = useState<DebtLoan[]>(sampleLoans);
   const [repaymentRows, setRepaymentRows] =
@@ -810,6 +884,12 @@ export default function DebtLMSPage() {
   const [noticeMessage, setNoticeMessage] = useState("");
     const [isQueuingEmails, setIsQueuingEmails] = useState(false);
   const [emailQueueMessage, setEmailQueueMessage] = useState("");
+
+  const [receiptRow, setReceiptRow] = useState<RepaymentRow | null>(null);
+  const [receiptForm, setReceiptForm] =
+    useState<ReceiptUpdateForm>(emptyReceiptForm);
+  const [isSavingReceipt, setIsSavingReceipt] = useState(false);
+  const [receiptMessage, setReceiptMessage] = useState("");
 
   useEffect(() => {
     async function loadDebtLmsData() {
@@ -1339,6 +1419,136 @@ export default function DebtLMSPage() {
       setIsQueuingEmails(false);
     }
   }
+  function openReceiptUpdate(row: RepaymentRow) {
+    setReceiptRow(row);
+    setReceiptForm({
+      principalReceived: row.principalReceived
+        ? String(row.principalReceived)
+        : "",
+      interestReceived: row.interestReceived ? String(row.interestReceived) : "",
+      feesReceived: row.feesReceived ? String(row.feesReceived) : "",
+      penaltyReceived: row.penaltyReceived ? String(row.penaltyReceived) : "",
+      otherReceived: row.otherReceived ? String(row.otherReceived) : "",
+      receiptDate: new Date().toISOString().slice(0, 10),
+      bankReference: "",
+      remarks: "",
+    });
+    setReceiptMessage("");
+  }
+
+  function closeReceiptUpdate() {
+    setReceiptRow(null);
+    setReceiptForm(emptyReceiptForm);
+  }
+
+  function updateReceiptForm(field: keyof ReceiptUpdateForm, value: string) {
+    setReceiptForm((currentForm) => ({
+      ...currentForm,
+      [field]: value,
+    }));
+  }
+
+  async function submitReceiptUpdate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!receiptRow) return;
+
+    const principalReceived = Number(receiptForm.principalReceived || 0);
+    const interestReceived = Number(receiptForm.interestReceived || 0);
+    const feesReceived = Number(receiptForm.feesReceived || 0);
+    const penaltyReceived = Number(receiptForm.penaltyReceived || 0);
+    const otherReceived = Number(receiptForm.otherReceived || 0);
+
+    const receivedAmount =
+      principalReceived +
+      interestReceived +
+      feesReceived +
+      penaltyReceived +
+      otherReceived;
+
+    if (
+      principalReceived < 0 ||
+      interestReceived < 0 ||
+      feesReceived < 0 ||
+      penaltyReceived < 0 ||
+      otherReceived < 0
+    ) {
+      setReceiptMessage("Received amounts cannot be negative.");
+      return;
+    }
+
+    const pendingAmount = Math.max(receiptRow.totalDue - receivedAmount, 0);
+    const nextStatus = getCollectionStatusFromAmounts(
+      receiptRow.dueDate,
+      receiptRow.totalDue,
+      receivedAmount
+    );
+
+    const updatedRow: RepaymentRow = {
+      ...receiptRow,
+      receivedAmount,
+      principalReceived,
+      interestReceived,
+      feesReceived,
+      penaltyReceived,
+      otherReceived,
+      pendingAmount,
+      status: nextStatus,
+      daysPastDue: getDaysPastDue(receiptRow.dueDate),
+    };
+
+    setIsSavingReceipt(true);
+    setReceiptMessage("");
+
+    try {
+      if (isSupabaseConfigured && supabase && isUuid(receiptRow.id)) {
+        const db = supabase as any;
+
+        const { error } = await db
+          .from("debt_lms_repayment_schedule")
+          .update({
+            principal_received: principalReceived,
+            interest_received: interestReceived,
+            fees_received: feesReceived,
+            penalty_received: penaltyReceived,
+            other_received: otherReceived,
+            amount_received: receivedAmount,
+            receipt_date: receiptForm.receiptDate || null,
+            bank_reference: receiptForm.bankReference.trim(),
+            receipt_remarks: receiptForm.remarks.trim(),
+            pending_amount: pendingAmount,
+            collection_status: nextStatus,
+            days_past_due: updatedRow.daysPastDue,
+          })
+          .eq("id", receiptRow.id);
+
+        if (error) {
+          throw new Error(error.message);
+        }
+      }
+
+      setRepaymentRows((currentRows) =>
+        currentRows.map((row) => (row.id === receiptRow.id ? updatedRow : row))
+      );
+
+      setReceiptMessage(
+        `Receipt updated. Total received ${formatCurrency(
+          receivedAmount
+        )}. Pending amount is ${formatCurrency(pendingAmount)}.`
+      );
+
+      setTimeout(() => {
+        closeReceiptUpdate();
+      }, 700);
+    } catch (error) {
+      setReceiptMessage(
+        error instanceof Error ? error.message : "Unable to update receipt."
+      );
+    } finally {
+      setIsSavingReceipt(false);
+    }
+  }
+
   const selectedLoan =
     loans.find((loan) => loan.id === selectedLoanId) ?? loans[0] ?? sampleLoans[0];
   const summary = useMemo(() => {
@@ -1369,6 +1579,23 @@ export default function DebtLMSPage() {
 
   const selectedSchedule = repaymentRows.filter((row) => row.loanId === selectedLoan.id);
   const selectedCovenants = covenantRows.filter((row) => row.loanId === selectedLoan.id);
+
+  const receiptPrincipalReceived = Number(receiptForm.principalReceived || 0);
+  const receiptInterestReceived = Number(receiptForm.interestReceived || 0);
+  const receiptFeesReceived = Number(receiptForm.feesReceived || 0);
+  const receiptPenaltyReceived = Number(receiptForm.penaltyReceived || 0);
+  const receiptOtherReceived = Number(receiptForm.otherReceived || 0);
+
+  const receiptTotalReceived =
+    receiptPrincipalReceived +
+    receiptInterestReceived +
+    receiptFeesReceived +
+    receiptPenaltyReceived +
+    receiptOtherReceived;
+
+  const receiptPendingAmount = receiptRow
+    ? Math.max(receiptRow.totalDue - receiptTotalReceived, 0)
+    : 0;
 
   return (
     <main className="debt-page">
@@ -1936,6 +2163,34 @@ export default function DebtLMSPage() {
           font-size: 13px;
           font-weight: 800;
         }
+
+        .receipt-modal {
+          width: min(720px, 100%);
+          border: 1px solid rgba(245, 200, 91, 0.28);
+          background: #08111f;
+          border-radius: 28px;
+          padding: 24px;
+          box-shadow: 0 28px 90px rgba(0, 0, 0, 0.46);
+        }
+
+        .receipt-summary-box {
+          border: 1px solid rgba(147, 197, 253, 0.14);
+          background: rgba(15, 23, 42, 0.72);
+          border-radius: 18px;
+          padding: 14px;
+          margin-bottom: 18px;
+        }
+
+        .receipt-summary-box h3 {
+          margin: 0 0 8px;
+          color: #ffffff;
+        }
+
+        .receipt-summary-box p {
+          margin: 0;
+          color: #c7d7f4;
+          line-height: 1.55;
+        }
         @media (max-width: 980px) {
           .debt-header,
           .panel-header {
@@ -1997,6 +2252,169 @@ export default function DebtLMSPage() {
           · Term sheet intelligence → repayment schedule → notices → email
           dispatch → bank matching → penalty/default tracking
         </div>
+                {receiptRow && (
+          <div className="loan-modal-backdrop">
+            <form className="receipt-modal" onSubmit={submitReceiptUpdate}>
+              <div className="loan-modal-header">
+                <div>
+                  <h2>Update Receipt</h2>
+                  <p>
+                    Manually update component-wise collections where bank
+                    reconciliation is not enabled or the receipt needs finance
+                    confirmation.
+                  </p>
+                </div>
+
+                <button
+                  className="debt-secondary"
+                  onClick={closeReceiptUpdate}
+                  type="button"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="receipt-summary-box">
+                <h3>{receiptRow.borrowerName}</h3>
+                <p>
+                  Due date {formatDate(receiptRow.dueDate)} · Total due{" "}
+                  {formatCurrency(receiptRow.totalDue)} · Current pending{" "}
+                  {formatCurrency(receiptRow.pendingAmount)}
+                </p>
+              </div>
+
+              <div className="loan-form-grid">
+                <div className="loan-form-field">
+                  <label>Principal Received</label>
+                  <input
+                    type="number"
+                    value={receiptForm.principalReceived}
+                    onChange={(event) =>
+                      updateReceiptForm("principalReceived", event.target.value)
+                    }
+                    placeholder="Principal received"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Interest Received</label>
+                  <input
+                    type="number"
+                    value={receiptForm.interestReceived}
+                    onChange={(event) =>
+                      updateReceiptForm("interestReceived", event.target.value)
+                    }
+                    placeholder="Interest received"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Fees Received</label>
+                  <input
+                    type="number"
+                    value={receiptForm.feesReceived}
+                    onChange={(event) =>
+                      updateReceiptForm("feesReceived", event.target.value)
+                    }
+                    placeholder="Fees received"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Penal Interest / Penalty Received</label>
+                  <input
+                    type="number"
+                    value={receiptForm.penaltyReceived}
+                    onChange={(event) =>
+                      updateReceiptForm("penaltyReceived", event.target.value)
+                    }
+                    placeholder="Penalty received"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Other Amount Received</label>
+                  <input
+                    type="number"
+                    value={receiptForm.otherReceived}
+                    onChange={(event) =>
+                      updateReceiptForm("otherReceived", event.target.value)
+                    }
+                    placeholder="Other amount"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Receipt Date</label>
+                  <input
+                    type="date"
+                    value={receiptForm.receiptDate}
+                    onChange={(event) =>
+                      updateReceiptForm("receiptDate", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Bank Reference / UTR</label>
+                  <input
+                    value={receiptForm.bankReference}
+                    onChange={(event) =>
+                      updateReceiptForm("bankReference", event.target.value)
+                    }
+                    placeholder="NEFT / RTGS / UTR reference"
+                  />
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Remarks</label>
+                  <textarea
+                    value={receiptForm.remarks}
+                    onChange={(event) =>
+                      updateReceiptForm("remarks", event.target.value)
+                    }
+                    placeholder="Optional finance remarks"
+                  />
+                </div>
+              </div>
+
+              <div className="receipt-summary-box">
+                <h3>Auto Calculation</h3>
+                <p>
+                  Total received {formatCurrency(receiptTotalReceived)} ·
+                  Pending amount {formatCurrency(receiptPendingAmount)}
+                </p>
+              </div>
+
+              <div className="loan-form-actions">
+                <div>
+                  {receiptMessage && (
+                    <div className="loan-form-message">{receiptMessage}</div>
+                  )}
+                </div>
+
+                <div className="debt-header-actions">
+                  <button
+                    className="debt-secondary"
+                    onClick={closeReceiptUpdate}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    className="debt-primary"
+                    disabled={isSavingReceipt}
+                    type="submit"
+                  >
+                    {isSavingReceipt ? "Saving..." : "Update Receipt"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        )}
+
                 {isAddLoanOpen && (
           <div className="loan-modal-backdrop">
             <form className="loan-modal" onSubmit={submitNewLoan}>
@@ -2634,6 +3052,7 @@ export default function DebtLMSPage() {
                   <th className="right">Received</th>
                   <th className="right">Pending</th>
                   <th>Status</th>
+                  <th>Action</th>
                 </tr>
               </thead>
 
@@ -2656,6 +3075,16 @@ export default function DebtLMSPage() {
                         {row.status}
                       </span>
                     </td>
+
+                    <td>
+                      <button
+                        className="small-action"
+                        onClick={() => openReceiptUpdate(row)}
+                        type="button"
+                      >
+                        Update Receipt
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2675,7 +3104,7 @@ export default function DebtLMSPage() {
               </div>
 
               <a className="debt-secondary" href="/bank-reconciliation">
-                Open Bank Matching
+                Sync from Bank Reconciliation
               </a>
             </div>
 
