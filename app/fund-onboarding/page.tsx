@@ -1041,7 +1041,60 @@ export default function FundOnboardingPage() {
       setIsSavingStakeholder(false);
     }
   }
+  async function sendSecureInvite(stakeholder: StakeholderRow) {
+    setInviteMessage("");
 
+    try {
+      const response = await fetch("/api/stakeholders/invite", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          stakeholderId: stakeholder.id,
+          email: stakeholder.email,
+          fullName: stakeholder.fullName,
+          roleKey: stakeholder.roleKey,
+          roleLabel: stakeholder.roleLabel,
+          dashboardPath: stakeholder.dashboardPath,
+          fundId: stakeholder.fundId,
+        }),
+      });
+
+      const result = (await response.json()) as {
+        ok?: boolean;
+        message?: string;
+      };
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message || "Unable to send secure invite.");
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+
+      setStakeholders((currentStakeholders) =>
+        currentStakeholders.map((item) =>
+          item.id === stakeholder.id
+            ? {
+                ...item,
+                inviteStatus: "Invite Sent",
+                invitedAt: today,
+              }
+            : item
+        )
+      );
+
+      setInviteMessage(
+        `Secure invite sent to ${stakeholder.email}. User will set their own password.`
+      );
+    } catch (error) {
+      setInviteMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to send secure invite."
+      );
+    }
+  }
   async function updateStakeholderStatus(
     stakeholder: StakeholderRow,
     nextStatus: string
@@ -2233,14 +2286,9 @@ export default function FundOnboardingPage() {
                     <td>{formatDate(stakeholder.activatedAt)}</td>
                     <td>
                       <div className="actions">
-                        <button
+                                              <button
                           className="small-button"
-                          onClick={() =>
-                            updateStakeholderStatus(
-                              stakeholder,
-                              "Invite Sent"
-                            )
-                          }
+                          onClick={() => sendSecureInvite(stakeholder)}
                           type="button"
                         >
                           Invite
