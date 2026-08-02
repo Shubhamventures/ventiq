@@ -1046,6 +1046,53 @@ function getCollectionStatusFromAmounts(
   return "Pending";
 }
 
+function calculatePenaltyDue(row: RepaymentRow, loan?: DebtLoan) {
+  const daysPastDue = getDaysPastDue(row.dueDate);
+
+  if (daysPastDue <= 0 || row.pendingAmount <= 0 || row.status === "Received") {
+    return 0;
+  }
+
+  const penalRate = loan?.penalRate || 24;
+  const baseAmount = row.pendingAmount || row.totalDue;
+
+  return Math.round(baseAmount * (penalRate / 100) * (daysPastDue / 365));
+}
+
+function getLoanStatusFromRows(loan: DebtLoan, rows: RepaymentRow[]): LoanStatus {
+  const loanRows = rows.filter((row) => row.loanId === loan.id);
+  const openRows = loanRows.filter((row) => row.pendingAmount > 0);
+  const maxDaysPastDue = openRows.reduce(
+    (maxDays, row) => Math.max(maxDays, row.daysPastDue),
+    0
+  );
+
+  if (maxDaysPastDue >= 30) return "Default Watch";
+  if (openRows.some((row) => row.status === "Overdue")) return "Overdue";
+
+  const dueSoon = openRows.some((row) => {
+    const dueDate = new Date(`${row.dueDate}T00:00:00`);
+    const today = new Date();
+    const diffDays = Math.ceil(
+      (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    return diffDays >= 0 && diffDays <= 7;
+  });
+
+  if (dueSoon) return "Due Soon";
+
+  return "Performing";
+}
+
+function getDefaultStage(row: RepaymentRow) {
+  if (row.pendingAmount <= 0) return "Closed";
+  if (row.daysPastDue >= 60) return "Default Escalation";
+  if (row.daysPastDue >= 30) return "Default Watch";
+  if (row.daysPastDue > 0) return "Overdue";
+  return "Not Due";
+}
+
 export default function DebtLMSPage() {
   const [loans, setLoans] = useState<DebtLoan[]>(sampleLoans);
   const [repaymentRows, setRepaymentRows] =
@@ -1082,6 +1129,9 @@ export default function DebtLMSPage() {
 
   const [isSyncingBankRecon, setIsSyncingBankRecon] = useState(false);
   const [bankReconSyncMessage, setBankReconSyncMessage] = useState("");
+
+  const [isRunningDefaultReview, setIsRunningDefaultReview] = useState(false);
+  const [defaultReviewMessage, setDefaultReviewMessage] = useState("");
 
   useEffect(() => {
     async function loadDebtLmsData() {
@@ -1906,6 +1956,212 @@ export default function DebtLMSPage() {
     }
   }
 
+  async function runPenaltyAndDefaultReview() {
+    setDefaultReviewMessage("");
+    setIsRunningDefaultReview(true);
+
+    try {
+      const reviewedRows = repaymentRows.map((row) => {
+        const loan = loans.find((loanItem) => loanItem.id === row.loanId);
+        const existingReceivedAmount = row.receivedAmount || 0;
+        const daysPastDue = getDaysPastDue(row.dueDate);
+        const calculatedPenalty = calculatePenaltyDue(row, loan);
+        const nextPenaltyDue = Math.max(row.penaltyDue || 0, calculatedPenalty);
+        const nextTotalDue =
+          row.principalDue + row.interestDue + row.feesDue + nextPenaltyDue;
+        const nextPendingAmount = Math.max(nextTotalDue - existingReceivedAmount, 0);
+        const nextStatus = getCollectionStatusFromAmounts(
+          row.dueDate,
+          nextTotalDue,
+          existingReceivedAmount
+        );
+
+        return {
+          ...row,
+          penaltyDue: nextPenaltyDue,
+          totalDue: nextTotalDue,
+          pendingAmount: nextPendingAmount,
+          status: nextStatus,
+          daysPastDue,
+        };
+      });
+
+      const reviewedLoans = loans.map((loan) => {
+        const loanRows = reviewedRows.filter((row) => row.loanId === loan.id);
+        const overdueAmount = loanRows
+          .filter((row) => row.pendingAmount > 0 && row.daysPastDue > 0)
+          .reduce((sum, row) => sum + row.pendingAmount, 0);
+        const nextDueRow = loanRows
+          .filter((row) => row.pendingAmount > 0)
+          .sort(
+            (first, second) =>
+              new Date(`${first.dueDate}T00:00:00`).getTime() -
+              new Date(`${second.dueDate}T00:00:00`).getTime()
+          )[0];
+
+        return {
+          ...loan,
+          status: getLoanStatusFromRows(loan, reviewedRows),
+          overdueAmount,
+          nextDueDate: nextDueRow?.dueDate || loan.nextDueDate,
+          nextDueAmount: nextDueRow?.pendingAmount || 0,
+        };
+      });
+
+      const generatedDefaultNotices = reviewedRows
+        .filter(
+          (row) =>
+            row.pendingAmount > 0 &&
+            row.daysPastDue > 0 &&
+            row.status !== "Received"
+        )
+        .map((row) => ({
+          ...buildNoticeFromRepayment(row),
+          noticeType:
+            row.daysPastDue >= 30
+              ? "Default watch notice"
+              : row.penaltyDue > 0
+                ? "Penalty notice"
+                : "Overdue reminder",
+          amount: row.pendingAmount,
+          linkedDocument:
+            row.daysPastDue >= 30
+              ? "Default Watch Notice PDF"
+              : row.penaltyDue > 0
+                ? "Penalty Notice PDF"
+                : "Overdue Reminder PDF",
+        }));
+
+      if (isSupabaseConfigured && supabase) {
+        const db = supabase as any;
+
+        const scheduleUpdates = reviewedRows
+          .filter((row) => isUuid(row.id))
+          .map((row) =>
+            db
+              .from("debt_lms_repayment_schedule")
+              .update({
+                penalty_due: row.penaltyDue,
+                total_due: row.totalDue,
+                pending_amount: row.pendingAmount,
+                collection_status: row.status,
+                days_past_due: row.daysPastDue,
+                penalty_applied: row.penaltyDue > 0,
+                default_stage: getDefaultStage(row),
+                escalation_status:
+                  row.daysPastDue >= 30
+                    ? "Default Watch"
+                    : row.daysPastDue > 0
+                      ? "Overdue Follow-up"
+                      : "No Escalation",
+                last_penalty_calculated_at: new Date().toISOString(),
+              })
+              .eq("id", row.id)
+          );
+
+        if (scheduleUpdates.length > 0) {
+          const updateResults = await Promise.all(scheduleUpdates);
+          const updateError = updateResults.find((result) => result.error)?.error;
+
+          if (updateError) {
+            throw new Error(updateError.message);
+          }
+        }
+
+        const loanUpdates = reviewedLoans
+          .filter((loan) => isUuid(loan.id))
+          .map((loan) =>
+            db
+              .from("debt_lms_loans")
+              .update({
+                risk_status: loan.status,
+                overdue_amount: loan.overdueAmount,
+                next_due_date: loan.nextDueDate,
+                next_due_amount: loan.nextDueAmount,
+                default_stage:
+                  loan.status === "Default Watch"
+                    ? "Default Watch"
+                    : loan.status === "Overdue"
+                      ? "Overdue"
+                      : "Normal",
+                last_default_review_at: new Date().toISOString(),
+              })
+              .eq("id", loan.id)
+          );
+
+        if (loanUpdates.length > 0) {
+          const loanUpdateResults = await Promise.all(loanUpdates);
+          const loanUpdateError = loanUpdateResults.find((result) => result.error)
+            ?.error;
+
+          if (loanUpdateError) {
+            throw new Error(loanUpdateError.message);
+          }
+        }
+
+        if (generatedDefaultNotices.length > 0) {
+          const noticePayload = generatedDefaultNotices.map((notice) => ({
+            borrower_name: notice.borrowerName,
+            notice_type: notice.noticeType,
+            notice_title: `${notice.noticeType} - ${notice.borrowerName}`,
+            due_date: notice.dueDate,
+            total_due: notice.amount,
+            recipient_email: notice.emailTo,
+            cc_emails: [],
+            email_subject: `${notice.noticeType} - ${notice.borrowerName}`,
+            email_body: `Dear Team,\n\nThis is a ${notice.noticeType.toLowerCase()} for pending repayment amount of ${formatCurrency(
+              notice.amount
+            )}. Please arrange payment or share confirmation immediately.\n\nRegards,\nFinance Team`,
+            pdf_file_name: notice.linkedDocument,
+            notice_status: "Draft",
+          }));
+
+          const { data: savedNotices, error: noticeError } = await db
+            .from("debt_lms_notices")
+            .insert(noticePayload)
+            .select("*")
+            .order("created_at", { ascending: false });
+
+          if (noticeError) {
+            throw new Error(noticeError.message);
+          }
+
+          if (savedNotices && savedNotices.length > 0) {
+            generatedDefaultNotices.splice(
+              0,
+              generatedDefaultNotices.length,
+              ...(savedNotices as DataRow[]).map(mapNotice)
+            );
+          }
+        }
+      }
+
+      setRepaymentRows(reviewedRows);
+      setLoans(reviewedLoans);
+      setNoticeRows((currentRows) => [
+        ...generatedDefaultNotices,
+        ...currentRows,
+      ]);
+
+      const penaltyRows = reviewedRows.filter((row) => row.penaltyDue > 0).length;
+      const defaultWatchRows = reviewedRows.filter(
+        (row) => row.pendingAmount > 0 && row.daysPastDue >= 30
+      ).length;
+
+      setDefaultReviewMessage(
+        `Default review completed. ${penaltyRows} row(s) have penalty applied and ${defaultWatchRows} row(s) are on default watch.`
+      );
+    } catch (error) {
+      setDefaultReviewMessage(
+        error instanceof Error
+          ? `Default review failed: ${error.message}`
+          : "Default review failed."
+      );
+    } finally {
+      setIsRunningDefaultReview(false);
+    }
+  }
+
   const selectedLoan =
     loans.find((loan) => loan.id === selectedLoanId) ?? loans[0] ?? sampleLoans[0];
   const summary = useMemo(() => {
@@ -2547,6 +2803,19 @@ export default function DebtLMSPage() {
           margin: 0;
           color: #c7d7f4;
           line-height: 1.55;
+        }
+
+
+        .default-review-strip {
+          border: 1px solid rgba(239, 68, 68, 0.24);
+          background: rgba(239, 68, 68, 0.10);
+          color: #fecaca;
+          border-radius: 16px;
+          padding: 12px 14px;
+          margin-top: 12px;
+          font-size: 13px;
+          font-weight: 800;
+          line-height: 1.5;
         }
         @media (max-width: 980px) {
           .debt-header,
@@ -3386,12 +3655,24 @@ export default function DebtLMSPage() {
 >
   {isQueuingEmails ? "Queuing..." : "Send Email Queue"}
 </button>
+<button
+  className="debt-secondary"
+  disabled={isRunningDefaultReview}
+  onClick={runPenaltyAndDefaultReview}
+  type="button"
+>
+  {isRunningDefaultReview ? "Reviewing..." : "Apply Penalty / Default Review"}
+</button>
             </div>
                         {noticeMessage && (
               <p className="loan-form-message">{noticeMessage}</p>
             )}
                         {emailQueueMessage && (
               <p className="loan-form-message">{emailQueueMessage}</p>
+            )}
+
+            {defaultReviewMessage && (
+              <p className="default-review-strip">{defaultReviewMessage}</p>
             )}
           </div>
 
@@ -3408,6 +3689,7 @@ export default function DebtLMSPage() {
                   <th className="right">Total Due</th>
                   <th className="right">Received</th>
                   <th className="right">Pending</th>
+                  <th className="right">DPD</th>
                   <th>Status</th>
                   <th>Action</th>
                 </tr>
@@ -3427,6 +3709,7 @@ export default function DebtLMSPage() {
                     <td className="right">{formatCurrency(row.totalDue)}</td>
                     <td className="right">{formatCurrency(row.receivedAmount)}</td>
                     <td className="right">{formatCurrency(row.pendingAmount)}</td>
+                    <td className="right">{row.daysPastDue}</td>
                     <td>
                       <span className={`status-pill status-${statusClass(row.status)}`}>
                         {row.status}
@@ -3555,6 +3838,16 @@ export default function DebtLMSPage() {
                       <div className="schedule-compact-row">
                         <span>Pending</span>
                         <strong>{formatCurrency(row.pendingAmount)}</strong>
+                      </div>
+
+                      <div className="schedule-compact-row">
+                        <span>Penalty</span>
+                        <strong>{formatCurrency(row.penaltyDue)}</strong>
+                      </div>
+
+                      <div className="schedule-compact-row">
+                        <span>Days Past Due</span>
+                        <strong>{row.daysPastDue}</strong>
                       </div>
                     </div>
                   </div>
@@ -3700,8 +3993,13 @@ export default function DebtLMSPage() {
                     Queue Email
                   </button>
 
-                  <button className="small-action" type="button">
-                    Add Penalty
+                  <button
+                    className="small-action"
+                    disabled={isRunningDefaultReview}
+                    onClick={runPenaltyAndDefaultReview}
+                    type="button"
+                  >
+                    Review Penalty
                   </button>
                 </div>
               </div>
