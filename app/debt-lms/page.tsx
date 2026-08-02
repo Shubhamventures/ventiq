@@ -68,6 +68,23 @@ type CovenantRow = {
   evidence: string;
 };
 
+type SecurityTrackerRow = {
+  id: string;
+  loanId: string;
+  borrowerName: string;
+  securityType: string;
+  securityDescription: string;
+  chargeCreationRequired: boolean;
+  chargeCreationDueDate: string;
+  chargeCreationStatus: "Pending" | "Completed" | "Overdue" | "Waived";
+  rocFilingRequired: boolean;
+  rocFilingDueDate: string;
+  rocFilingStatus: "Pending" | "Completed" | "Overdue" | "Waived";
+  trusteeDocumentRequired: boolean;
+  trusteeDocumentStatus: "Pending" | "Completed" | "Overdue" | "Waived";
+  evidence: string;
+};
+
 type NoticeRow = {
   id: string;
   borrowerName: string;
@@ -180,6 +197,28 @@ type TermSheetUploadForm = {
   covenantThree: string;
   extractionNotes: string;
 };
+
+type CovenantActionForm = {
+  covenant: string;
+  type: string;
+  frequency: string;
+  dueDate: string;
+  status: CovenantStatus;
+  evidence: string;
+  breachDescription: string;
+  waiverReason: string;
+};
+
+type SecurityActionForm = {
+  securityType: string;
+  securityDescription: string;
+  chargeCreationDueDate: string;
+  chargeCreationStatus: SecurityTrackerRow["chargeCreationStatus"];
+  rocFilingDueDate: string;
+  rocFilingStatus: SecurityTrackerRow["rocFilingStatus"];
+  trusteeDocumentStatus: SecurityTrackerRow["trusteeDocumentStatus"];
+  evidence: string;
+};
 const emptyLoanForm: NewLoanForm = {
   borrowerName: "",
   borrowerEmail: "",
@@ -252,6 +291,28 @@ const emptyTermSheetForm: TermSheetUploadForm = {
   covenantTwo: "Minimum security cover to be maintained as per term sheet",
   covenantThree: "No additional borrowing without investor consent",
   extractionNotes: "",
+};
+
+const emptyCovenantActionForm: CovenantActionForm = {
+  covenant: "",
+  type: "Reporting",
+  frequency: "Monthly",
+  dueDate: "",
+  status: "Pending",
+  evidence: "",
+  breachDescription: "",
+  waiverReason: "",
+};
+
+const emptySecurityActionForm: SecurityActionForm = {
+  securityType: "Receivables Charge",
+  securityDescription: "",
+  chargeCreationDueDate: "",
+  chargeCreationStatus: "Pending",
+  rocFilingDueDate: "",
+  rocFilingStatus: "Pending",
+  trusteeDocumentStatus: "Pending",
+  evidence: "",
 };
 const sampleLoans: DebtLoan[] = [
   {
@@ -467,6 +528,57 @@ const sampleCovenantRows: CovenantRow[] = [
     dueDate: "2026-08-25",
     status: "Pending",
     evidence: "Valuation certificate due",
+  },
+];
+
+const sampleSecurityRows: SecurityTrackerRow[] = [
+  {
+    id: "sec-001",
+    loanId: "loan-001",
+    borrowerName: "Alpha Fintech Pvt Ltd",
+    securityType: "Receivables Charge",
+    securityDescription: "First ranking charge on receivables and escrow control",
+    chargeCreationRequired: true,
+    chargeCreationDueDate: "2026-08-20",
+    chargeCreationStatus: "Pending",
+    rocFilingRequired: true,
+    rocFilingDueDate: "2026-08-25",
+    rocFilingStatus: "Pending",
+    trusteeDocumentRequired: true,
+    trusteeDocumentStatus: "Pending",
+    evidence: "Charge documents pending upload",
+  },
+  {
+    id: "sec-002",
+    loanId: "loan-002",
+    borrowerName: "Nova Health Systems",
+    securityType: "Share Pledge + Escrow",
+    securityDescription: "Pledge of promoter shares and escrow control",
+    chargeCreationRequired: true,
+    chargeCreationDueDate: "2026-08-05",
+    chargeCreationStatus: "Overdue",
+    rocFilingRequired: false,
+    rocFilingDueDate: "2026-08-05",
+    rocFilingStatus: "Waived",
+    trusteeDocumentRequired: true,
+    trusteeDocumentStatus: "Pending",
+    evidence: "Trustee confirmation awaited",
+  },
+  {
+    id: "sec-003",
+    loanId: "loan-004",
+    borrowerName: "Kinetic Mobility",
+    securityType: "Hypothecation",
+    securityDescription: "Hypothecation of receivables and bank escrow",
+    chargeCreationRequired: true,
+    chargeCreationDueDate: "2026-08-01",
+    chargeCreationStatus: "Overdue",
+    rocFilingRequired: true,
+    rocFilingDueDate: "2026-08-10",
+    rocFilingStatus: "Pending",
+    trusteeDocumentRequired: true,
+    trusteeDocumentStatus: "Overdue",
+    evidence: "Default watch: security perfection incomplete",
   },
 ];
 
@@ -780,6 +892,41 @@ function mapCovenant(row: DataRow): CovenantRow {
     dueDate: getDateString(row, ["due_date"], "2026-01-01"),
     status: normalizeCovenantStatus(getString(row, ["covenant_status"], "Pending")),
     evidence: getString(row, ["evidence_required", "evidence_storage_path"], "Pending"),
+  };
+}
+
+function normalizeSecurityStatus(
+  value: string
+): SecurityTrackerRow["chargeCreationStatus"] {
+  const status = value.toLowerCase();
+
+  if (status.includes("complete") || status.includes("done")) return "Completed";
+  if (status.includes("overdue") || status.includes("delay")) return "Overdue";
+  if (status.includes("waive")) return "Waived";
+
+  return "Pending";
+}
+
+function mapSecurityTracker(row: DataRow): SecurityTrackerRow {
+  return {
+    id: getString(row, ["id"], crypto.randomUUID()),
+    loanId: getString(row, ["loan_id"], ""),
+    borrowerName: getString(row, ["borrower_name"], "Borrower"),
+    securityType: getString(row, ["security_type"], "Security"),
+    securityDescription: getString(row, ["security_description"], "Security details pending"),
+    chargeCreationRequired: Boolean(row.charge_creation_required),
+    chargeCreationDueDate: getDateString(row, ["charge_creation_due_date"], "2026-01-01"),
+    chargeCreationStatus: normalizeSecurityStatus(
+      getString(row, ["charge_creation_status"], "Pending")
+    ),
+    rocFilingRequired: Boolean(row.roc_filing_required),
+    rocFilingDueDate: getDateString(row, ["roc_filing_due_date"], "2026-01-01"),
+    rocFilingStatus: normalizeSecurityStatus(getString(row, ["roc_filing_status"], "Pending")),
+    trusteeDocumentRequired: Boolean(row.trustee_document_required),
+    trusteeDocumentStatus: normalizeSecurityStatus(
+      getString(row, ["trustee_document_status"], "Pending")
+    ),
+    evidence: getString(row, ["evidence_storage_path", "security_description"], "Evidence pending"),
   };
 }
 
@@ -1231,12 +1378,42 @@ function buildCovenantsFromTermSheet(
   }));
 }
 
+function buildSecurityTrackerFromTermSheet(
+  loanId: string,
+  borrowerName: string,
+  form: TermSheetUploadForm
+): SecurityTrackerRow {
+  const baseDueDate = form.repaymentStartDate || "2026-09-15";
+
+  return {
+    id: crypto.randomUUID(),
+    loanId,
+    borrowerName,
+    securityType: form.instrumentType.includes("NCD")
+      ? "Debenture Security Package"
+      : "Loan Security Package",
+    securityDescription:
+      form.securityDetails.trim() || "Security details extracted from term sheet",
+    chargeCreationRequired: true,
+    chargeCreationDueDate: addMonthsToDate(baseDueDate, 1),
+    chargeCreationStatus: "Pending",
+    rocFilingRequired: true,
+    rocFilingDueDate: addMonthsToDate(baseDueDate, 1),
+    rocFilingStatus: "Pending",
+    trusteeDocumentRequired: Boolean(form.trusteeDetails.trim()),
+    trusteeDocumentStatus: "Pending",
+    evidence: form.chargeDetails.trim() || "Charge / security evidence pending",
+  };
+}
+
 export default function DebtLMSPage() {
   const [loans, setLoans] = useState<DebtLoan[]>(sampleLoans);
   const [repaymentRows, setRepaymentRows] =
     useState<RepaymentRow[]>(sampleRepaymentRows);
   const [covenantRows, setCovenantRows] =
     useState<CovenantRow[]>(sampleCovenantRows);
+  const [securityRows, setSecurityRows] =
+    useState<SecurityTrackerRow[]>(sampleSecurityRows);
   const [noticeRows, setNoticeRows] = useState<NoticeRow[]>(sampleNoticeRows);
   const [bankMatches, setBankMatches] =
     useState<BankMatchRow[]>(sampleBankMatches);
@@ -1278,6 +1455,22 @@ export default function DebtLMSPage() {
   const [isExtractingTermSheet, setIsExtractingTermSheet] = useState(false);
   const [isSavingTermSheet, setIsSavingTermSheet] = useState(false);
 
+
+  const [covenantActionRow, setCovenantActionRow] = useState<CovenantRow | null>(null);
+  const [isAddingCovenant, setIsAddingCovenant] = useState(false);
+  const [covenantForm, setCovenantForm] =
+    useState<CovenantActionForm>(emptyCovenantActionForm);
+  const [isSavingCovenant, setIsSavingCovenant] = useState(false);
+  const [covenantMessage, setCovenantMessage] = useState("");
+
+  const [securityActionRow, setSecurityActionRow] =
+    useState<SecurityTrackerRow | null>(null);
+  const [isAddingSecurity, setIsAddingSecurity] = useState(false);
+  const [securityForm, setSecurityForm] =
+    useState<SecurityActionForm>(emptySecurityActionForm);
+  const [isSavingSecurity, setIsSavingSecurity] = useState(false);
+  const [securityMessage, setSecurityMessage] = useState("");
+
   useEffect(() => {
     async function loadDebtLmsData() {
       if (!isSupabaseConfigured || !supabase) {
@@ -1295,6 +1488,7 @@ export default function DebtLMSPage() {
           loansResult,
           repaymentResult,
           covenantsResult,
+          securityResult,
           noticesResult,
           bankMatchesResult,
         ] = await Promise.all([
@@ -1314,6 +1508,11 @@ export default function DebtLMSPage() {
             .order("due_date", { ascending: true }),
 
           db
+            .from("debt_lms_security_tracker")
+            .select("*")
+            .order("charge_creation_due_date", { ascending: true }),
+
+          db
             .from("debt_lms_notices")
             .select("*")
             .order("created_at", { ascending: false }),
@@ -1327,6 +1526,7 @@ export default function DebtLMSPage() {
         if (loansResult.error) throw new Error(loansResult.error.message);
         if (repaymentResult.error) throw new Error(repaymentResult.error.message);
         if (covenantsResult.error) throw new Error(covenantsResult.error.message);
+        if (securityResult.error) throw new Error(securityResult.error.message);
         if (noticesResult.error) throw new Error(noticesResult.error.message);
         if (bankMatchesResult.error) {
           throw new Error(bankMatchesResult.error.message);
@@ -1347,6 +1547,11 @@ export default function DebtLMSPage() {
             ? (covenantsResult.data as DataRow[]).map(mapCovenant)
             : sampleCovenantRows;
 
+        const nextSecurityRows =
+          securityResult.data && securityResult.data.length > 0
+            ? (securityResult.data as DataRow[]).map(mapSecurityTracker)
+            : sampleSecurityRows;
+
         const nextNotices =
           noticesResult.data && noticesResult.data.length > 0
             ? (noticesResult.data as DataRow[]).map(mapNotice)
@@ -1360,6 +1565,7 @@ export default function DebtLMSPage() {
         setLoans(nextLoans);
         setRepaymentRows(nextRepayments);
         setCovenantRows(nextCovenants);
+        setSecurityRows(nextSecurityRows);
         setNoticeRows(nextNotices);
         setBankMatches(nextBankMatches);
         setSelectedLoanId(nextLoans[0]?.id || sampleLoans[0].id);
@@ -1379,6 +1585,7 @@ export default function DebtLMSPage() {
         setLoans(sampleLoans);
         setRepaymentRows(sampleRepaymentRows);
         setCovenantRows(sampleCovenantRows);
+        setSecurityRows(sampleSecurityRows);
         setNoticeRows(sampleNoticeRows);
         setBankMatches(sampleBankMatches);
       } finally {
@@ -2424,9 +2631,15 @@ export default function DebtLMSPage() {
           localLoan.borrowerName,
           termSheetForm
         );
+        const localSecurityRow = buildSecurityTrackerFromTermSheet(
+          localLoan.id,
+          localLoan.borrowerName,
+          termSheetForm
+        );
 
         setLoans((currentLoans) => [localLoan, ...currentLoans]);
         setCovenantRows((currentRows) => [...localCovenants, ...currentRows]);
+        setSecurityRows((currentRows) => [localSecurityRow, ...currentRows]);
         setSelectedLoanId(localLoan.id);
         setDataMessage("Term sheet converted into a local loan master.");
         closeTermSheetModal();
@@ -2506,6 +2719,11 @@ export default function DebtLMSPage() {
         savedLoan.borrowerName,
         termSheetForm
       );
+      const extractedSecurityRow = buildSecurityTrackerFromTermSheet(
+        savedLoan.id,
+        savedLoan.borrowerName,
+        termSheetForm
+      );
 
       const covenantPayload = extractedCovenants.map((covenant) => ({
         loan_id: savedLoan.id,
@@ -2538,6 +2756,34 @@ export default function DebtLMSPage() {
         }
       }
 
+      const { data: securityData, error: securityError } = await db
+        .from("debt_lms_security_tracker")
+        .insert({
+          loan_id: savedLoan.id,
+          borrower_name: savedLoan.borrowerName,
+          security_type: extractedSecurityRow.securityType,
+          security_description: extractedSecurityRow.securityDescription,
+          charge_creation_required: extractedSecurityRow.chargeCreationRequired,
+          charge_creation_due_date: extractedSecurityRow.chargeCreationDueDate,
+          charge_creation_status: extractedSecurityRow.chargeCreationStatus,
+          roc_filing_required: extractedSecurityRow.rocFilingRequired,
+          roc_filing_due_date: extractedSecurityRow.rocFilingDueDate,
+          roc_filing_status: extractedSecurityRow.rocFilingStatus,
+          trustee_document_required: extractedSecurityRow.trusteeDocumentRequired,
+          trustee_document_status: extractedSecurityRow.trusteeDocumentStatus,
+          evidence_storage_path: extractedSecurityRow.evidence,
+        })
+        .select("*")
+        .single();
+
+      if (securityError) {
+        throw new Error(securityError.message);
+      }
+
+      const savedSecurityRow = securityData
+        ? mapSecurityTracker(securityData as DataRow)
+        : extractedSecurityRow;
+
       if (importRecord?.id) {
         await db
           .from("debt_lms_term_sheet_imports")
@@ -2547,6 +2793,7 @@ export default function DebtLMSPage() {
 
       setLoans((currentLoans) => [savedLoan, ...currentLoans]);
       setCovenantRows((currentRows) => [...savedCovenants, ...currentRows]);
+      setSecurityRows((currentRows) => [savedSecurityRow, ...currentRows]);
       setSelectedLoanId(savedLoan.id);
       setDataMessage("Term sheet converted into loan master and covenant tracker.");
       closeTermSheetModal();
@@ -2558,6 +2805,293 @@ export default function DebtLMSPage() {
       );
     } finally {
       setIsSavingTermSheet(false);
+    }
+  }
+
+  function openAddCovenant() {
+    setIsAddingCovenant(true);
+    setCovenantActionRow(null);
+    setCovenantForm({
+      ...emptyCovenantActionForm,
+      dueDate: addMonthsToDate(new Date().toISOString().slice(0, 10), 1),
+    });
+    setCovenantMessage("");
+  }
+
+  function openCovenantAction(row: CovenantRow) {
+    setIsAddingCovenant(false);
+    setCovenantActionRow(row);
+    setCovenantForm({
+      covenant: row.covenant,
+      type: row.type,
+      frequency: row.frequency,
+      dueDate: row.dueDate,
+      status: row.status,
+      evidence: row.evidence,
+      breachDescription: "",
+      waiverReason: "",
+    });
+    setCovenantMessage("");
+  }
+
+  function closeCovenantAction() {
+    setIsAddingCovenant(false);
+    setCovenantActionRow(null);
+    setCovenantForm(emptyCovenantActionForm);
+    setCovenantMessage("");
+  }
+
+  function updateCovenantForm<K extends keyof CovenantActionForm>(
+    field: K,
+    value: CovenantActionForm[K]
+  ) {
+    setCovenantForm((currentForm) => ({
+      ...currentForm,
+      [field]: value,
+    }));
+  }
+
+  async function submitCovenantAction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!covenantForm.covenant.trim()) {
+      setCovenantMessage("Covenant description is required.");
+      return;
+    }
+
+    setIsSavingCovenant(true);
+    setCovenantMessage("");
+
+    const covenantId = covenantActionRow?.id || crypto.randomUUID();
+    const nextRow: CovenantRow = {
+      id: covenantId,
+      loanId: covenantActionRow?.loanId || selectedLoan.id,
+      borrowerName: covenantActionRow?.borrowerName || selectedLoan.borrowerName,
+      covenant: covenantForm.covenant.trim(),
+      type: covenantForm.type,
+      frequency: covenantForm.frequency,
+      dueDate: covenantForm.dueDate || new Date().toISOString().slice(0, 10),
+      status: covenantForm.status,
+      evidence: covenantForm.evidence.trim() || "Evidence pending",
+    };
+
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const db = supabase as any;
+
+        if (covenantActionRow && isUuid(covenantActionRow.id)) {
+          const { error } = await db
+            .from("debt_lms_covenants")
+            .update({
+              covenant_name: nextRow.covenant,
+              covenant_type: nextRow.type,
+              frequency: nextRow.frequency,
+              due_date: nextRow.dueDate,
+              covenant_status: nextRow.status,
+              evidence_required: nextRow.evidence,
+              breach_description: covenantForm.breachDescription.trim(),
+              waiver_reason: covenantForm.waiverReason.trim(),
+              waiver_status: nextRow.status === "Waived" ? "Waived" : "Not Waived",
+            })
+            .eq("id", covenantActionRow.id);
+
+          if (error) throw new Error(error.message);
+        } else if (isUuid(selectedLoan.id)) {
+          const { data, error } = await db
+            .from("debt_lms_covenants")
+            .insert({
+                            loan_id: selectedLoan.id,
+              borrower_name: selectedLoan.borrowerName,
+              covenant_name: nextRow.covenant,
+              covenant_type: nextRow.type,
+              frequency: nextRow.frequency,
+              due_date: nextRow.dueDate,
+              covenant_status: nextRow.status,
+              evidence_required: nextRow.evidence,
+            })
+            .select("*")
+            .single();
+
+          if (error) throw new Error(error.message);
+          Object.assign(nextRow, mapCovenant(data as DataRow));
+        }
+      }
+
+      setCovenantRows((currentRows) => {
+        const exists = currentRows.some((row) => row.id === covenantId);
+        if (exists) {
+          return currentRows.map((row) => (row.id === covenantId ? nextRow : row));
+        }
+        return [nextRow, ...currentRows];
+      });
+
+      if (nextRow.status === "Breached") {
+        const breachNotice: NoticeRow = {
+          id: crypto.randomUUID(),
+          borrowerName: nextRow.borrowerName,
+          noticeType: "Covenant breach notice",
+          dueDate: nextRow.dueDate,
+          amount: 0,
+          emailTo: "finance@borrower.com",
+          status: "Draft",
+          linkedDocument: "Covenant Breach Notice PDF",
+        };
+        setNoticeRows((currentRows) => [breachNotice, ...currentRows]);
+      }
+
+      setCovenantMessage("Covenant tracker updated.");
+      setTimeout(closeCovenantAction, 600);
+    } catch (error) {
+      setCovenantMessage(
+        error instanceof Error ? error.message : "Unable to update covenant."
+      );
+    } finally {
+      setIsSavingCovenant(false);
+    }
+  }
+
+  function openAddSecurity() {
+    setIsAddingSecurity(true);
+    setSecurityActionRow(null);
+    setSecurityForm({
+      ...emptySecurityActionForm,
+      securityDescription: selectedLoan.security,
+      chargeCreationDueDate: addMonthsToDate(new Date().toISOString().slice(0, 10), 1),
+      rocFilingDueDate: addMonthsToDate(new Date().toISOString().slice(0, 10), 1),
+      evidence: "Security evidence pending",
+    });
+    setSecurityMessage("");
+  }
+
+  function openSecurityAction(row: SecurityTrackerRow) {
+    setIsAddingSecurity(false);
+    setSecurityActionRow(row);
+    setSecurityForm({
+      securityType: row.securityType,
+      securityDescription: row.securityDescription,
+      chargeCreationDueDate: row.chargeCreationDueDate,
+      chargeCreationStatus: row.chargeCreationStatus,
+      rocFilingDueDate: row.rocFilingDueDate,
+      rocFilingStatus: row.rocFilingStatus,
+      trusteeDocumentStatus: row.trusteeDocumentStatus,
+      evidence: row.evidence,
+    });
+    setSecurityMessage("");
+  }
+
+  function closeSecurityAction() {
+    setIsAddingSecurity(false);
+    setSecurityActionRow(null);
+    setSecurityForm(emptySecurityActionForm);
+    setSecurityMessage("");
+  }
+
+  function updateSecurityForm<K extends keyof SecurityActionForm>(
+    field: K,
+    value: SecurityActionForm[K]
+  ) {
+    setSecurityForm((currentForm) => ({
+      ...currentForm,
+      [field]: value,
+    }));
+  }
+
+  async function submitSecurityAction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!securityForm.securityDescription.trim()) {
+      setSecurityMessage("Security description is required.");
+      return;
+    }
+
+    setIsSavingSecurity(true);
+    setSecurityMessage("");
+
+    const securityId = securityActionRow?.id || crypto.randomUUID();
+    const nextRow: SecurityTrackerRow = {
+      id: securityId,
+      loanId: securityActionRow?.loanId || selectedLoan.id,
+      borrowerName: securityActionRow?.borrowerName || selectedLoan.borrowerName,
+      securityType: securityForm.securityType,
+      securityDescription: securityForm.securityDescription.trim(),
+      chargeCreationRequired: true,
+      chargeCreationDueDate:
+        securityForm.chargeCreationDueDate || new Date().toISOString().slice(0, 10),
+      chargeCreationStatus: securityForm.chargeCreationStatus,
+      rocFilingRequired: true,
+      rocFilingDueDate:
+        securityForm.rocFilingDueDate || new Date().toISOString().slice(0, 10),
+      rocFilingStatus: securityForm.rocFilingStatus,
+      trusteeDocumentRequired: true,
+      trusteeDocumentStatus: securityForm.trusteeDocumentStatus,
+      evidence: securityForm.evidence.trim() || "Evidence pending",
+    };
+
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const db = supabase as any;
+
+        if (securityActionRow && isUuid(securityActionRow.id)) {
+          const { error } = await db
+            .from("debt_lms_security_tracker")
+            .update({
+              security_type: nextRow.securityType,
+              security_description: nextRow.securityDescription,
+              charge_creation_required: nextRow.chargeCreationRequired,
+              charge_creation_due_date: nextRow.chargeCreationDueDate,
+              charge_creation_status: nextRow.chargeCreationStatus,
+              roc_filing_required: nextRow.rocFilingRequired,
+              roc_filing_due_date: nextRow.rocFilingDueDate,
+              roc_filing_status: nextRow.rocFilingStatus,
+              trustee_document_required: nextRow.trusteeDocumentRequired,
+              trustee_document_status: nextRow.trusteeDocumentStatus,
+              evidence_storage_path: nextRow.evidence,
+            })
+            .eq("id", securityActionRow.id);
+
+          if (error) throw new Error(error.message);
+        } else if (isUuid(selectedLoan.id)) {
+          const { data, error } = await db
+            .from("debt_lms_security_tracker")
+            .insert({
+              loan_id: selectedLoan.id,
+              borrower_name: selectedLoan.borrowerName,
+              security_type: nextRow.securityType,
+              security_description: nextRow.securityDescription,
+              charge_creation_required: nextRow.chargeCreationRequired,
+              charge_creation_due_date: nextRow.chargeCreationDueDate,
+              charge_creation_status: nextRow.chargeCreationStatus,
+              roc_filing_required: nextRow.rocFilingRequired,
+              roc_filing_due_date: nextRow.rocFilingDueDate,
+              roc_filing_status: nextRow.rocFilingStatus,
+              trustee_document_required: nextRow.trusteeDocumentRequired,
+              trustee_document_status: nextRow.trusteeDocumentStatus,
+              evidence_storage_path: nextRow.evidence,
+            })
+            .select("*")
+            .single();
+
+          if (error) throw new Error(error.message);
+          Object.assign(nextRow, mapSecurityTracker(data as DataRow));
+        }
+      }
+
+      setSecurityRows((currentRows) => {
+        const exists = currentRows.some((row) => row.id === securityId);
+        if (exists) {
+          return currentRows.map((row) => (row.id === securityId ? nextRow : row));
+        }
+        return [nextRow, ...currentRows];
+      });
+
+      setSecurityMessage("Security tracker updated.");
+      setTimeout(closeSecurityAction, 600);
+    } catch (error) {
+      setSecurityMessage(
+        error instanceof Error ? error.message : "Unable to update security tracker."
+      );
+    } finally {
+      setIsSavingSecurity(false);
     }
   }
 
@@ -2591,6 +3125,7 @@ export default function DebtLMSPage() {
 
   const selectedSchedule = repaymentRows.filter((row) => row.loanId === selectedLoan.id);
   const selectedCovenants = covenantRows.filter((row) => row.loanId === selectedLoan.id);
+  const selectedSecurityRows = securityRows.filter((row) => row.loanId === selectedLoan.id);
 
   const receiptPrincipalReceived = Number(receiptForm.principalReceived || 0);
   const receiptInterestReceived = Number(receiptForm.interestReceived || 0);
@@ -2828,6 +3363,7 @@ export default function DebtLMSPage() {
         .status-performing,
         .status-received,
         .status-compliant,
+        .status-completed,
         .status-sent,
         .status-matched {
           background: rgba(22, 163, 74, 0.28);
@@ -3202,6 +3738,28 @@ export default function DebtLMSPage() {
           margin: 0;
           color: #c7d7f4;
           line-height: 1.55;
+        }
+
+
+        .tracker-action-card {
+          border: 1px solid rgba(147, 197, 253, 0.14);
+          background: rgba(15, 23, 42, 0.72);
+          border-radius: 18px;
+          padding: 14px;
+          display: grid;
+          gap: 10px;
+          margin-bottom: 12px;
+        }
+
+        .tracker-action-card h3 {
+          margin: 0;
+          font-size: 17px;
+        }
+
+        .tracker-action-card p {
+          margin: 0;
+          color: #c7d7f4;
+          line-height: 1.5;
         }
 
         .term-sheet-confidence-grid {
@@ -3706,7 +4264,275 @@ export default function DebtLMSPage() {
           </div>
         )}
 
-                {receiptRow && (
+                {(isAddingCovenant || covenantActionRow) && (
+          <div className="loan-modal-backdrop">
+            <form className="receipt-modal" onSubmit={submitCovenantAction}>
+              <div className="loan-modal-header">
+                <div>
+                  <h2>{isAddingCovenant ? "Add Covenant" : "Update Covenant"}</h2>
+                  <p>
+                    Track reporting, financial, negative and security covenants with evidence,
+                    breach and waiver status.
+                  </p>
+                </div>
+
+                <button className="debt-secondary" onClick={closeCovenantAction} type="button">
+                  Close
+                </button>
+              </div>
+
+              <div className="loan-form-grid">
+                <div className="loan-form-field full">
+                  <label>Covenant</label>
+                  <textarea
+                    value={covenantForm.covenant}
+                    onChange={(event) => updateCovenantForm("covenant", event.target.value)}
+                    placeholder="Monthly MIS submission, DSCR threshold, security cover etc."
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Type</label>
+                  <select
+                    value={covenantForm.type}
+                    onChange={(event) => updateCovenantForm("type", event.target.value)}
+                  >
+                    <option>Reporting</option>
+                    <option>Financial</option>
+                    <option>Security</option>
+                    <option>Negative</option>
+                    <option>Information</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Frequency</label>
+                  <select
+                    value={covenantForm.frequency}
+                    onChange={(event) => updateCovenantForm("frequency", event.target.value)}
+                  >
+                    <option>Monthly</option>
+                    <option>Quarterly</option>
+                    <option>Half-yearly</option>
+                    <option>Annual</option>
+                    <option>Event based</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Due Date</label>
+                  <input
+                    type="date"
+                    value={covenantForm.dueDate}
+                    onChange={(event) => updateCovenantForm("dueDate", event.target.value)}
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Status</label>
+                  <select
+                    value={covenantForm.status}
+                    onChange={(event) =>
+                      updateCovenantForm("status", event.target.value as CovenantStatus)
+                    }
+                  >
+                    <option>Pending</option>
+                    <option>Compliant</option>
+                    <option>Breached</option>
+                    <option>Waived</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Evidence / Requirement</label>
+                  <textarea
+                    value={covenantForm.evidence}
+                    onChange={(event) => updateCovenantForm("evidence", event.target.value)}
+                    placeholder="MIS uploaded, CFO certificate awaited, waiver approval etc."
+                  />
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Breach Description</label>
+                  <textarea
+                    value={covenantForm.breachDescription}
+                    onChange={(event) =>
+                      updateCovenantForm("breachDescription", event.target.value)
+                    }
+                    placeholder="Capture breach details when status is Breached"
+                  />
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Waiver Reason</label>
+                  <textarea
+                    value={covenantForm.waiverReason}
+                    onChange={(event) => updateCovenantForm("waiverReason", event.target.value)}
+                    placeholder="Capture waiver approval rationale where applicable"
+                  />
+                </div>
+              </div>
+
+              <div className="loan-form-actions">
+                <div>
+                  {covenantMessage && (
+                    <div className="loan-form-message">{covenantMessage}</div>
+                  )}
+                </div>
+
+                <div className="debt-header-actions">
+                  <button className="debt-secondary" onClick={closeCovenantAction} type="button">
+                    Cancel
+                  </button>
+
+                  <button className="debt-primary" disabled={isSavingCovenant} type="submit">
+                    {isSavingCovenant ? "Saving..." : "Save Covenant"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {(isAddingSecurity || securityActionRow) && (
+          <div className="loan-modal-backdrop">
+            <form className="receipt-modal" onSubmit={submitSecurityAction}>
+              <div className="loan-modal-header">
+                <div>
+                  <h2>{isAddingSecurity ? "Add Security Item" : "Update Security"}</h2>
+                  <p>
+                    Track charge creation, ROC filing, trustee documents and evidence for the
+                    selected loan security package.
+                  </p>
+                </div>
+
+                <button className="debt-secondary" onClick={closeSecurityAction} type="button">
+                  Close
+                </button>
+              </div>
+
+              <div className="loan-form-grid">
+                <div className="loan-form-field">
+                  <label>Security Type</label>
+                  <select
+                    value={securityForm.securityType}
+                    onChange={(event) => updateSecurityForm("securityType", event.target.value)}
+                  >
+                    <option>Receivables Charge</option>
+                    <option>Debenture Security Package</option>
+                    <option>Share Pledge</option>
+                    <option>Hypothecation</option>
+                    <option>Escrow Control</option>
+                    <option>Corporate Guarantee</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Security Description</label>
+                  <textarea
+                    value={securityForm.securityDescription}
+                    onChange={(event) =>
+                      updateSecurityForm("securityDescription", event.target.value)
+                    }
+                    placeholder="Describe security / charge / pledge terms"
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Charge Due Date</label>
+                  <input
+                    type="date"
+                    value={securityForm.chargeCreationDueDate}
+                    onChange={(event) =>
+                      updateSecurityForm("chargeCreationDueDate", event.target.value)
+                    }
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Charge Status</label>
+                  <select
+                    value={securityForm.chargeCreationStatus}
+                    onChange={(event) =>
+                      updateSecurityForm("chargeCreationStatus", event.target.value as SecurityActionForm["chargeCreationStatus"])
+                    }
+                  >
+                    <option>Pending</option>
+                    <option>Completed</option>
+                    <option>Overdue</option>
+                    <option>Waived</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field">
+                  <label>ROC Due Date</label>
+                  <input
+                    type="date"
+                    value={securityForm.rocFilingDueDate}
+                    onChange={(event) => updateSecurityForm("rocFilingDueDate", event.target.value)}
+                  />
+                </div>
+
+                <div className="loan-form-field">
+                  <label>ROC Status</label>
+                  <select
+                    value={securityForm.rocFilingStatus}
+                    onChange={(event) => updateSecurityForm("rocFilingStatus", event.target.value as SecurityActionForm["rocFilingStatus"])}
+                  >
+                    <option>Pending</option>
+                    <option>Completed</option>
+                    <option>Overdue</option>
+                    <option>Waived</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field">
+                  <label>Trustee Document Status</label>
+                  <select
+                    value={securityForm.trusteeDocumentStatus}
+                    onChange={(event) =>
+                      updateSecurityForm("trusteeDocumentStatus", event.target.value as SecurityActionForm["trusteeDocumentStatus"])
+                    }
+                  >
+                    <option>Pending</option>
+                    <option>Completed</option>
+                    <option>Overdue</option>
+                    <option>Waived</option>
+                  </select>
+                </div>
+
+                <div className="loan-form-field full">
+                  <label>Evidence / Remarks</label>
+                  <textarea
+                    value={securityForm.evidence}
+                    onChange={(event) => updateSecurityForm("evidence", event.target.value)}
+                    placeholder="Upload reference, trustee mail, ROC SRN, charge document location etc."
+                  />
+                </div>
+              </div>
+
+              <div className="loan-form-actions">
+                <div>
+                  {securityMessage && (
+                    <div className="loan-form-message">{securityMessage}</div>
+                  )}
+                </div>
+
+                <div className="debt-header-actions">
+                  <button className="debt-secondary" onClick={closeSecurityAction} type="button">
+                    Cancel
+                  </button>
+
+                  <button className="debt-primary" disabled={isSavingSecurity} type="submit">
+                    {isSavingSecurity ? "Saving..." : "Save Security"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {receiptRow && (
           <div className="loan-modal-backdrop">
             <form className="receipt-modal" onSubmit={submitReceiptUpdate}>
               <div className="loan-modal-header">
@@ -4697,9 +5523,13 @@ export default function DebtLMSPage() {
                 <h2>Covenant Tracker</h2>
                 <p>
                   Reporting, financial, negative and security covenants extracted
-                  from the term sheet.
+                  from the term sheet with action tracking.
                 </p>
               </div>
+
+              <button className="debt-secondary" onClick={openAddCovenant} type="button">
+                Add Covenant
+              </button>
             </div>
 
             <div className="table-wrap">
@@ -4713,6 +5543,7 @@ export default function DebtLMSPage() {
                     <th>Due Date</th>
                     <th>Status</th>
                     <th>Evidence</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
 
@@ -4732,6 +5563,15 @@ export default function DebtLMSPage() {
                         </span>
                       </td>
                       <td>{row.evidence}</td>
+                      <td>
+                        <button
+                          className="small-action"
+                          onClick={() => openCovenantAction(row)}
+                          type="button"
+                        >
+                          Update
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -4749,21 +5589,158 @@ export default function DebtLMSPage() {
 
             {selectedCovenants.length > 0 ? (
               selectedCovenants.map((row) => (
-                <div className="selected-loan-main" key={row.id}>
-                  <h3>{row.covenant}</h3>
+                <div className="tracker-action-card" key={row.id}>
+                  <div className="schedule-compact-top">
+                    <h3>{row.covenant}</h3>
+                    <span className={`status-pill status-${statusClass(row.status)}`}>
+                      {row.status}
+                    </span>
+                  </div>
+
                   <p>
-                    {row.type} covenant · {row.frequency} · due{" "}
-                    {formatDate(row.dueDate)}
+                    {row.type} covenant · {row.frequency} · due {formatDate(row.dueDate)}
                   </p>
-                  <span className={`status-pill status-${statusClass(row.status)}`}>
-                    {row.status}
-                  </span>
+                  <p>Evidence: {row.evidence}</p>
+
+                  <div className="notice-actions">
+                    <button
+                      className="small-action"
+                      onClick={() => openCovenantAction(row)}
+                      type="button"
+                    >
+                      Update Covenant
+                    </button>
+                  </div>
                 </div>
               ))
             ) : (
               <div className="selected-loan-main">
                 <h3>No covenant due</h3>
                 <p>All covenant records will appear after term sheet extraction.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="debt-grid">
+          <div className="debt-panel">
+            <div className="panel-header">
+              <div>
+                <h2>Security Tracker</h2>
+                <p>
+                  Charge creation, ROC filing, trustee documents and evidence status
+                  for debt security perfection.
+                </p>
+              </div>
+
+              <button className="debt-secondary" onClick={openAddSecurity} type="button">
+                Add Security Item
+              </button>
+            </div>
+
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Borrower</th>
+                    <th>Security</th>
+                    <th>Charge Due</th>
+                    <th>Charge</th>
+                    <th>ROC</th>
+                    <th>Trustee</th>
+                    <th>Evidence</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {securityRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>
+                        <strong>{row.borrowerName}</strong>
+                      </td>
+                      <td>{row.securityType}</td>
+                      <td>{formatDate(row.chargeCreationDueDate)}</td>
+                      <td>
+                        <span
+                          className={`status-pill status-${statusClass(row.chargeCreationStatus)}`}
+                        >
+                          {row.chargeCreationStatus}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`status-pill status-${statusClass(row.rocFilingStatus)}`}>
+                          {row.rocFilingStatus}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          className={`status-pill status-${statusClass(
+                            row.trusteeDocumentStatus
+                          )}`}
+                        >
+                          {row.trusteeDocumentStatus}
+                        </span>
+                      </td>
+                      <td>{row.evidence}</td>
+                      <td>
+                        <button
+                          className="small-action"
+                          onClick={() => openSecurityAction(row)}
+                          type="button"
+                        >
+                          Update
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="debt-panel">
+            <div className="panel-header">
+              <div>
+                <h2>Selected Loan Security</h2>
+                <p>{selectedLoan.borrowerName}</p>
+              </div>
+            </div>
+
+            {selectedSecurityRows.length > 0 ? (
+              selectedSecurityRows.map((row) => (
+                <div className="tracker-action-card" key={row.id}>
+                  <div className="schedule-compact-top">
+                    <h3>{row.securityType}</h3>
+                    <span
+                      className={`status-pill status-${statusClass(row.chargeCreationStatus)}`}
+                    >
+                      {row.chargeCreationStatus}
+                    </span>
+                  </div>
+
+                  <p>{row.securityDescription}</p>
+                  <p>
+                    Charge due {formatDate(row.chargeCreationDueDate)} · ROC due{" "}
+                    {formatDate(row.rocFilingDueDate)}
+                  </p>
+                  <p>Evidence: {row.evidence}</p>
+
+                  <div className="notice-actions">
+                    <button
+                      className="small-action"
+                      onClick={() => openSecurityAction(row)}
+                      type="button"
+                    >
+                      Update Security
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="selected-loan-main">
+                <h3>No security item tracked</h3>
+                <p>Add a security item or create one from term sheet extraction.</p>
               </div>
             )}
           </div>
