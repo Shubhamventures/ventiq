@@ -42,9 +42,9 @@ export async function POST(request: Request) {
       process.env.NEXT_PUBLIC_VERCEL_URL ||
       "http://localhost:3000";
 
-    const redirectTo = `${siteUrl}/auth/welcome?next=${encodeURIComponent(
+       const redirectTo = `${siteUrl}/auth/set-password?next=${encodeURIComponent(
       dashboardPath
-    )}`;
+    )}&stakeholder=${encodeURIComponent(stakeholderId)}`;
 
     const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       email,
@@ -72,11 +72,13 @@ export async function POST(request: Request) {
 
     const now = new Date().toISOString();
 
-    const { error: stakeholderUpdateError } = await supabaseAdmin
+        const { error: stakeholderUpdateError } = await supabaseAdmin
       .from("ventiq_stakeholders")
       .update({
+        auth_user_id: data.user?.id || null,
         invite_status: "Invite Sent",
         invited_at: now,
+        access_status: "Active",
       })
       .eq("id", stakeholderId);
 
