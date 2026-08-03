@@ -423,7 +423,31 @@ export default function DataActivationDashboardPage() {
 
     if (!isSupabaseConfigured || !supabase) return;
 
-    await supabase.from("migration_activation_events").insert(eventPayload);
+        await supabase.from("migration_activation_events").insert(eventPayload);
+
+    await supabase.from("ventiq_enterprise_audit_logs").insert({
+      source_module: "Migration Activation",
+      linked_record_id: layer?.id || "fund-activation",
+      linked_record_type: layer ? "Migration Data Layer" : "Fund Activation",
+      event_type: eventType,
+      event_title: title,
+      event_description: description,
+      actor_name: "VENTIQ Admin",
+      actor_email: "admin@useventiq.com",
+      actor_role:
+        eventType === "Maker Submitted"
+          ? "Maker"
+          : eventType === "Checker Approved" || eventType === "Checker Rejected"
+            ? "Checker"
+            : "Fund Admin",
+      event_status: "Recorded",
+      risk_level:
+        eventType === "Checker Rejected"
+          ? "High"
+          : eventType === "Fund Activated"
+            ? "High"
+            : "Medium",
+    });
   }
 
   async function loadActivationSnapshot() {

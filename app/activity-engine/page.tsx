@@ -71,7 +71,16 @@ type DataRoomQuestion = {
   created_at: string | null;
   updated_at: string | null;
 };
-
+type MigrationActivationEvent = {
+  id: string;
+  event_type: string;
+  layer_id: string | null;
+  layer_title: string | null;
+  event_title: string;
+  event_description: string | null;
+  actor_name: string | null;
+  created_at: string | null;
+};
 type ActivityEvent = {
   id: string;
   time: string;
@@ -140,6 +149,9 @@ export default function ActivityEnginePage() {
   const [dataRoomQuestions, setDataRoomQuestions] = useState<
     DataRoomQuestion[]
   >([]);
+    const [migrationActivationEvents, setMigrationActivationEvents] = useState<
+    MigrationActivationEvent[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -156,12 +168,13 @@ export default function ActivityEnginePage() {
       setLoading(true);
       setErrorMessage("");
 
-      const [
+            const [
         capitalCallResult,
         documentResult,
         dataRoomDocumentResult,
         engagementResult,
         questionResult,
+        migrationActivationResult,
       ] = await Promise.all([
         supabase
           .from("capital_calls")
@@ -192,14 +205,20 @@ export default function ActivityEnginePage() {
           .select("*")
           .order("asked_at", { ascending: false })
           .limit(40),
+                  supabase
+          .from("migration_activation_events")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(40),
       ]);
 
-      const firstError =
+          const firstError =
         capitalCallResult.error ||
         documentResult.error ||
         dataRoomDocumentResult.error ||
         engagementResult.error ||
-        questionResult.error;
+        questionResult.error ||
+        migrationActivationResult.error;
 
       if (firstError) {
         setErrorMessage(firstError.message);
@@ -216,6 +235,9 @@ export default function ActivityEnginePage() {
         (engagementResult.data as DataRoomEngagementEvent[]) ?? []
       );
       setDataRoomQuestions((questionResult.data as DataRoomQuestion[]) ?? []);
+            setMigrationActivationEvents(
+        (migrationActivationResult.data as MigrationActivationEvent[]) ?? []
+      );
       setLoading(false);
     }
 
@@ -369,18 +391,32 @@ export default function ActivityEnginePage() {
         investorName: question.investor_name,
       });
     });
+        migrationActivationEvents.forEach((event) => {
+      events.push({
+        id: `migration-activation-${event.id}`,
+        time: event.created_at ?? "",
+        module: "Migration Activation",
+        title: event.event_title,
+        description:
+          event.event_description ??
+          `${event.layer_title ?? "Fund data"} moved through activation workflow.`,
+        status: event.event_type.toLowerCase(),
+        fundName: event.layer_title ?? "VENTIQ Fund Activation",
+      });
+    });
 
     return events.sort((a, b) => {
       const aTime = new Date(a.time || 0).getTime();
       const bTime = new Date(b.time || 0).getTime();
       return bTime - aTime;
     });
-  }, [
+    }, [
     capitalCalls,
     documents,
     dataRoomDocuments,
     dataRoomEngagementEvents,
     dataRoomQuestions,
+    migrationActivationEvents,
   ]);
 
   const approvedCapitalCalls = capitalCalls.filter(
