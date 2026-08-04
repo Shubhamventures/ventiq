@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { useActiveFund } from "../../lib/useActiveFund";
 
 type DataRow = Record<string, unknown>;
 
@@ -99,7 +100,97 @@ function getEngagementLabel(action: string) {
   return action || "Engaged";
 }
 
+const DEFAULT_FUND_NAME = "VENTIQ Growth Fund II";
+
+function getFundName(row: DataRow) {
+  return getString(
+    row,
+    ["fund_name", "scheme_name", "fund", "fund_title"],
+    ""
+  ).trim();
+}
+
+function filterRowsForFund(
+  rows: DataRow[],
+  fundName: string,
+  includeGlobalRows = false
+) {
+  const normalizedFundName = fundName.trim().toLowerCase();
+
+  return rows.filter((row) => {
+    const rowFundName = getFundName(row).toLowerCase();
+
+    if (!rowFundName) return includeGlobalRows;
+    return rowFundName === normalizedFundName;
+  });
+}
+
+function uniqueFundNames(rowGroups: DataRow[][]) {
+  return Array.from(
+    new Set(
+      rowGroups
+        .flat()
+        .map(getFundName)
+        .filter(Boolean)
+    )
+  ).sort((left, right) => left.localeCompare(right));
+}
+
+function filterLinkedDataRoomRows(
+  rows: DataRow[],
+  fundName: string,
+  fundDocuments: DataRow[]
+) {
+  const normalizedFundName = fundName.trim().toLowerCase();
+  const documentIds = new Set(fundDocuments.map(getId).filter(Boolean));
+  const documentNames = new Set(
+    fundDocuments
+      .map((row) =>
+        getString(row, ["document_name", "file_name", "name"], "")
+          .trim()
+          .toLowerCase()
+      )
+      .filter(Boolean)
+  );
+
+  return rows.filter((row) => {
+    const rowFundName = getFundName(row).toLowerCase();
+    if (rowFundName) return rowFundName === normalizedFundName;
+
+    const documentId = getString(
+      row,
+      ["document_id", "data_room_document_id"],
+      ""
+    );
+    const documentName = getString(
+      row,
+      ["document_name", "file_name"],
+      ""
+    )
+      .trim()
+      .toLowerCase();
+
+    if (documentId && documentIds.has(documentId)) return true;
+    if (documentName && documentNames.has(documentName)) return true;
+
+    // Older data-room records may not yet carry a fund key. Keep them visible
+    // as legacy global engagement until the test-data normalization step.
+    return !documentId && !documentName;
+  });
+}
+
 export default function FundraisingAIPage() {
+  const {
+    activeFundName,
+    setActiveFundName,
+    isReady: fundContextReady,
+  } = useActiveFund(DEFAULT_FUND_NAME);
+  const [availableFunds, setAvailableFunds] = useState<string[]>([
+    DEFAULT_FUND_NAME,
+  ]);
+  const [fundActivationStatus, setFundActivationStatus] = useState("Checking");
+  const [fundActivatedAt, setFundActivatedAt] = useState("");
+  const [fundActivatedBy, setFundActivatedBy] = useState("");
   const [latestInvestorBatch, setLatestInvestorBatch] =
     useState<DataRow | null>(null);
   const [latestPdfBatch, setLatestPdfBatch] = useState<DataRow | null>(null);
@@ -120,49 +211,60 @@ export default function FundraisingAIPage() {
   const [errorMessage, setErrorMessage] = useState("");
 
   async function loadInvestorRelationsWorkspace() {
+    if (!fundContextReady) return;
+
     if (!isSupabaseConfigured || !supabase) {
       setErrorMessage(
         "The sample Investor Relations workspace is temporarily unavailable. Please request a walkthrough."
       );
+      setFundActivationStatus("Unavailable");
       setLoading(false);
       return;
     }
 
     setLoading(true);
     setErrorMessage("");
+    setFundActivationStatus("Checking");
+    setFundActivatedAt("");
+    setFundActivatedBy("");
 
     try {
       const [
-        investorBatchResult,
-        pdfBatchResult,
-        complianceBatchResult,
+        fundMasterResult,
+        activationResult,
+        investorBatchesResult,
+        pdfBatchesResult,
+        complianceBatchesResult,
         investorsResult,
         commitmentsResult,
         investorDocumentsResult,
+        complianceItemsResult,
         dataRoomDocumentsResult,
         dataRoomEngagementResult,
         dataRoomQuestionsResult,
       ] = await Promise.all([
+        supabase.from("fund_master").select("*"),
+
+        supabase
+          .from("fund_activation_status")
+          .select("status, activated_at, activated_by, readiness_score")
+          .eq("fund_name", activeFundName)
+          .maybeSingle(),
+
         supabase
           .from("investor_import_batches")
           .select("*")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+          .order("created_at", { ascending: false }),
 
         supabase
           .from("pdf_intelligence_batches")
           .select("*")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+          .order("created_at", { ascending: false }),
 
         supabase
           .from("compliance_data_migration_batches")
           .select("*")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+          .order("created_at", { ascending: false }),
 
         supabase
           .from("investor_master")
@@ -176,6 +278,11 @@ export default function FundraisingAIPage() {
 
         supabase
           .from("investor_documents")
+          .select("*")
+          .order("created_at", { ascending: false }),
+
+        supabase
+          .from("compliance_items")
           .select("*")
           .order("created_at", { ascending: false }),
 
@@ -195,68 +302,117 @@ export default function FundraisingAIPage() {
           .order("asked_at", { ascending: false }),
       ]);
 
-      const investorBatch =
-        investorBatchResult.error
-          ? null
-          : ((investorBatchResult.data as DataRow | null) ?? null);
+      const allFundMaster = fundMasterResult.error
+        ? []
+        : ((fundMasterResult.data ?? []) as DataRow[]);
+      const allInvestorBatches = investorBatchesResult.error
+        ? []
+        : ((investorBatchesResult.data ?? []) as DataRow[]);
+      const allPdfBatches = pdfBatchesResult.error
+        ? []
+        : ((pdfBatchesResult.data ?? []) as DataRow[]);
+      const allComplianceBatches = complianceBatchesResult.error
+        ? []
+        : ((complianceBatchesResult.data ?? []) as DataRow[]);
+      const allInvestors = investorsResult.error
+        ? []
+        : ((investorsResult.data ?? []) as DataRow[]);
+      const allCommitments = commitmentsResult.error
+        ? []
+        : ((commitmentsResult.data ?? []) as DataRow[]);
+      const allInvestorDocuments = investorDocumentsResult.error
+        ? []
+        : ((investorDocumentsResult.data ?? []) as DataRow[]);
+      const allComplianceItems = complianceItemsResult.error
+        ? []
+        : ((complianceItemsResult.data ?? []) as DataRow[]);
+      const allDataRoomDocuments = dataRoomDocumentsResult.error
+        ? []
+        : ((dataRoomDocumentsResult.data ?? []) as DataRow[]);
+      const allDataRoomEngagement = dataRoomEngagementResult.error
+        ? []
+        : ((dataRoomEngagementResult.data ?? []) as DataRow[]);
+      const allDataRoomQuestions = dataRoomQuestionsResult.error
+        ? []
+        : ((dataRoomQuestionsResult.data ?? []) as DataRow[]);
 
-      const pdfBatch =
-        pdfBatchResult.error
-          ? null
-          : ((pdfBatchResult.data as DataRow | null) ?? null);
+      const detectedFunds = uniqueFundNames([
+        allFundMaster,
+        allInvestorBatches,
+        allPdfBatches,
+        allComplianceBatches,
+        allInvestors,
+        allCommitments,
+        allInvestorDocuments,
+        allComplianceItems,
+        allDataRoomDocuments,
+      ]);
 
-      const complianceBatch =
-        complianceBatchResult.error
-          ? null
-          : ((complianceBatchResult.data as DataRow | null) ?? null);
-
-      setLatestInvestorBatch(investorBatch);
-      setLatestPdfBatch(pdfBatch);
-      setLatestComplianceBatch(complianceBatch);
-
-      if (!investorsResult.error) {
-        setInvestors((investorsResult.data ?? []) as DataRow[]);
-      }
-
-      if (!commitmentsResult.error) {
-        setCommitments((commitmentsResult.data ?? []) as DataRow[]);
-      }
-
-      if (!investorDocumentsResult.error) {
-        setInvestorDocuments((investorDocumentsResult.data ?? []) as DataRow[]);
-      }
-
-      if (!dataRoomDocumentsResult.error) {
-        setDataRoomDocuments((dataRoomDocumentsResult.data ?? []) as DataRow[]);
-      }
-
-      if (!dataRoomEngagementResult.error) {
-        setDataRoomEngagementEvents(
-          (dataRoomEngagementResult.data ?? []) as DataRow[]
-        );
-      }
-
-      if (!dataRoomQuestionsResult.error) {
-        setDataRoomQuestions((dataRoomQuestionsResult.data ?? []) as DataRow[]);
-      }
-
-      const complianceBatchId = getString(
-        complianceBatch ?? undefined,
-        ["id"],
-        ""
+      setAvailableFunds(
+        Array.from(new Set([DEFAULT_FUND_NAME, activeFundName, ...detectedFunds]))
+          .filter(Boolean)
+          .sort((left, right) => left.localeCompare(right))
       );
 
-      if (complianceBatchId) {
-        const complianceItemsResult = await supabase
-          .from("compliance_items")
-          .select("*")
-          .eq("batch_id", complianceBatchId)
-          .order("created_at", { ascending: false });
+      const activationRecord = activationResult.error
+        ? null
+        : ((activationResult.data as DataRow | null) ?? null);
 
-        if (!complianceItemsResult.error) {
-          setComplianceItems((complianceItemsResult.data ?? []) as DataRow[]);
-        }
-      }
+      setFundActivationStatus(
+        getString(activationRecord ?? undefined, ["status"], "Setup Not Started")
+      );
+      setFundActivatedAt(
+        getString(activationRecord ?? undefined, ["activated_at"], "")
+      );
+      setFundActivatedBy(
+        getString(activationRecord ?? undefined, ["activated_by"], "")
+      );
+
+      const fundInvestorBatches = filterRowsForFund(
+        allInvestorBatches,
+        activeFundName
+      );
+      const fundPdfBatches = filterRowsForFund(allPdfBatches, activeFundName);
+      const fundComplianceBatches = filterRowsForFund(
+        allComplianceBatches,
+        activeFundName
+      );
+      const fundInvestors = filterRowsForFund(allInvestors, activeFundName);
+      const fundCommitments = filterRowsForFund(allCommitments, activeFundName);
+      const fundInvestorDocuments = filterRowsForFund(
+        allInvestorDocuments,
+        activeFundName
+      );
+      const fundComplianceItems = filterRowsForFund(
+        allComplianceItems,
+        activeFundName
+      );
+      const fundDataRoomDocuments = filterRowsForFund(
+        allDataRoomDocuments,
+        activeFundName,
+        true
+      );
+      const fundEngagementRows = filterLinkedDataRoomRows(
+        allDataRoomEngagement,
+        activeFundName,
+        fundDataRoomDocuments
+      );
+      const fundQuestionRows = filterLinkedDataRoomRows(
+        allDataRoomQuestions,
+        activeFundName,
+        fundDataRoomDocuments
+      );
+
+      setLatestInvestorBatch(fundInvestorBatches[0] ?? null);
+      setLatestPdfBatch(fundPdfBatches[0] ?? null);
+      setLatestComplianceBatch(fundComplianceBatches[0] ?? null);
+      setInvestors(fundInvestors);
+      setCommitments(fundCommitments);
+      setInvestorDocuments(fundInvestorDocuments);
+      setComplianceItems(fundComplianceItems);
+      setDataRoomDocuments(fundDataRoomDocuments);
+      setDataRoomEngagementEvents(fundEngagementRows);
+      setDataRoomQuestions(fundQuestionRows);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -270,7 +426,7 @@ export default function FundraisingAIPage() {
 
   useEffect(() => {
     loadInvestorRelationsWorkspace();
-  }, []);
+  }, [activeFundName, fundContextReady]);
 
   const investorRelationsMetrics = useMemo(() => {
     const importedInvestorCount = getNumber(latestInvestorBatch ?? undefined, [
@@ -664,9 +820,71 @@ export default function FundraisingAIPage() {
           </a>
         </div>
 
+        <div
+          className="preview-card"
+          style={{ marginBottom: 18, padding: 22 }}
+        >
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">Active Fund Context</p>
+              <h2 style={{ marginBottom: 8 }}>{activeFundName}</h2>
+              <p style={{ margin: 0 }}>
+                Activation status: <strong>{fundActivationStatus}</strong>
+                {fundActivatedAt
+                  ? ` · Activated ${formatDateTime(fundActivatedAt)}`
+                  : ""}
+                {fundActivatedBy ? ` by ${fundActivatedBy}` : ""}
+              </p>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-end",
+                flexWrap: "wrap",
+                gap: 10,
+              }}
+            >
+              <label style={{ display: "grid", gap: 6, minWidth: 270 }}>
+                <span style={{ fontSize: 12, fontWeight: 800 }}>
+                  Switch active fund
+                </span>
+                <select
+                  aria-label="Select active fund"
+                  disabled={!fundContextReady || loading}
+                  onChange={(event) => setActiveFundName(event.target.value)}
+                  style={{
+                    background: "#0f172a",
+                    border: "1px solid rgba(148, 163, 184, 0.35)",
+                    borderRadius: 12,
+                    color: "#f8fafc",
+                    minHeight: 42,
+                    padding: "0 12px",
+                  }}
+                  value={activeFundName}
+                >
+                  {availableFunds.map((fundName) => (
+                    <option key={fundName} value={fundName}>
+                      {fundName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <a
+                className="monitor-btn monitor-btn-secondary"
+                href="/migration/activation"
+              >
+                Open Fund Activation
+              </a>
+            </div>
+          </div>
+        </div>
+
         <div className="sample-data-ribbon">
-          Connected investor relations workspace · Reading migrated investor,
-          PDF, portal, data room, DDQ and compliance evidence records
+          {activeFundName} · {fundActivationStatus} · Connected Investor
+          Relations workspace reading this fund&apos;s investor, data-room, DDQ
+          and evidence records
         </div>
 
         {loading && (
@@ -686,10 +904,42 @@ export default function FundraisingAIPage() {
           </div>
         )}
 
-        {!loading && !errorMessage && (
+        {!loading &&
+          !errorMessage &&
+          fundActivationStatus !== "Active" && (
+            <div className="preview-card">
+              <p className="eyebrow">Activation Required</p>
+              <h2>{activeFundName} is not active across VENTIQ</h2>
+              <div className="explain-box">
+                The Investor Relations Workspace is locked because this fund has
+                not completed the controlled activation process. Validate the
+                investor, PDF, fund, portfolio and compliance layers, complete
+                maker-checker approval, and activate the fund before IR teams
+                publish documents or respond to LP diligence from operational data.
+              </div>
+              <div className="action-row">
+                <a
+                  className="monitor-btn monitor-btn-primary"
+                  href="/migration/activation"
+                >
+                  Complete Fund Activation
+                </a>
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/migration/data-intake"
+                >
+                  Open Data Intake
+                </a>
+              </div>
+            </div>
+          )}
+
+        {!loading &&
+          !errorMessage &&
+          fundActivationStatus === "Active" && (
           <>
             <div className="preview-card">
-              <h2>Investor Relations Workspace Preview</h2>
+              <h2>{activeFundName} Investor Relations Workspace</h2>
 
               <div className="explain-box">
                 VENTIQ reviewed {investorRelationsMetrics.investorCount}

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { useActiveFund } from "../../lib/useActiveFund";
 
 type DataRow = Record<string, unknown>;
 type DeckChartItem = {
@@ -178,7 +179,133 @@ function isDraft(row: DataRow) {
   return status === "draft" || status === "pending" || status === "";
 }
 
+
+function getFundName(row: DataRow) {
+  return getString(
+    row,
+    ["fund_name", "scheme_name", "fund", "fund_title"],
+    ""
+  ).trim();
+}
+
+function normalizeValue(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function getReference(row: DataRow, keys: string[]) {
+  return getString(row, keys, "").trim();
+}
+
+function rowMatchesFund(
+  row: DataRow,
+  fundName: string,
+  fundIds: Set<string>,
+  includeGlobalRows = false
+) {
+  const normalizedFundName = normalizeValue(fundName);
+  const rowFundName = normalizeValue(getFundName(row));
+
+  if (rowFundName) {
+    return rowFundName === normalizedFundName;
+  }
+
+  const rowFundId = getReference(row, ["fund_id", "scheme_id"]);
+  if (rowFundId) return fundIds.has(rowFundId);
+
+  return includeGlobalRows;
+}
+
+function filterRowsForFund(
+  rows: DataRow[],
+  fundName: string,
+  fundIds: Set<string>,
+  includeGlobalRows = false
+) {
+  return rows.filter((row) =>
+    rowMatchesFund(row, fundName, fundIds, includeGlobalRows)
+  );
+}
+
+function uniqueFundNames(rowGroups: DataRow[][]) {
+  return Array.from(
+    new Set(
+      rowGroups
+        .flat()
+        .map(getFundName)
+        .filter(Boolean)
+    )
+  ).sort((left, right) => left.localeCompare(right));
+}
+
+function latestTimestamp(rows: DataRow[]) {
+  return (
+    rows
+      .map((row) =>
+        getString(
+          row,
+          ["updated_at", "created_at", "published_at", "generated_at"],
+          ""
+        )
+      )
+      .filter(Boolean)
+      .sort()
+      .at(-1) ?? ""
+  );
+}
+
+function latestRowFromRows(rows: DataRow[]) {
+  if (rows.length === 0) return null;
+
+  return [...rows].sort((left, right) => {
+    const leftTime = new Date(
+      getString(
+        left,
+        ["updated_at", "created_at", "published_at", "generated_at"],
+        "1970-01-01"
+      )
+    ).getTime();
+    const rightTime = new Date(
+      getString(
+        right,
+        ["updated_at", "created_at", "published_at", "generated_at"],
+        "1970-01-01"
+      )
+    ).getTime();
+
+    return rightTime - leftTime;
+  })[0];
+}
+
+function batchIdentity(rows: DataRow[], fallback: string) {
+  const latestRow = latestRowFromRows(rows);
+  return getString(latestRow ?? undefined, ["batch_id", "id"], fallback);
+}
+
+function sumRows(rows: DataRow[], keys: string[]) {
+  return rows.reduce((sum, row) => sum + getNumber(row, keys), 0);
+}
+
+function averageRows(rows: DataRow[], keys: string[]) {
+  const values = rows
+    .map((row) => getNumber(row, keys))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  if (values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
 export default function ManagingPartnerAIPage() {
+  const {
+    activeFundName,
+    setActiveFundName,
+    isReady: fundContextReady,
+  } = useActiveFund("VENTIQ Growth Fund II");
+  const [availableFunds, setAvailableFunds] = useState<string[]>([
+    "VENTIQ Growth Fund II",
+  ]);
+  const [fundActivationStatus, setFundActivationStatus] = useState("Checking");
+  const [fundActivatedAt, setFundActivatedAt] = useState("");
+  const [fundActivatedBy, setFundActivatedBy] = useState("");
   const [funds, setFunds] = useState<DataRow[]>([]);
   const [commitments, setCommitments] = useState<DataRow[]>([]);
   const [investors, setInvestors] = useState<DataRow[]>([]);
@@ -262,220 +389,574 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
   });
 
   useEffect(() => {
-    loadManagingPartnerDashboard();
-  }, []);
+    if (!fundContextReady || !activeFundName) return;
+    void loadManagingPartnerDashboard();
+  }, [activeFundName, fundContextReady, setActiveFundName]);
 
   async function loadManagingPartnerDashboard() {
-  if (!isSupabaseConfigured || !supabase) {
-    setErrorMessage(
-      "The sample Managing Partner workspace is temporarily unavailable. Please request a walkthrough."
-    );
-    setLoading(false);
-    return;
-  }
-
-  setLoading(true);
-  setErrorMessage("");
-
-  const db = supabase as any;
-
-  async function selectRows(
-    tableName: string,
-    options?: {
-      orderBy?: string;
-      ascending?: boolean;
-      eq?: {
-        column: string;
-        value: string;
-      };
+    if (!isSupabaseConfigured || !supabase) {
+      setErrorMessage(
+        "The sample Managing Partner workspace is temporarily unavailable. Please request a walkthrough."
+      );
+      setLoading(false);
+      return;
     }
-  ) {
-    try {
-      let query = db.from(tableName).select("*");
 
-      if (options?.eq) {
-        query = query.eq(options.eq.column, options.eq.value);
+    setLoading(true);
+    setErrorMessage("");
+    setFundActivationStatus("Checking");
+    setFundActivatedAt("");
+    setFundActivatedBy("");
+
+    const db = supabase as any;
+
+    async function selectRows(
+      tableName: string,
+      options?: {
+        orderBy?: string;
+        ascending?: boolean;
+        eq?: {
+          column: string;
+          value: string;
+        };
       }
+    ) {
+      try {
+        let query = db.from(tableName).select("*");
 
-      if (options?.orderBy) {
-        query = query.order(options.orderBy, {
-          ascending: options.ascending ?? false,
-        });
-      }
+        if (options?.eq) {
+          query = query.eq(options.eq.column, options.eq.value);
+        }
 
-      const { data, error } = await query;
+        if (options?.orderBy) {
+          query = query.order(options.orderBy, {
+            ascending: options.ascending ?? false,
+          });
+        }
 
-      if (error) {
-        console.warn(`VENTIQ dashboard skipped ${tableName}:`, error.message);
+        const { data, error } = await query;
+
+        if (error) {
+          console.warn(
+            `VENTIQ Managing Partner dashboard skipped ${tableName}:`,
+            error.message
+          );
+          return [] as DataRow[];
+        }
+
+        return (data ?? []) as DataRow[];
+      } catch (error) {
+        console.warn(
+          `VENTIQ Managing Partner dashboard skipped ${tableName}:`,
+          error
+        );
         return [] as DataRow[];
       }
-
-      return (data ?? []) as DataRow[];
-    } catch (error) {
-      console.warn(`VENTIQ dashboard skipped ${tableName}:`, error);
-      return [] as DataRow[];
     }
-  }
 
-  async function latestRow(tableName: string) {
-    try {
-      const { data, error } = await db
-        .from(tableName)
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    async function loadActivationRecord() {
+      try {
+        const { data, error } = await db
+          .from("fund_activation_status")
+          .select("status, activated_at, activated_by, readiness_score")
+          .eq("fund_name", activeFundName)
+          .maybeSingle();
 
-      if (error) {
-        console.warn(`VENTIQ dashboard skipped latest ${tableName}:`, error.message);
+        if (error) {
+          console.warn(
+            "VENTIQ Managing Partner dashboard could not read fund activation:",
+            error.message
+          );
+          return null;
+        }
+
+        return (data as DataRow | null) ?? null;
+      } catch (error) {
+        console.warn(
+          "VENTIQ Managing Partner dashboard could not read fund activation:",
+          error
+        );
         return null;
       }
+    }
 
-      return (data as DataRow | null) ?? null;
+    try {
+      const [
+        fundsData,
+        commitmentsData,
+        investorsData,
+        capitalCallsData,
+        distributionsData,
+        documentsData,
+        matchesData,
+        circularsData,
+        portfolioCompaniesData,
+        fundInvestmentsData,
+        debtRepaymentsData,
+        portfolioCompanyMetricsData,
+        portfolioNewsAlertsData,
+        fundPerformanceMetricsData,
+        dataRoomDocumentsData,
+        dataRoomEngagementData,
+        dataRoomQuestionsData,
+        migratedInvestorMasterData,
+        migratedFundCommitmentsData,
+        migratedFinancialPositionsData,
+        migratedFundMasterData,
+        migratedPortfolioInvestmentsData,
+        migratedComplianceItemsData,
+        migratedPdfDocumentsData,
+        activationRecord,
+      ] = await Promise.all([
+        selectRows("funds"),
+        selectRows("commitments"),
+        selectRows("investors"),
+        selectRows("capital_calls"),
+        selectRows("distributions"),
+        selectRows("investor_documents", {
+          orderBy: "published_at",
+          ascending: false,
+        }),
+        selectRows("regulatory_source_matches", {
+          eq: { column: "status", value: "needs_review" },
+        }),
+        selectRows("regulatory_circulars", {
+          eq: { column: "status", value: "active" },
+        }),
+        selectRows("portfolio_companies"),
+        selectRows("fund_investments"),
+        selectRows("debt_repayment_schedules", {
+          orderBy: "due_date",
+          ascending: true,
+        }),
+        selectRows("portfolio_company_metrics", {
+          orderBy: "metric_date",
+          ascending: false,
+        }),
+        selectRows("portfolio_news_alerts", {
+          orderBy: "alert_date",
+          ascending: false,
+        }),
+        selectRows("fund_performance_metrics", {
+          orderBy: "reporting_date",
+          ascending: false,
+        }),
+        selectRows("data_room_documents", {
+          orderBy: "imported_at",
+          ascending: false,
+        }),
+        selectRows("data_room_engagement_events", {
+          orderBy: "event_time",
+          ascending: false,
+        }),
+        selectRows("data_room_questions", {
+          orderBy: "asked_at",
+          ascending: false,
+        }),
+        selectRows("investor_master", {
+          orderBy: "investor_code",
+          ascending: true,
+        }),
+        selectRows("fund_commitments"),
+        selectRows("investor_financial_positions"),
+        selectRows("fund_master"),
+        selectRows("portfolio_investments"),
+        selectRows("compliance_items"),
+        selectRows("pdf_intelligence_documents"),
+        loadActivationRecord(),
+      ]);
+
+      const fundOptions = uniqueFundNames([
+        migratedFundMasterData,
+        migratedInvestorMasterData,
+        migratedFundCommitmentsData,
+        migratedFinancialPositionsData,
+        migratedPortfolioInvestmentsData,
+        migratedComplianceItemsData,
+        migratedPdfDocumentsData,
+        fundsData,
+        commitmentsData,
+        capitalCallsData,
+        distributionsData,
+        documentsData,
+        fundInvestmentsData,
+        fundPerformanceMetricsData,
+        dataRoomDocumentsData,
+      ]);
+
+      const nextFundOptions = fundOptions.length
+        ? fundOptions
+        : [activeFundName];
+      setAvailableFunds(nextFundOptions);
+
+      if (!nextFundOptions.includes(activeFundName)) {
+        setActiveFundName(nextFundOptions[0]);
+        return;
+      }
+
+      const selectedFundRows = [
+        ...fundsData,
+        ...migratedFundMasterData,
+      ].filter(
+        (row) => normalizeValue(getFundName(row)) === normalizeValue(activeFundName)
+      );
+      const selectedFundIds = new Set(
+        selectedFundRows.map(getId).filter(Boolean)
+      );
+
+      const scopedFunds = filterRowsForFund(
+        fundsData,
+        activeFundName,
+        selectedFundIds
+      );
+      const scopedMigratedFundMaster = filterRowsForFund(
+        migratedFundMasterData,
+        activeFundName,
+        selectedFundIds
+      );
+      const scopedCommitments = filterRowsForFund(
+        commitmentsData,
+        activeFundName,
+        selectedFundIds
+      );
+      const scopedMigratedCommitments = filterRowsForFund(
+        migratedFundCommitmentsData,
+        activeFundName,
+        selectedFundIds
+      );
+      const selectedInvestorIds = new Set(
+        [...scopedCommitments, ...scopedMigratedCommitments]
+          .map((row) =>
+            getReference(row, ["investor_id", "limited_partner_id", "lp_id"])
+          )
+          .filter(Boolean)
+      );
+      const scopedInvestors = investorsData.filter((row) => {
+        if (rowMatchesFund(row, activeFundName, selectedFundIds)) return true;
+        return selectedInvestorIds.has(getId(row));
+      });
+      const scopedInvestorMaster = filterRowsForFund(
+        migratedInvestorMasterData,
+        activeFundName,
+        selectedFundIds
+      );
+      const scopedFinancialPositions = filterRowsForFund(
+        migratedFinancialPositionsData,
+        activeFundName,
+        selectedFundIds
+      );
+      const scopedCapitalCalls = filterRowsForFund(
+        capitalCallsData,
+        activeFundName,
+        selectedFundIds
+      );
+      const scopedDistributions = filterRowsForFund(
+        distributionsData,
+        activeFundName,
+        selectedFundIds
+      );
+      const scopedDocuments = filterRowsForFund(
+        documentsData,
+        activeFundName,
+        selectedFundIds
+      );
+      const scopedPdfDocuments = filterRowsForFund(
+        migratedPdfDocumentsData,
+        activeFundName,
+        selectedFundIds
+      );
+      const scopedFundInvestments = filterRowsForFund(
+        fundInvestmentsData,
+        activeFundName,
+        selectedFundIds
+      );
+      const selectedInvestmentIds = new Set(
+        scopedFundInvestments.map(getId).filter(Boolean)
+      );
+      const selectedCompanyIds = new Set(
+        scopedFundInvestments
+          .map((row) =>
+            getReference(row, [
+              "portfolio_company_id",
+              "company_id",
+              "investee_company_id",
+            ])
+          )
+          .filter(Boolean)
+      );
+      const scopedPortfolioCompanies = portfolioCompaniesData.filter((row) => {
+        if (rowMatchesFund(row, activeFundName, selectedFundIds)) return true;
+        return selectedCompanyIds.has(getId(row));
+      });
+      const scopedDebtRepayments = debtRepaymentsData.filter((row) => {
+        if (rowMatchesFund(row, activeFundName, selectedFundIds)) return true;
+        const investmentId = getReference(row, [
+          "fund_investment_id",
+          "investment_id",
+        ]);
+        const companyId = getReference(row, [
+          "portfolio_company_id",
+          "company_id",
+        ]);
+        return (
+          selectedInvestmentIds.has(investmentId) ||
+          selectedCompanyIds.has(companyId)
+        );
+      });
+      const scopedPortfolioMetrics = portfolioCompanyMetricsData.filter((row) => {
+        if (rowMatchesFund(row, activeFundName, selectedFundIds)) return true;
+        return selectedCompanyIds.has(
+          getReference(row, ["portfolio_company_id", "company_id"])
+        );
+      });
+      const scopedPortfolioNews = portfolioNewsAlertsData.filter((row) => {
+        if (rowMatchesFund(row, activeFundName, selectedFundIds)) return true;
+        return selectedCompanyIds.has(
+          getReference(row, ["portfolio_company_id", "company_id"])
+        );
+      });
+      const scopedPerformanceMetrics = filterRowsForFund(
+        fundPerformanceMetricsData,
+        activeFundName,
+        selectedFundIds
+      );
+      const scopedMigratedPortfolio = filterRowsForFund(
+        migratedPortfolioInvestmentsData,
+        activeFundName,
+        selectedFundIds
+      );
+      const scopedCompliance = filterRowsForFund(
+        migratedComplianceItemsData,
+        activeFundName,
+        selectedFundIds
+      );
+      const scopedDataRoomDocuments = filterRowsForFund(
+        dataRoomDocumentsData,
+        activeFundName,
+        selectedFundIds
+      );
+      const selectedDataRoomDocumentIds = new Set(
+        scopedDataRoomDocuments.map(getId).filter(Boolean)
+      );
+      const scopedDataRoomEngagement = dataRoomEngagementData.filter((row) => {
+        if (rowMatchesFund(row, activeFundName, selectedFundIds)) return true;
+        return selectedDataRoomDocumentIds.has(
+          getReference(row, ["document_id", "data_room_document_id"])
+        );
+      });
+      const scopedDataRoomQuestions = dataRoomQuestionsData.filter((row) => {
+        if (rowMatchesFund(row, activeFundName, selectedFundIds)) return true;
+        return selectedDataRoomDocumentIds.has(
+          getReference(row, ["document_id", "data_room_document_id"])
+        );
+      });
+
+      setFunds(scopedFunds);
+      setCommitments(scopedCommitments);
+      setInvestors(scopedInvestors);
+      setCapitalCalls(scopedCapitalCalls);
+      setDistributions(scopedDistributions);
+      setInvestorDocuments(scopedDocuments);
+      setRegulatoryMatches(
+        filterRowsForFund(matchesData, activeFundName, selectedFundIds, true)
+      );
+      setRegulatoryCirculars(
+        filterRowsForFund(circularsData, activeFundName, selectedFundIds, true)
+      );
+      setPortfolioCompanies(scopedPortfolioCompanies);
+      setFundInvestments(scopedFundInvestments);
+      setDebtRepayments(scopedDebtRepayments);
+      setPortfolioCompanyMetrics(scopedPortfolioMetrics);
+      setPortfolioNewsAlerts(scopedPortfolioNews);
+      setFundPerformanceMetrics(scopedPerformanceMetrics);
+      setDataRoomDocuments(scopedDataRoomDocuments);
+      setDataRoomEngagementEvents(scopedDataRoomEngagement);
+      setDataRoomQuestions(scopedDataRoomQuestions);
+      setMigratedInvestorMaster(scopedInvestorMaster);
+      setMigratedFundCommitments(scopedMigratedCommitments);
+      setMigratedFinancialPositions(scopedFinancialPositions);
+      setMigratedFundMaster(scopedMigratedFundMaster);
+      setMigratedPortfolioInvestments(scopedMigratedPortfolio);
+      setMigratedComplianceItems(scopedCompliance);
+      setMigratedPdfDocuments(scopedPdfDocuments);
+
+      const investorSourceRows = [
+        ...scopedInvestorMaster,
+        ...scopedMigratedCommitments,
+        ...scopedFinancialPositions,
+      ];
+      const investorSummary = investorSourceRows.length
+        ? {
+            id: batchIdentity(
+              investorSourceRows,
+              `${activeFundName}-investor-data`
+            ),
+            fund_name: activeFundName,
+            batch_name: `${activeFundName} investor dataset`,
+            total_records: scopedInvestorMaster.length || scopedInvestors.length,
+            total_commitment:
+              sumRows(scopedMigratedCommitments, [
+                "commitment_amount",
+                "committed_amount",
+                "commitment",
+              ]) ||
+              sumRows(scopedCommitments, [
+                "commitment_amount",
+                "committed_amount",
+                "commitment",
+                "amount",
+              ]),
+            status: "activated",
+            created_at: latestTimestamp(investorSourceRows),
+          }
+        : null;
+
+      const pdfReadyFiles = scopedPdfDocuments.filter((row) => {
+        const status = getString(row, ["status"], "").toLowerCase();
+        return ["ready", "approved", "published", "available"].includes(status);
+      }).length;
+      const pdfUnmatchedFiles = scopedPdfDocuments.filter(
+        (row) => getString(row, ["status"], "").toLowerCase() === "unmatched"
+      ).length;
+      const pdfReviewFiles = Math.max(
+        scopedPdfDocuments.length - pdfReadyFiles - pdfUnmatchedFiles,
+        0
+      );
+      const pdfSummary = scopedPdfDocuments.length
+        ? {
+            id: batchIdentity(scopedPdfDocuments, `${activeFundName}-pdf-data`),
+            fund_name: activeFundName,
+            batch_name: `${activeFundName} PDF intelligence dataset`,
+            total_files: scopedPdfDocuments.length,
+            ready_files: pdfReadyFiles,
+            review_files: pdfReviewFiles,
+            unmatched_files: pdfUnmatchedFiles,
+            status: "activated",
+            created_at: latestTimestamp(scopedPdfDocuments),
+          }
+        : null;
+
+      const totalInvestmentCost = sumRows(scopedMigratedPortfolio, [
+        "investment_cost",
+        "original_investment_amount",
+      ]);
+      const currentPortfolioValue = sumRows(scopedMigratedPortfolio, [
+        "current_value",
+        "current_portfolio_value",
+        "current_fair_value",
+      ]);
+      const realisedValue = sumRows(scopedMigratedPortfolio, [
+        "realised_value",
+        "realized_value",
+      ]);
+      const expectedExitValue = sumRows(scopedMigratedPortfolio, [
+        "expected_exit_value",
+      ]);
+      const portfolioSummary = scopedMigratedPortfolio.length
+        ? {
+            id: batchIdentity(
+              scopedMigratedPortfolio,
+              `${activeFundName}-portfolio-data`
+            ),
+            fund_name: activeFundName,
+            batch_name: `${activeFundName} portfolio dataset`,
+            total_records: scopedMigratedPortfolio.length,
+            total_investment_cost: totalInvestmentCost,
+            current_portfolio_value: currentPortfolioValue,
+            realised_value: realisedValue,
+            expected_exit_value: expectedExitValue,
+            portfolio_moic:
+              totalInvestmentCost > 0
+                ? (currentPortfolioValue + realisedValue) / totalInvestmentCost
+                : averageRows(scopedMigratedPortfolio, ["moic"]),
+            at_risk_count: scopedMigratedPortfolio.filter((row) => {
+              const risk = getString(row, ["risk_status"], "").toLowerCase();
+              return risk.includes("risk") || risk.includes("watch");
+            }).length,
+            repayment_count: scopedMigratedPortfolio.filter((row) =>
+              Boolean(getString(row, ["repayment_due_date"], ""))
+            ).length,
+            status: "activated",
+            created_at: latestTimestamp(scopedMigratedPortfolio),
+          }
+        : null;
+
+      const fundSummary = scopedMigratedFundMaster.length
+        ? {
+            id: batchIdentity(
+              scopedMigratedFundMaster,
+              `${activeFundName}-fund-data`
+            ),
+            fund_name: activeFundName,
+            batch_name: `${activeFundName} fund master dataset`,
+            total_funds: scopedMigratedFundMaster.length,
+            total_committed_capital: sumRows(scopedMigratedFundMaster, [
+              "committed_capital",
+              "total_committed_capital",
+              "commitment_amount",
+            ]),
+            average_carry: averageRows(scopedMigratedFundMaster, [
+              "carry_rate",
+              "carry",
+            ]),
+            status: "activated",
+            created_at: latestTimestamp(scopedMigratedFundMaster),
+          }
+        : null;
+
+      const complianceSummary = scopedCompliance.length
+        ? {
+            id: batchIdentity(
+              scopedCompliance,
+              `${activeFundName}-compliance-data`
+            ),
+            fund_name: activeFundName,
+            batch_name: `${activeFundName} compliance dataset`,
+            total_items: scopedCompliance.length,
+            pending_review_count: scopedCompliance.filter((row) => {
+              const status = getString(
+                row,
+                ["filing_status", "migration_status"],
+                ""
+              ).toLowerCase();
+              return ["pending", "review", "overdue", "draft"].includes(status);
+            }).length,
+            high_risk_count: scopedCompliance.filter(
+              (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
+            ).length,
+            status: "activated",
+            created_at: latestTimestamp(scopedCompliance),
+          }
+        : null;
+
+      setLatestInvestorBatch(investorSummary);
+      setLatestPdfBatch(pdfSummary);
+      setLatestPortfolioBatch(portfolioSummary);
+      setLatestFundBatch(fundSummary);
+      setLatestComplianceBatch(complianceSummary);
+
+      const activationStatus = getString(
+        activationRecord ?? undefined,
+        ["status"],
+        "Setup Not Started"
+      );
+      setFundActivationStatus(activationStatus);
+      setFundActivatedAt(
+        getString(activationRecord ?? undefined, ["activated_at"], "")
+      );
+      setFundActivatedBy(
+        getString(activationRecord ?? undefined, ["activated_by"], "")
+      );
     } catch (error) {
-      console.warn(`VENTIQ dashboard skipped latest ${tableName}:`, error);
-      return null;
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load Managing Partner workspace."
+      );
+    } finally {
+      setLoading(false);
     }
   }
-
-  const [
-    fundsData,
-    commitmentsData,
-    investorsData,
-    capitalCallsData,
-    distributionsData,
-    documentsData,
-    matchesData,
-    circularsData,
-    portfolioCompaniesData,
-    fundInvestmentsData,
-    debtRepaymentsData,
-    portfolioCompanyMetricsData,
-    portfolioNewsAlertsData,
-    fundPerformanceMetricsData,
-    dataRoomDocumentsData,
-    dataRoomEngagementData,
-    dataRoomQuestionsData,
-
-    migratedInvestorMasterData,
-    migratedFundCommitmentsData,
-    migratedFinancialPositionsData,
-    migratedFundMasterData,
-    migratedPortfolioInvestmentsData,
-    migratedComplianceItemsData,
-    migratedPdfDocumentsData,
-
-    investorMigrationBatch,
-    pdfMigrationBatch,
-    portfolioMigrationBatch,
-    fundMigrationBatch,
-    complianceMigrationBatch,
-  ] = await Promise.all([
-    selectRows("funds"),
-    selectRows("commitments"),
-    selectRows("investors"),
-    selectRows("capital_calls"),
-    selectRows("distributions"),
-    selectRows("investor_documents", {
-      orderBy: "published_at",
-      ascending: false,
-    }),
-    selectRows("regulatory_source_matches", {
-      eq: {
-        column: "status",
-        value: "needs_review",
-      },
-    }),
-    selectRows("regulatory_circulars", {
-      eq: {
-        column: "status",
-        value: "active",
-      },
-    }),
-    selectRows("portfolio_companies"),
-    selectRows("fund_investments"),
-    selectRows("debt_repayment_schedules", {
-      orderBy: "due_date",
-      ascending: true,
-    }),
-    selectRows("portfolio_company_metrics", {
-      orderBy: "metric_date",
-      ascending: false,
-    }),
-    selectRows("portfolio_news_alerts", {
-      orderBy: "alert_date",
-      ascending: false,
-    }),
-    selectRows("fund_performance_metrics", {
-      orderBy: "reporting_date",
-      ascending: false,
-    }),
-    selectRows("data_room_documents", {
-      orderBy: "imported_at",
-      ascending: false,
-    }),
-    selectRows("data_room_engagement_events", {
-      orderBy: "event_time",
-      ascending: false,
-    }),
-    selectRows("data_room_questions", {
-      orderBy: "asked_at",
-      ascending: false,
-    }),
-
-    selectRows("investor_master", {
-      orderBy: "investor_code",
-      ascending: true,
-    }),
-    selectRows("fund_commitments"),
-    selectRows("investor_financial_positions"),
-    selectRows("fund_master"),
-    selectRows("portfolio_investments"),
-    selectRows("compliance_items"),
-    selectRows("pdf_intelligence_documents"),
-
-    latestRow("investor_import_batches"),
-    latestRow("pdf_intelligence_batches"),
-    latestRow("portfolio_data_migration_batches"),
-    latestRow("fund_data_migration_batches"),
-    latestRow("compliance_data_migration_batches"),
-  ]);
-
-  setFunds(fundsData);
-  setCommitments(commitmentsData);
-  setInvestors(investorsData);
-  setCapitalCalls(capitalCallsData);
-  setDistributions(distributionsData);
-  setInvestorDocuments(documentsData);
-  setRegulatoryMatches(matchesData);
-  setRegulatoryCirculars(circularsData);
-
-  setPortfolioCompanies(portfolioCompaniesData);
-  setFundInvestments(fundInvestmentsData);
-  setDebtRepayments(debtRepaymentsData);
-  setPortfolioCompanyMetrics(portfolioCompanyMetricsData);
-  setPortfolioNewsAlerts(portfolioNewsAlertsData);
-  setFundPerformanceMetrics(fundPerformanceMetricsData);
-  setDataRoomDocuments(dataRoomDocumentsData);
-  setDataRoomEngagementEvents(dataRoomEngagementData);
-  setDataRoomQuestions(dataRoomQuestionsData);
-
-  setMigratedInvestorMaster(migratedInvestorMasterData);
-  setMigratedFundCommitments(migratedFundCommitmentsData);
-  setMigratedFinancialPositions(migratedFinancialPositionsData);
-  setMigratedFundMaster(migratedFundMasterData);
-  setMigratedPortfolioInvestments(migratedPortfolioInvestmentsData);
-  setMigratedComplianceItems(migratedComplianceItemsData);
-  setMigratedPdfDocuments(migratedPdfDocumentsData);
-
-  setLatestInvestorBatch(investorMigrationBatch);
-  setLatestPdfBatch(pdfMigrationBatch);
-  setLatestPortfolioBatch(portfolioMigrationBatch);
-  setLatestFundBatch(fundMigrationBatch);
-  setLatestComplianceBatch(complianceMigrationBatch);
-
-  setLoading(false);
-}
 
   const fundMap = useMemo(() => {
     return new Map(funds.map((fund) => [getId(fund), fund]));
@@ -485,463 +966,342 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     return new Map(portfolioCompanies.map((company) => [getId(company), company]));
   }, [portfolioCompanies]);
 
-   const dashboardMetrics = useMemo(() => {
-  function averageFromRows(rows: DataRow[], keys: string[]) {
-    const values = rows
-      .map((row) => getNumber(row, keys))
-      .filter((value) => Number.isFinite(value) && value > 0);
-
-    if (values.length === 0) return 0;
-
-    return values.reduce((sum, value) => sum + value, 0) / values.length;
-  }
-
-  const migrationInvestorCount = getNumber(latestInvestorBatch ?? undefined, [
-    "total_records",
-  ]);
-
-  const migrationInvestorCommitment = getNumber(
-    latestInvestorBatch ?? undefined,
-    ["total_commitment"]
-  );
-
-  const migrationPdfCount = getNumber(latestPdfBatch ?? undefined, [
-    "total_files",
-  ]);
-
-  const migrationPdfReviewCount =
-    getNumber(latestPdfBatch ?? undefined, ["review_files"]) +
-    getNumber(latestPdfBatch ?? undefined, ["unmatched_files"]);
-
-  const migrationPortfolioCount = getNumber(
-    latestPortfolioBatch ?? undefined,
-    ["total_records"]
-  );
-
-  const migrationPortfolioCost = getNumber(
-    latestPortfolioBatch ?? undefined,
-    ["total_investment_cost"]
-  );
-
-  const migrationPortfolioValue = getNumber(
-    latestPortfolioBatch ?? undefined,
-    ["current_portfolio_value"]
-  );
-
-  const migrationRealizedValue = getNumber(
-    latestPortfolioBatch ?? undefined,
-    ["realised_value", "realized_value"]
-  );
-
-  const migrationExpectedExitValue = getNumber(
-    latestPortfolioBatch ?? undefined,
-    ["expected_exit_value"]
-  );
-
-  const migrationPortfolioMoic = getNumber(
-    latestPortfolioBatch ?? undefined,
-    ["portfolio_moic"]
-  );
-
-  const migrationAtRiskCount = getNumber(latestPortfolioBatch ?? undefined, [
-    "at_risk_count",
-  ]);
-
-  const migrationRepaymentCount = getNumber(
-    latestPortfolioBatch ?? undefined,
-    ["repayment_count"]
-  );
-
-  const migrationFundCount = getNumber(latestFundBatch ?? undefined, [
-    "total_funds",
-  ]);
-
-  const migrationFundCommitted = getNumber(latestFundBatch ?? undefined, [
-    "total_committed_capital",
-  ]);
-
-  const migrationAverageCarry = getNumber(latestFundBatch ?? undefined, [
-    "average_carry",
-  ]);
-
-  const migrationComplianceItems = getNumber(
-    latestComplianceBatch ?? undefined,
-    ["total_items"]
-  );
-
-  const migrationComplianceReview = getNumber(
-    latestComplianceBatch ?? undefined,
-    ["pending_review_count"]
-  );
-
-  const migrationComplianceHighRisk = getNumber(
-    latestComplianceBatch ?? undefined,
-    ["high_risk_count"]
-  );
-
-  const migratedInvestorCount = migratedInvestorMaster.length;
-
-  const migratedCommitmentTotal = migratedFundCommitments.reduce(
-    (sum, row) =>
-      sum +
-      getNumber(row, [
-        "commitment_amount",
-        "committed_amount",
-        "commitment",
-        "amount",
-      ]),
-    0
-  );
-
-  const migratedCapitalCalled = migratedFinancialPositions.reduce(
-    (sum, row) =>
-      sum +
-      getNumber(row, [
-        "capital_called",
-        "capital_called_till_date",
-        "called_capital",
-      ]),
-    0
-  );
-
-  const migratedUncalledCapital = migratedFinancialPositions.reduce(
-    (sum, row) =>
-      sum +
-      getNumber(row, [
-        "uncalled_capital",
-        "remaining_commitment",
-        "dry_powder",
-      ]),
-    0
-  );
-
-  const migratedDistributions = migratedFinancialPositions.reduce(
-    (sum, row) =>
-      sum +
-      getNumber(row, [
-        "distributions",
-        "distributions_till_date",
-        "distributed",
-      ]),
-    0
-  );
-
-  const migratedNav = migratedFinancialPositions.reduce(
-    (sum, row) => sum + getNumber(row, ["nav", "latest_nav", "current_nav"]),
-    0
-  );
-
-  const migratedGrossIrr = averageFromRows(migratedFinancialPositions, [
-    "gross_irr",
-    "irr",
-  ]);
-
-  const migratedNetIrr = averageFromRows(migratedFinancialPositions, [
-    "net_irr",
-  ]);
-
-  const migratedDpi = averageFromRows(migratedFinancialPositions, ["dpi"]);
-
-  const migratedTvpi = averageFromRows(migratedFinancialPositions, ["tvpi"]);
-
-  const migratedMoic = averageFromRows(migratedFinancialPositions, [
-    "moic",
-    "tvpi",
-  ]);
-
-  const migratedPortfolioCompanyNames = new Set(
-    migratedPortfolioInvestments
-      .map((row) => getString(row, ["portfolio_company"], ""))
-      .filter(Boolean)
-  );
-
-  const migratedInvestmentCost = migratedPortfolioInvestments.reduce(
-    (sum, row) => sum + getNumber(row, ["investment_cost"]),
-    0
-  );
-
-  const migratedCurrentValue = migratedPortfolioInvestments.reduce(
-    (sum, row) => sum + getNumber(row, ["current_value"]),
-    0
-  );
-
-  const migratedRealizedValue = migratedPortfolioInvestments.reduce(
-    (sum, row) => sum + getNumber(row, ["realised_value", "realized_value"]),
-    0
-  );
-
-  const migratedExpectedExitValue = migratedPortfolioInvestments.reduce(
-    (sum, row) => sum + getNumber(row, ["expected_exit_value"]),
-    0
-  );
-
-  const migratedAtRiskRows = migratedPortfolioInvestments.filter((row) => {
-    const riskStatus = getString(row, ["risk_status"], "").toLowerCase();
-
-    return (
-      riskStatus.includes("risk") ||
-      riskStatus.includes("watch") ||
-      riskStatus.includes("attention")
+    const dashboardMetrics = useMemo(() => {
+    const migrationInvestorCount = getNumber(latestInvestorBatch ?? undefined, [
+      "total_records",
+    ]);
+    const migrationInvestorCommitment = getNumber(
+      latestInvestorBatch ?? undefined,
+      ["total_commitment"]
     );
-  }).length;
 
-  const migratedRepaymentRows = migratedPortfolioInvestments.filter((row) =>
-    Boolean(getString(row, ["repayment_due_date"], ""))
-  ).length;
+    const migrationPdfCount = getNumber(latestPdfBatch ?? undefined, [
+      "total_files",
+    ]);
+    const migrationPdfReviewCount =
+      getNumber(latestPdfBatch ?? undefined, ["review_files"]) +
+      getNumber(latestPdfBatch ?? undefined, ["unmatched_files"]);
 
-  const migratedComplianceReviewRows = migratedComplianceItems.filter((row) => {
-    const status = getString(row, ["filing_status", "migration_status"], "")
-      .toLowerCase();
+    const migrationPortfolioCount = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["total_records"]
+    );
+    const migrationPortfolioCost = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["total_investment_cost"]
+    );
+    const migrationPortfolioValue = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["current_portfolio_value"]
+    );
+    const migrationRealizedValue = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["realised_value", "realized_value"]
+    );
+    const migrationExpectedExitValue = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["expected_exit_value"]
+    );
+    const migrationPortfolioMoic = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["portfolio_moic"]
+    );
+    const migrationAtRiskCount = getNumber(latestPortfolioBatch ?? undefined, [
+      "at_risk_count",
+    ]);
+    const migrationRepaymentCount = getNumber(
+      latestPortfolioBatch ?? undefined,
+      ["repayment_count"]
+    );
 
-    return status === "pending" || status === "review" || status === "overdue";
-  }).length;
+    const migrationFundCount = getNumber(latestFundBatch ?? undefined, [
+      "total_funds",
+    ]);
+    const migrationFundCommitted = getNumber(latestFundBatch ?? undefined, [
+      "total_committed_capital",
+    ]);
+    const migrationAverageCarry = getNumber(latestFundBatch ?? undefined, [
+      "average_carry",
+    ]);
 
-  const migratedComplianceHighRiskRows = migratedComplianceItems.filter(
-    (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
-  ).length;
+    const migrationComplianceItems = getNumber(
+      latestComplianceBatch ?? undefined,
+      ["total_items"]
+    );
+    const migrationComplianceReview = getNumber(
+      latestComplianceBatch ?? undefined,
+      ["pending_review_count"]
+    );
+    const migrationComplianceHighRisk = getNumber(
+      latestComplianceBatch ?? undefined,
+      ["high_risk_count"]
+    );
 
-  const legacyTotalCommitted = commitments.reduce(
-    (sum, row) =>
-      sum +
-      getNumber(row, [
-        "commitment_amount",
-        "committed_amount",
-        "commitment",
-        "amount",
-      ]),
-    0
-  );
+    const migratedPortfolioCompanyNames = new Set(
+      migratedPortfolioInvestments
+        .map((row) => getString(row, ["portfolio_company"], ""))
+        .filter(Boolean)
+    );
 
-  const totalCommitted =
-    migrationInvestorCommitment ||
-    migratedCommitmentTotal ||
-    migrationFundCommitted ||
-    legacyTotalCommitted;
+    const migratedInvestmentCost = migratedPortfolioInvestments.reduce(
+      (sum, row) => sum + getNumber(row, ["investment_cost"]),
+      0
+    );
 
-  const approvedCapitalCalls = capitalCalls.filter(isApproved);
-  const draftCapitalCalls = capitalCalls.filter(isDraft);
+    const migratedCurrentValue = migratedPortfolioInvestments.reduce(
+      (sum, row) => sum + getNumber(row, ["current_value"]),
+      0
+    );
 
-  const legacyTotalCalled = approvedCapitalCalls.reduce(
-    (sum, row) =>
-      sum +
-      getNumber(row, [
-        "capital_call_amount",
-        "call_amount",
-        "total_amount",
-        "amount",
-      ]),
-    0
-  );
+    const migratedRealizedValue = migratedPortfolioInvestments.reduce(
+      (sum, row) => sum + getNumber(row, ["realised_value", "realized_value"]),
+      0
+    );
 
-  const totalCalled = migratedCapitalCalled || legacyTotalCalled;
+    const migratedExpectedExitValue = migratedPortfolioInvestments.reduce(
+      (sum, row) => sum + getNumber(row, ["expected_exit_value"]),
+      0
+    );
 
-  const approvedDistributions = distributions.filter(isApproved);
-  const draftDistributions = distributions.filter(isDraft);
+    const migratedAtRiskRows = migratedPortfolioInvestments.filter(
+      (row) => getString(row, ["risk_status"], "") === "At Risk"
+    ).length;
 
-  const legacyTotalDistributed = approvedDistributions.reduce(
-    (sum, row) =>
-      sum +
-      getNumber(row, [
-        "distribution_amount",
-        "total_distribution_amount",
-        "amount",
-      ]),
-    0
-  );
+    const migratedRepaymentRows = migratedPortfolioInvestments.filter((row) =>
+      Boolean(getString(row, ["repayment_due_date"], ""))
+    ).length;
 
-  const totalDistributed = migratedDistributions || legacyTotalDistributed;
+    const migratedComplianceReviewRows = migratedComplianceItems.filter((row) => {
+      const status = getString(row, ["filing_status"], "").toLowerCase();
 
-  const uncalledCapital =
-    migratedUncalledCapital || Math.max(totalCommitted - totalCalled, 0);
+      return status === "pending" || status === "review" || status === "overdue";
+    }).length;
 
-  const deploymentRate =
-    totalCommitted > 0 ? (totalCalled / totalCommitted) * 100 : 0;
+    const migratedComplianceHighRiskRows = migratedComplianceItems.filter(
+      (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
+    ).length;
 
-  const legacyStoredDocuments = investorDocuments.filter((row) =>
-    Boolean(getString(row, ["storage_url", "storage_path"], ""))
-  ).length;
+    const legacyTotalCommitted = commitments.reduce(
+      (sum, row) =>
+        sum +
+        getNumber(row, [
+          "commitment_amount",
+          "committed_amount",
+          "commitment",
+          "amount",
+        ]),
+      0
+    );
 
-  const storedDocuments = Math.max(
-    legacyStoredDocuments,
-    investorDocuments.length,
-    migrationPdfCount,
-    migratedPdfDocuments.length
-  );
+    const totalCommitted =
+      migrationInvestorCommitment ||
+      migrationFundCommitted ||
+      legacyTotalCommitted;
 
-  const queuedEmails = investorDocuments.filter(
-    (row) => getString(row, ["email_status"], "") === "queued"
-  ).length;
+    const approvedCapitalCalls = capitalCalls.filter(isApproved);
+    const draftCapitalCalls = capitalCalls.filter(isDraft);
 
-  const sentEmails = investorDocuments.filter(
-    (row) => getString(row, ["email_status"], "") === "sent"
-  ).length;
+    const totalCalled = approvedCapitalCalls.reduce(
+      (sum, row) =>
+        sum +
+        getNumber(row, [
+          "capital_call_amount",
+          "call_amount",
+          "total_amount",
+          "amount",
+        ]),
+      0
+    );
 
-  const highImpactCirculars = Math.max(
-    regulatoryCirculars.filter(
-      (row) => getString(row, ["impact"], "").toUpperCase() === "HIGH"
-    ).length,
-    migrationComplianceHighRisk,
-    migratedComplianceHighRiskRows
-  );
+    const approvedDistributions = distributions.filter(isApproved);
+    const draftDistributions = distributions.filter(isDraft);
 
-  const legacyInvestmentCost = fundInvestments.reduce(
-    (sum, row) => sum + getNumber(row, ["original_investment_amount"]),
-    0
-  );
+    const totalDistributed = approvedDistributions.reduce(
+      (sum, row) =>
+        sum +
+        getNumber(row, [
+          "distribution_amount",
+          "total_distribution_amount",
+          "amount",
+        ]),
+      0
+    );
 
-  const totalInvestmentCost =
-    migrationPortfolioCost || migratedInvestmentCost || legacyInvestmentCost;
+    const uncalledCapital = Math.max(totalCommitted - totalCalled, 0);
 
-  const legacyCurrentFairValue = fundInvestments.reduce(
-    (sum, row) => sum + getNumber(row, ["current_fair_value"]),
-    0
-  );
+    const deploymentRate =
+      totalCommitted > 0 ? (totalCalled / totalCommitted) * 100 : 0;
 
-  const currentFairValue =
-    migrationPortfolioValue || migratedCurrentValue || legacyCurrentFairValue;
+    const legacyStoredDocuments = investorDocuments.filter((row) =>
+      Boolean(getString(row, ["storage_url", "storage_path"], ""))
+    ).length;
 
-  const legacyRealizedValue = fundInvestments.reduce(
-    (sum, row) => sum + getNumber(row, ["realized_value"]),
-    0
-  );
+    const storedDocuments = Math.max(
+      legacyStoredDocuments,
+      migrationPdfCount
+    );
 
-  const realizedValue =
-    migrationRealizedValue || migratedRealizedValue || legacyRealizedValue;
+    const queuedEmails = investorDocuments.filter(
+      (row) => getString(row, ["email_status"], "") === "queued"
+    ).length;
 
-  const legacyUnrealizedValue = fundInvestments.reduce(
-    (sum, row) => sum + getNumber(row, ["unrealized_value"]),
-    0
-  );
+    const sentEmails = investorDocuments.filter(
+      (row) => getString(row, ["email_status"], "") === "sent"
+    ).length;
 
-  const unrealizedValue =
-    currentFairValue > 0 && totalInvestmentCost > 0
-      ? currentFairValue - totalInvestmentCost
-      : legacyUnrealizedValue;
+    const highImpactCirculars = Math.max(
+      regulatoryCirculars.filter(
+        (row) => getString(row, ["impact"], "").toUpperCase() === "HIGH"
+      ).length,
+      migrationComplianceHighRisk,
+      migratedComplianceHighRiskRows
+    );
 
-  const latestFundMetric = fundPerformanceMetrics[0];
+    const legacyInvestmentCost = fundInvestments.reduce(
+      (sum, row) => sum + getNumber(row, ["original_investment_amount"]),
+      0
+    );
 
-  const grossIrr =
-    migratedGrossIrr || getNumber(latestFundMetric, ["gross_irr"]);
+    const totalInvestmentCost =
+      migrationPortfolioCost || migratedInvestmentCost || legacyInvestmentCost;
 
-  const netIrr = migratedNetIrr || getNumber(latestFundMetric, ["net_irr"]);
+    const legacyCurrentFairValue = fundInvestments.reduce(
+      (sum, row) => sum + getNumber(row, ["current_fair_value"]),
+      0
+    );
 
-  const dpi = migratedDpi || getNumber(latestFundMetric, ["dpi"]);
+    const currentFairValue =
+      migrationPortfolioValue || migratedCurrentValue || legacyCurrentFairValue;
 
-  const tvpi = migratedTvpi || getNumber(latestFundMetric, ["tvpi"]);
+    const legacyRealizedValue = fundInvestments.reduce(
+      (sum, row) => sum + getNumber(row, ["realized_value"]),
+      0
+    );
 
-  const moic =
-    migrationPortfolioMoic ||
-    migratedMoic ||
-    getNumber(latestFundMetric, ["moic"]);
+    const realizedValue =
+      migrationRealizedValue || migratedRealizedValue || legacyRealizedValue;
 
-  const currentNav =
-    migratedNav ||
-    getNumber(latestFundMetric, ["current_nav"]) ||
-    currentFairValue ||
-    migrationFundCommitted;
+    const legacyUnrealizedValue = fundInvestments.reduce(
+      (sum, row) => sum + getNumber(row, ["unrealized_value"]),
+      0
+    );
 
-  const legacyUpcomingRepayments = debtRepayments.filter(
-    (row) => getString(row, ["payment_status"], "") === "upcoming"
-  ).length;
+    const unrealizedValue =
+      currentFairValue > 0 && totalInvestmentCost > 0
+        ? currentFairValue - totalInvestmentCost
+        : legacyUnrealizedValue;
 
-  const upcomingRepayments =
-    migrationRepaymentCount || migratedRepaymentRows || legacyUpcomingRepayments;
+    const latestFundMetric = fundPerformanceMetrics[0];
 
-  const overdueRepayments = debtRepayments.filter(
-    (row) => getString(row, ["payment_status"], "") === "overdue"
-  ).length;
+    const grossIrr = getNumber(latestFundMetric, ["gross_irr"]);
+    const netIrr = getNumber(latestFundMetric, ["net_irr"]);
+    const dpi = getNumber(latestFundMetric, ["dpi"]);
+    const tvpi = getNumber(latestFundMetric, ["tvpi"]);
+    const moic =
+      migrationPortfolioMoic || getNumber(latestFundMetric, ["moic"]);
+    const currentNav =
+      getNumber(latestFundMetric, ["current_nav"]) ||
+      currentFairValue ||
+      migrationFundCommitted;
 
-  const openPortfolioAlerts = portfolioNewsAlerts.filter(
-    (row) => getString(row, ["status"], "") === "open"
-  ).length;
+    const legacyUpcomingRepayments = debtRepayments.filter(
+      (row) => getString(row, ["payment_status"], "") === "upcoming"
+    ).length;
 
-  const legacyHighRiskMetrics = portfolioCompanyMetrics.filter((row) => {
-    const risk = getString(row, ["risk_rating"], "").toLowerCase();
-    const performance = getString(row, ["performance_status"], "").toLowerCase();
+    const upcomingRepayments =
+      migrationRepaymentCount || migratedRepaymentRows || legacyUpcomingRepayments;
 
-    return risk === "high" || performance === "below_plan";
-  }).length;
+    const overdueRepayments = debtRepayments.filter(
+      (row) => getString(row, ["payment_status"], "") === "overdue"
+    ).length;
 
-  const highRiskMetrics =
-    migrationAtRiskCount || migratedAtRiskRows || legacyHighRiskMetrics;
+    const openPortfolioAlerts = portfolioNewsAlerts.filter(
+      (row) => getString(row, ["status"], "") === "open"
+    ).length;
 
-  return {
-    totalCommitted,
-    totalCalled,
-    totalDistributed,
-    uncalledCapital,
-    deploymentRate,
-    activeFunds: migratedFundMaster.length || migrationFundCount || funds.length,
-    investors: migratedInvestorCount || migrationInvestorCount || investors.length,
-    pendingCapitalCalls: draftCapitalCalls.length,
-    pendingDistributions: draftDistributions.length,
-    pendingRegulatoryReviews: Math.max(
-      regulatoryMatches.length,
-      migrationComplianceReview,
-      migratedComplianceReviewRows
-    ),
-    generatedDocuments: Math.max(
-      investorDocuments.length,
-      migrationPdfCount,
-      migratedPdfDocuments.length
-    ),
-    storedDocuments,
-    queuedEmails,
-    sentEmails,
-    highImpactCirculars,
+    const legacyHighRiskMetrics = portfolioCompanyMetrics.filter((row) => {
+      const risk = getString(row, ["risk_rating"], "").toLowerCase();
+      const performance = getString(
+        row,
+        ["performance_status"],
+        ""
+      ).toLowerCase();
 
-    totalInvestmentCost,
-    currentFairValue,
-    realizedValue,
-    unrealizedValue,
-    grossIrr,
-    netIrr,
-    dpi,
-    tvpi,
-    moic,
-    currentNav,
-    portfolioCompanies:
-      migratedPortfolioCompanyNames.size ||
-      migrationPortfolioCount ||
-      portfolioCompanies.length,
-    fundInvestments: migrationPortfolioCount || migratedPortfolioInvestments.length || fundInvestments.length,
-    upcomingRepayments,
-    overdueRepayments,
-    openPortfolioAlerts,
-    highRiskMetrics,
-    expectedExitValue: migrationExpectedExitValue || migratedExpectedExitValue,
-    migrationPdfReviewCount,
-    migrationAverageCarry,
-    migrationComplianceItems,
-  };
-}, [
-  commitments,
-  capitalCalls,
-  distributions,
-  funds,
-  investors,
-  investorDocuments,
-  regulatoryMatches,
-  regulatoryCirculars,
-  fundInvestments,
-  fundPerformanceMetrics,
-  debtRepayments,
-  portfolioNewsAlerts,
-  portfolioCompanyMetrics,
-  portfolioCompanies,
-  latestInvestorBatch,
-  latestPdfBatch,
-  latestPortfolioBatch,
-  latestFundBatch,
-  latestComplianceBatch,
-  migratedInvestorMaster,
-  migratedFundCommitments,
-  migratedFinancialPositions,
-  migratedFundMaster,
-  migratedPortfolioInvestments,
-  migratedComplianceItems,
-  migratedPdfDocuments,
-]);
+      return risk === "high" || performance === "below_plan";
+    }).length;
+
+    const highRiskMetrics =
+      migrationAtRiskCount || migratedAtRiskRows || legacyHighRiskMetrics;
+
+    return {
+      totalCommitted,
+      totalCalled,
+      totalDistributed,
+      uncalledCapital,
+      deploymentRate,
+      activeFunds: migrationFundCount || funds.length,
+      investors: migrationInvestorCount || investors.length,
+      pendingCapitalCalls: draftCapitalCalls.length,
+      pendingDistributions: draftDistributions.length,
+      pendingRegulatoryReviews: Math.max(
+        regulatoryMatches.length,
+        migrationComplianceReview,
+        migratedComplianceReviewRows
+      ),
+      generatedDocuments: Math.max(investorDocuments.length, migrationPdfCount),
+      storedDocuments,
+      queuedEmails,
+      sentEmails,
+      highImpactCirculars,
+
+      totalInvestmentCost,
+      currentFairValue,
+      realizedValue,
+      unrealizedValue,
+      grossIrr,
+      netIrr,
+      dpi,
+      tvpi,
+      moic,
+      currentNav,
+      portfolioCompanies:
+        migratedPortfolioCompanyNames.size ||
+        migrationPortfolioCount ||
+        portfolioCompanies.length,
+      fundInvestments: migrationPortfolioCount || fundInvestments.length,
+      upcomingRepayments,
+      overdueRepayments,
+      openPortfolioAlerts,
+      highRiskMetrics,
+      expectedExitValue:
+        migrationExpectedExitValue || migratedExpectedExitValue,
+      migrationPdfReviewCount,
+      migrationAverageCarry,
+      migrationComplianceItems,
+    };
+  }, [
+    commitments,
+    capitalCalls,
+    distributions,
+    funds,
+    investors,
+    investorDocuments,
+    regulatoryMatches,
+    regulatoryCirculars,
+    fundInvestments,
+    fundPerformanceMetrics,
+    debtRepayments,
+    portfolioNewsAlerts,
+    portfolioCompanyMetrics,
+    portfolioCompanies,
+    latestInvestorBatch,
+    latestPdfBatch,
+    latestPortfolioBatch,
+    latestFundBatch,
+    latestComplianceBatch,
+    migratedPortfolioInvestments,
+    migratedComplianceItems,
+  ]);
   const connectedActivityEvents = useMemo(() => {
     const events: ConnectedActivityEvent[] = [];
 
@@ -2021,7 +2381,73 @@ async function handleGeneratePowerPoint() {
           </a>
         </div>
 
-                {loading && (
+        <div
+          className="preview-card"
+          style={{ marginBottom: 18, padding: 22 }}
+        >
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">Active Fund Context</p>
+              <h2 style={{ marginBottom: 8 }}>{activeFundName}</h2>
+              <p style={{ margin: 0 }}>
+                Activation status: <strong>{fundActivationStatus}</strong>
+                {fundActivatedAt
+                  ? ` · Activated ${formatDateTime(fundActivatedAt)}`
+                  : ""}
+                {fundActivatedBy ? ` by ${fundActivatedBy}` : ""}
+              </p>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-end",
+                flexWrap: "wrap",
+                gap: 10,
+              }}
+            >
+              <label style={{ display: "grid", gap: 6, minWidth: 270 }}>
+                <span style={{ fontSize: 12, fontWeight: 800 }}>
+                  Switch active fund
+                </span>
+                <select
+                  aria-label="Select active fund"
+                  disabled={!fundContextReady || loading}
+                  onChange={(event) => setActiveFundName(event.target.value)}
+                  style={{
+                    background: "#0f172a",
+                    border: "1px solid rgba(148, 163, 184, 0.35)",
+                    borderRadius: 12,
+                    color: "#f8fafc",
+                    minHeight: 42,
+                    padding: "0 12px",
+                  }}
+                  value={activeFundName}
+                >
+                  {availableFunds.map((fundName) => (
+                    <option key={fundName} value={fundName}>
+                      {fundName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <a
+                className="monitor-btn monitor-btn-secondary"
+                href="/migration/activation"
+              >
+                Open Fund Activation
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div className="sample-data-ribbon">
+          {activeFundName} · {fundActivationStatus} · Executive workspace reading
+          only this fund&apos;s activated migrated and workflow records
+        </div>
+
+        {loading && (
           <div className="preview-card">
             <h2>Preparing Managing Partner Workspace...</h2>
             <p>
@@ -2038,11 +2464,40 @@ async function handleGeneratePowerPoint() {
           </div>
         )}
 
-        {!loading && !errorMessage && (
-          <>
-                      <div className="sample-data-ribbon">
-              Live workspace preview · Reading migrated investor, PDF, portfolio, fund and compliance records
+        {!loading &&
+          !errorMessage &&
+          fundActivationStatus !== "Active" && (
+            <div className="preview-card">
+              <p className="eyebrow">Activation Required</p>
+              <h2>{activeFundName} is not active across VENTIQ</h2>
+              <div className="explain-box">
+                The Managing Partner Command Center is locked because this fund
+                has not completed the controlled activation process. Complete
+                data readiness, maker-checker approval and fund activation before
+                executive metrics, portfolio intelligence and LP narratives use
+                the migrated operating data.
+              </div>
+              <div className="action-row">
+                <a
+                  className="monitor-btn monitor-btn-primary"
+                  href="/migration/activation"
+                >
+                  Complete Fund Activation
+                </a>
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/migration/data-intake"
+                >
+                  Open Data Intake
+                </a>
+              </div>
             </div>
+          )}
+
+        {!loading &&
+          !errorMessage &&
+          fundActivationStatus === "Active" && (
+          <>
             <div className="preview-card">
   <div className="section-heading-row">
     <div>
@@ -2082,10 +2537,10 @@ async function handleGeneratePowerPoint() {
   </div>
 
   <div className="explain-box">
-    This page now reads directly from investor_master, fund_commitments,
-    investor_financial_positions, portfolio_investments, compliance_items and
-    investor_documents. Migration is now feeding the real Managing Partner
-    dashboard, not only the migration screens.
+    This page reads only the activated records for {activeFundName} from
+    investor_master, fund_commitments, investor_financial_positions,
+    portfolio_investments, compliance_items and investor_documents. The same
+    fund context is shared with Migration Activation and the Finance Head Workspace.
   </div>
 </div>
             <div className="preview-card">

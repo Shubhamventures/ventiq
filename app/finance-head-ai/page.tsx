@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { useActiveFund } from "../../lib/useActiveFund";
 
 type DataRow = Record<string, unknown>;
 
@@ -116,7 +117,95 @@ function getActivityIcon(status: string) {
   return "⚪";
 }
 
+function getFundName(row: DataRow) {
+  return getString(
+    row,
+    ["fund_name", "scheme_name", "fund", "fund_title"],
+    ""
+  ).trim();
+}
+
+function filterRowsForFund(
+  rows: DataRow[],
+  fundName: string,
+  includeGlobalRows = false
+) {
+  const normalizedFundName = fundName.trim().toLowerCase();
+
+  return rows.filter((row) => {
+    const rowFundName = getFundName(row).toLowerCase();
+
+    if (!rowFundName) return includeGlobalRows;
+    return rowFundName === normalizedFundName;
+  });
+}
+
+function sumRows(rows: DataRow[], keys: string[]) {
+  return rows.reduce((sum, row) => sum + getNumber(row, keys), 0);
+}
+
+function averageRows(rows: DataRow[], keys: string[]) {
+  const values = rows
+    .map((row) => getNumber(row, keys))
+    .filter((value) => value > 0);
+
+  if (values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function latestTimestamp(rows: DataRow[]) {
+  return rows
+    .map((row) =>
+      getString(row, ["updated_at", "created_at", "generated_at"], "")
+    )
+    .filter(Boolean)
+    .sort()
+    .at(-1) ?? "";
+}
+
+function latestRowFromRows(rows: DataRow[]) {
+  if (rows.length === 0) return null;
+
+  return [...rows].sort((left, right) => {
+    const leftTime = new Date(
+      getString(left, ["updated_at", "created_at"], "1970-01-01")
+    ).getTime();
+    const rightTime = new Date(
+      getString(right, ["updated_at", "created_at"], "1970-01-01")
+    ).getTime();
+
+    return rightTime - leftTime;
+  })[0];
+}
+
+function batchIdentity(rows: DataRow[], fallback: string) {
+  const latestRow = latestRowFromRows(rows);
+  return getString(latestRow ?? undefined, ["batch_id", "id"], fallback);
+}
+
+function uniqueFundNames(rowGroups: DataRow[][]) {
+  return Array.from(
+    new Set(
+      rowGroups
+        .flat()
+        .map(getFundName)
+        .filter(Boolean)
+    )
+  ).sort((left, right) => left.localeCompare(right));
+}
+
 export default function FinanceHeadAIPage() {
+  const {
+    activeFundName,
+    setActiveFundName,
+    isReady: fundContextReady,
+  } = useActiveFund("VENTIQ Growth Fund II");
+  const [availableFunds, setAvailableFunds] = useState<string[]>([
+    "VENTIQ Growth Fund II",
+  ]);
+  const [fundActivationStatus, setFundActivationStatus] = useState("Checking");
+  const [fundActivatedAt, setFundActivatedAt] = useState("");
+  const [fundActivatedBy, setFundActivatedBy] = useState("");
   const [capitalCalls, setCapitalCalls] = useState<DataRow[]>([]);
   const [distributions, setDistributions] = useState<DataRow[]>([]);
   const [investorDocuments, setInvestorDocuments] = useState<DataRow[]>([]);
@@ -162,207 +251,430 @@ const [
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-  async function loadFinanceHeadWorkspace() {
-    if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage(
-        "The sample Finance Head workspace is temporarily unavailable. Please request a walkthrough."
-      );
-      setLoading(false);
-      return;
-    }
+    if (!fundContextReady || !activeFundName) return;
 
-    setLoading(true);
-    setErrorMessage("");
-
-    const db = supabase as any;
-
-    async function selectRows(
-      tableName: string,
-      options?: {
-        orderBy?: string;
-        ascending?: boolean;
-        eq?: {
-          column: string;
-          value: string;
-        };
+    async function loadFinanceHeadWorkspace() {
+      if (!isSupabaseConfigured || !supabase) {
+        setErrorMessage(
+          "The sample Finance Head workspace is temporarily unavailable. Please request a walkthrough."
+        );
+        setLoading(false);
+        return;
       }
-    ) {
-      try {
-        let query = db.from(tableName).select("*");
 
-        if (options?.eq) {
-          query = query.eq(options.eq.column, options.eq.value);
+      setLoading(true);
+      setErrorMessage("");
+      setFundActivationStatus("Checking");
+      setFundActivatedAt("");
+      setFundActivatedBy("");
+
+      const db = supabase as any;
+
+      async function selectRows(
+        tableName: string,
+        options?: {
+          orderBy?: string;
+          ascending?: boolean;
+          eq?: {
+            column: string;
+            value: string;
+          };
         }
+      ) {
+        try {
+          let query = db.from(tableName).select("*");
 
-        if (options?.orderBy) {
-          query = query.order(options.orderBy, {
-            ascending: options.ascending ?? false,
-          });
-        }
+          if (options?.eq) {
+            query = query.eq(options.eq.column, options.eq.value);
+          }
 
-        const { data, error } = await query;
+          if (options?.orderBy) {
+            query = query.order(options.orderBy, {
+              ascending: options.ascending ?? false,
+            });
+          }
 
-        if (error) {
-          console.warn(
-            `VENTIQ finance dashboard skipped ${tableName}:`,
-            error.message
-          );
+          const { data, error } = await query;
+
+          if (error) {
+            console.warn(
+              `VENTIQ finance dashboard skipped ${tableName}:`,
+              error.message
+            );
+            return [] as DataRow[];
+          }
+
+          return (data ?? []) as DataRow[];
+        } catch (error) {
+          console.warn(`VENTIQ finance dashboard skipped ${tableName}:`, error);
           return [] as DataRow[];
         }
-
-        return (data ?? []) as DataRow[];
-      } catch (error) {
-        console.warn(`VENTIQ finance dashboard skipped ${tableName}:`, error);
-        return [] as DataRow[];
       }
-    }
 
-    async function latestRow(tableName: string) {
-      try {
-        const { data, error } = await db
-          .from(tableName)
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+      async function loadActivationRecord() {
+        try {
+          const { data, error } = await db
+            .from("fund_activation_status")
+            .select("status, activated_at, activated_by, readiness_score")
+            .eq("fund_name", activeFundName)
+            .maybeSingle();
 
-        if (error) {
+          if (error) {
+            console.warn(
+              "VENTIQ finance dashboard could not read fund activation:",
+              error.message
+            );
+            return null;
+          }
+
+          return (data as DataRow | null) ?? null;
+        } catch (error) {
           console.warn(
-            `VENTIQ finance dashboard skipped latest ${tableName}:`,
-            error.message
+            "VENTIQ finance dashboard could not read fund activation:",
+            error
           );
           return null;
         }
+      }
 
-        return (data as DataRow | null) ?? null;
-      } catch (error) {
-        console.warn(
-          `VENTIQ finance dashboard skipped latest ${tableName}:`,
-          error
+      try {
+        const [
+          capitalCallsData,
+          distributionsData,
+          documentsData,
+          matchesData,
+          circularsData,
+          migratedInvestorMasterData,
+          migratedFundCommitmentsData,
+          migratedFinancialPositionsData,
+          migratedInvestorCashflowsData,
+          migratedFundMasterData,
+          migratedPortfolioInvestmentsData,
+          migratedComplianceItemsData,
+          migratedPdfDocumentsData,
+          allocationBatchRows,
+          activationRecord,
+        ] = await Promise.all([
+          selectRows("capital_calls", {
+            orderBy: "created_at",
+            ascending: false,
+          }),
+          selectRows("distributions", {
+            orderBy: "created_at",
+            ascending: false,
+          }),
+          selectRows("investor_documents"),
+          selectRows("regulatory_source_matches", {
+            eq: {
+              column: "status",
+              value: "needs_review",
+            },
+          }),
+          selectRows("regulatory_circulars", {
+            eq: {
+              column: "status",
+              value: "active",
+            },
+          }),
+          selectRows("investor_master", {
+            orderBy: "investor_code",
+            ascending: true,
+          }),
+          selectRows("fund_commitments"),
+          selectRows("investor_financial_positions"),
+          selectRows("investor_cashflows", {
+            orderBy: "cashflow_date",
+            ascending: false,
+          }),
+          selectRows("fund_master"),
+          selectRows("portfolio_investments"),
+          selectRows("compliance_items"),
+          selectRows("pdf_intelligence_documents"),
+          selectRows("capital_call_allocation_batches", {
+            orderBy: "created_at",
+            ascending: false,
+          }),
+          loadActivationRecord(),
+        ]);
+
+        const fundOptions = uniqueFundNames([
+          migratedFundMasterData,
+          migratedInvestorMasterData,
+          migratedFundCommitmentsData,
+          migratedFinancialPositionsData,
+          migratedPortfolioInvestmentsData,
+          migratedComplianceItemsData,
+          migratedPdfDocumentsData,
+          capitalCallsData,
+          distributionsData,
+          documentsData,
+        ]);
+
+        const nextFundOptions = fundOptions.length
+          ? fundOptions
+          : [activeFundName];
+
+        setAvailableFunds(nextFundOptions);
+
+        if (!nextFundOptions.includes(activeFundName)) {
+          setActiveFundName(nextFundOptions[0]);
+          return;
+        }
+
+        const scopedCapitalCalls = filterRowsForFund(
+          capitalCallsData,
+          activeFundName
         );
-        return null;
+        const scopedDistributions = filterRowsForFund(
+          distributionsData,
+          activeFundName
+        );
+        const scopedDocuments = filterRowsForFund(
+          documentsData,
+          activeFundName
+        );
+        const scopedInvestorMaster = filterRowsForFund(
+          migratedInvestorMasterData,
+          activeFundName
+        );
+        const scopedCommitments = filterRowsForFund(
+          migratedFundCommitmentsData,
+          activeFundName
+        );
+        const scopedFinancialPositions = filterRowsForFund(
+          migratedFinancialPositionsData,
+          activeFundName
+        );
+        const scopedCashflows = filterRowsForFund(
+          migratedInvestorCashflowsData,
+          activeFundName
+        );
+        const scopedFundMaster = filterRowsForFund(
+          migratedFundMasterData,
+          activeFundName
+        );
+        const scopedPortfolio = filterRowsForFund(
+          migratedPortfolioInvestmentsData,
+          activeFundName
+        );
+        const scopedCompliance = filterRowsForFund(
+          migratedComplianceItemsData,
+          activeFundName
+        );
+        const scopedPdfDocuments = filterRowsForFund(
+          migratedPdfDocumentsData,
+          activeFundName
+        );
+        const scopedAllocationBatches = filterRowsForFund(
+          allocationBatchRows,
+          activeFundName
+        );
+
+        setCapitalCalls(scopedCapitalCalls);
+        setDistributions(scopedDistributions);
+        setInvestorDocuments(scopedDocuments);
+        setRegulatoryMatches(
+          filterRowsForFund(matchesData, activeFundName, true)
+        );
+        setRegulatoryCirculars(
+          filterRowsForFund(circularsData, activeFundName, true)
+        );
+        setMigratedInvestorMaster(scopedInvestorMaster);
+        setMigratedFundCommitments(scopedCommitments);
+        setMigratedFinancialPositions(scopedFinancialPositions);
+        setMigratedInvestorCashflows(scopedCashflows);
+        setMigratedFundMasterRows(scopedFundMaster);
+        setMigratedPortfolioInvestments(scopedPortfolio);
+        setMigratedComplianceItems(scopedCompliance);
+        setMigratedPdfIntelligenceDocuments(scopedPdfDocuments);
+
+        const investorSourceRows = [
+          ...scopedInvestorMaster,
+          ...scopedCommitments,
+          ...scopedFinancialPositions,
+        ];
+        const investorSummary = investorSourceRows.length
+          ? {
+              id: batchIdentity(
+                investorSourceRows,
+                `${activeFundName}-investor-data`
+              ),
+              fund_name: activeFundName,
+              batch_name: `${activeFundName} investor dataset`,
+              total_records: scopedInvestorMaster.length,
+              total_commitment: sumRows(scopedCommitments, [
+                "commitment_amount",
+                "committed_amount",
+                "commitment",
+              ]),
+              status: "activated",
+              created_at: latestTimestamp(investorSourceRows),
+            }
+          : null;
+
+        const pdfReadyFiles = scopedPdfDocuments.filter((row) => {
+          const status = getString(row, ["status"], "").toLowerCase();
+          return ["ready", "approved", "published", "available"].includes(
+            status
+          );
+        }).length;
+        const pdfUnmatchedFiles = scopedPdfDocuments.filter(
+          (row) =>
+            getString(row, ["status"], "").toLowerCase() === "unmatched"
+        ).length;
+        const pdfReviewFiles = Math.max(
+          scopedPdfDocuments.length - pdfReadyFiles - pdfUnmatchedFiles,
+          0
+        );
+        const pdfSummary = scopedPdfDocuments.length
+          ? {
+              id: batchIdentity(
+                scopedPdfDocuments,
+                `${activeFundName}-pdf-data`
+              ),
+              fund_name: activeFundName,
+              batch_name: `${activeFundName} PDF intelligence dataset`,
+              total_files: scopedPdfDocuments.length,
+              ready_files: pdfReadyFiles,
+              review_files: pdfReviewFiles,
+              unmatched_files: pdfUnmatchedFiles,
+              status: "activated",
+              created_at: latestTimestamp(scopedPdfDocuments),
+            }
+          : null;
+
+        const portfolioSummary = scopedPortfolio.length
+          ? {
+              id: batchIdentity(
+                scopedPortfolio,
+                `${activeFundName}-portfolio-data`
+              ),
+              fund_name: activeFundName,
+              batch_name: `${activeFundName} portfolio dataset`,
+              total_records: scopedPortfolio.length,
+              current_portfolio_value: sumRows(scopedPortfolio, [
+                "current_value",
+                "current_portfolio_value",
+              ]),
+              at_risk_count: scopedPortfolio.filter((row) => {
+                const risk = getString(row, ["risk_status"], "").toLowerCase();
+                return risk.includes("risk") || risk.includes("watch");
+              }).length,
+              status: "activated",
+              created_at: latestTimestamp(scopedPortfolio),
+            }
+          : null;
+
+        const fundSummary = scopedFundMaster.length
+          ? {
+              id: batchIdentity(
+                scopedFundMaster,
+                `${activeFundName}-fund-data`
+              ),
+              fund_name: activeFundName,
+              batch_name: `${activeFundName} fund master dataset`,
+              total_funds: scopedFundMaster.length,
+              total_committed_capital: sumRows(scopedFundMaster, [
+                "committed_capital",
+                "total_committed_capital",
+                "commitment_amount",
+              ]),
+              total_sponsor_commitment: sumRows(scopedFundMaster, [
+                "sponsor_commitment",
+              ]),
+              average_management_fee: averageRows(scopedFundMaster, [
+                "management_fee_rate",
+                "management_fee",
+              ]),
+              average_carry: averageRows(scopedFundMaster, [
+                "carry_rate",
+                "carry",
+              ]),
+              status: "activated",
+              created_at: latestTimestamp(scopedFundMaster),
+            }
+          : null;
+
+        const evidenceAvailableCount = scopedCompliance.filter((row) => {
+          const evidence = getString(
+            row,
+            ["evidence_available", "evidence_status"],
+            ""
+          ).toLowerCase();
+          return (
+            row["evidence_available"] === true ||
+            ["yes", "true", "available", "complete", "filed"].includes(
+              evidence
+            )
+          );
+        }).length;
+        const pendingReviewCount = scopedCompliance.filter((row) => {
+          const status = getString(
+            row,
+            ["filing_status", "migration_status"],
+            ""
+          ).toLowerCase();
+          return ["pending", "review", "overdue", "draft"].includes(status);
+        }).length;
+        const highRiskCount = scopedCompliance.filter(
+          (row) =>
+            getString(row, ["risk_level"], "").toLowerCase() === "high"
+        ).length;
+        const complianceSummary = scopedCompliance.length
+          ? {
+              id: batchIdentity(
+                scopedCompliance,
+                `${activeFundName}-compliance-data`
+              ),
+              fund_name: activeFundName,
+              batch_name: `${activeFundName} compliance dataset`,
+              total_items: scopedCompliance.length,
+              evidence_available_count: evidenceAvailableCount,
+              pending_review_count: pendingReviewCount,
+              high_risk_count: highRiskCount,
+              status: "activated",
+              created_at: latestTimestamp(scopedCompliance),
+            }
+          : null;
+
+        setLatestInvestorBatch(investorSummary);
+        setLatestPdfBatch(pdfSummary);
+        setLatestPortfolioBatch(portfolioSummary);
+        setLatestFundBatch(fundSummary);
+        setLatestComplianceBatch(complianceSummary);
+        setLatestCapitalCallAllocationBatch(
+          latestRowFromRows(scopedAllocationBatches)
+        );
+
+        const activationStatus = getString(
+          activationRecord ?? undefined,
+          ["status"],
+          "Setup Not Started"
+        );
+        setFundActivationStatus(activationStatus);
+        setFundActivatedAt(
+          getString(activationRecord ?? undefined, ["activated_at"], "")
+        );
+        setFundActivatedBy(
+          getString(activationRecord ?? undefined, ["activated_by"], "")
+        );
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to load Finance Head workspace."
+        );
+      } finally {
+        setLoading(false);
       }
     }
 
-    try {
-      const [
-        capitalCallsData,
-        distributionsData,
-        documentsData,
-        matchesData,
-        circularsData,
-
-        migratedInvestorMasterData,
-        migratedFundCommitmentsData,
-        migratedFinancialPositionsData,
-        migratedInvestorCashflowsData,
-        migratedFundMasterData,
-        migratedPortfolioInvestmentsData,
-        migratedComplianceItemsData,
-        migratedPdfDocumentsData,
-
-        investorMigrationBatch,
-        pdfMigrationBatch,
-        portfolioMigrationBatch,
-        fundMigrationBatch,
-        complianceMigrationBatch,
-        capitalCallAllocationBatch,
-      ] = await Promise.all([
-        selectRows("capital_calls", {
-          orderBy: "created_at",
-          ascending: false,
-        }),
-
-        selectRows("distributions", {
-          orderBy: "created_at",
-          ascending: false,
-        }),
-
-        selectRows("investor_documents"),
-
-        selectRows("regulatory_source_matches", {
-          eq: {
-            column: "status",
-            value: "needs_review",
-          },
-        }),
-
-        selectRows("regulatory_circulars", {
-          eq: {
-            column: "status",
-            value: "active",
-          },
-        }),
-
-        selectRows("investor_master", {
-          orderBy: "investor_code",
-          ascending: true,
-        }),
-
-        selectRows("fund_commitments"),
-
-        selectRows("investor_financial_positions"),
-
-        selectRows("investor_cashflows", {
-          orderBy: "cashflow_date",
-          ascending: false,
-        }),
-
-        selectRows("fund_master"),
-
-        selectRows("portfolio_investments"),
-
-        selectRows("compliance_items"),
-
-        selectRows("pdf_intelligence_documents"),
-
-        latestRow("investor_import_batches"),
-
-        latestRow("pdf_intelligence_batches"),
-
-        latestRow("portfolio_data_migration_batches"),
-
-        latestRow("fund_data_migration_batches"),
-
-        latestRow("compliance_data_migration_batches"),
-
-        latestRow("capital_call_allocation_batches"),
-      ]);
-
-      setCapitalCalls(capitalCallsData);
-      setDistributions(distributionsData);
-      setInvestorDocuments(documentsData);
-      setRegulatoryMatches(matchesData);
-      setRegulatoryCirculars(circularsData);
-
-      setMigratedInvestorMaster(migratedInvestorMasterData);
-      setMigratedFundCommitments(migratedFundCommitmentsData);
-      setMigratedFinancialPositions(migratedFinancialPositionsData);
-      setMigratedInvestorCashflows(migratedInvestorCashflowsData);
-      setMigratedFundMasterRows(migratedFundMasterData);
-      setMigratedPortfolioInvestments(migratedPortfolioInvestmentsData);
-      setMigratedComplianceItems(migratedComplianceItemsData);
-      setMigratedPdfIntelligenceDocuments(migratedPdfDocumentsData);
-
-      setLatestInvestorBatch(investorMigrationBatch);
-      setLatestPdfBatch(pdfMigrationBatch);
-      setLatestPortfolioBatch(portfolioMigrationBatch);
-      setLatestFundBatch(fundMigrationBatch);
-      setLatestComplianceBatch(complianceMigrationBatch);
-      setLatestCapitalCallAllocationBatch(capitalCallAllocationBatch);
-    } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to load Finance Head workspace."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  loadFinanceHeadWorkspace();
-}, []);
+    void loadFinanceHeadWorkspace();
+  }, [
+    activeFundName,
+    fundContextReady,
+    setActiveFundName,
+  ]);
 
   const financeMetrics = useMemo(() => {
   const approvedCapitalCalls = capitalCalls.filter(isApproved);
@@ -1241,9 +1553,70 @@ const [
           </a>
         </div>
 
+        <div
+          className="preview-card"
+          style={{ marginBottom: 18, padding: 22 }}
+        >
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">Active Fund Context</p>
+              <h2 style={{ marginBottom: 8 }}>{activeFundName}</h2>
+              <p style={{ margin: 0 }}>
+                Activation status: <strong>{fundActivationStatus}</strong>
+                {fundActivatedAt
+                  ? ` · Activated ${formatDateTime(fundActivatedAt)}`
+                  : ""}
+                {fundActivatedBy ? ` by ${fundActivatedBy}` : ""}
+              </p>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-end",
+                flexWrap: "wrap",
+                gap: 10,
+              }}
+            >
+              <label style={{ display: "grid", gap: 6, minWidth: 270 }}>
+                <span style={{ fontSize: 12, fontWeight: 800 }}>
+                  Switch active fund
+                </span>
+                <select
+                  aria-label="Select active fund"
+                  disabled={!fundContextReady || loading}
+                  onChange={(event) => setActiveFundName(event.target.value)}
+                  style={{
+                    background: "#0f172a",
+                    border: "1px solid rgba(148, 163, 184, 0.35)",
+                    borderRadius: 12,
+                    color: "#f8fafc",
+                    minHeight: 42,
+                    padding: "0 12px",
+                  }}
+                  value={activeFundName}
+                >
+                  {availableFunds.map((fundName) => (
+                    <option key={fundName} value={fundName}>
+                      {fundName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <a
+                className="monitor-btn monitor-btn-secondary"
+                href="/migration/activation"
+              >
+                Open Fund Activation
+              </a>
+            </div>
+          </div>
+        </div>
+
         <div className="sample-data-ribbon">
-          Connected finance workspace · Reading migrated investor, PDF, fund,
-          portfolio, compliance and finance workflow records
+          {activeFundName} · {fundActivationStatus} · Connected finance workspace
+          reading only this fund&apos;s migrated and workflow records
         </div>
 
         {loading && (
@@ -1264,13 +1637,44 @@ const [
           </div>
         )}
 
-       {!loading && !errorMessage && (
+        {!loading &&
+          !errorMessage &&
+          fundActivationStatus !== "Active" && (
+            <div className="preview-card">
+              <p className="eyebrow">Activation Required</p>
+              <h2>{activeFundName} is not active across VENTIQ</h2>
+              <div className="explain-box">
+                The Finance Head Workspace is locked because this fund has not
+                completed the controlled activation process. Upload and validate
+                all mandatory data layers, complete maker-checker approval, and
+                activate the fund before operational dashboards consume the data.
+              </div>
+              <div className="action-row">
+                <a
+                  className="monitor-btn monitor-btn-primary"
+                  href="/migration/activation"
+                >
+                  Complete Fund Activation
+                </a>
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/migration/data-intake"
+                >
+                  Open Data Intake
+                </a>
+              </div>
+            </div>
+          )}
+
+       {!loading &&
+         !errorMessage &&
+         fundActivationStatus === "Active" && (
   <>
     <div className="preview-card">
       <div className="section-heading-row">
         <div>
           <p className="eyebrow">Migration Data Connected</p>
-          <h2>Live finance data is now powering this dashboard</h2>
+          <h2>{activeFundName} finance data is powering this dashboard</h2>
         </div>
       </div>
 
@@ -1319,10 +1723,11 @@ const [
       </div>
 
       <div className="explain-box">
-        This Finance Head dashboard now reads directly from investor_master,
-        fund_commitments, investor_financial_positions, investor_cashflows,
-        investor_documents, pdf_intelligence_documents, fund_master,
-        portfolio_investments and compliance_items.
+        This Finance Head dashboard now reads only activated records for
+        {activeFundName} from investor_master, fund_commitments,
+        investor_financial_positions, investor_cashflows, investor_documents,
+        pdf_intelligence_documents, fund_master, portfolio_investments and
+        compliance_items.
       </div>
     </div>
 

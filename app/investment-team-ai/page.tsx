@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { useActiveFund } from "../../lib/useActiveFund";
 
 type DataRow = Record<string, unknown>;
 
@@ -66,12 +67,6 @@ function formatMultiple(value: number) {
   return `${value.toFixed(2)}x`;
 }
 
-function formatPercent(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return "-";
-
-  return `${value.toFixed(2)}%`;
-}
-
 function formatDate(value: unknown) {
   if (typeof value !== "string" || !value) return "-";
 
@@ -105,7 +100,6 @@ function getActivityIcon(status: string) {
   if (value.includes("compliance")) return "🧾";
   if (value.includes("valuation")) return "📊";
   if (value.includes("covenant")) return "🛡️";
-  if (value.includes("imported")) return "📥";
 
   return "⚪";
 }
@@ -120,45 +114,36 @@ function getRiskEmoji(value: string) {
   return "⚪";
 }
 
-function averageFromRows(rows: DataRow[], keys: string[]) {
-  const values = rows
-    .map((row) => getNumber(row, keys))
-    .filter((value) => Number.isFinite(value) && value > 0);
-
-  if (values.length === 0) return 0;
-
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
 export default function InvestmentTeamAIPage() {
+  const {
+    activeFundName,
+    setActiveFundName,
+    isReady: isFundContextReady,
+  } = useActiveFund("VENTIQ Growth Fund II");
+
+  const [fundOptions, setFundOptions] = useState<string[]>([]);
+  const [activationStatus, setActivationStatus] = useState("Setup Not Started");
+  const [activationDetails, setActivationDetails] = useState<DataRow | null>(null);
+
   const [latestPortfolioBatch, setLatestPortfolioBatch] =
     useState<DataRow | null>(null);
   const [latestPdfBatch, setLatestPdfBatch] = useState<DataRow | null>(null);
   const [latestFundBatch, setLatestFundBatch] = useState<DataRow | null>(null);
   const [latestComplianceBatch, setLatestComplianceBatch] =
     useState<DataRow | null>(null);
-  const [latestInvestorBatch, setLatestInvestorBatch] =
-    useState<DataRow | null>(null);
 
-  const [portfolioInvestments, setPortfolioInvestments] = useState<DataRow[]>(
-    []
-  );
+  const [portfolioInvestments, setPortfolioInvestments] = useState<DataRow[]>([]);
   const [complianceItems, setComplianceItems] = useState<DataRow[]>([]);
-  const [fundMasterRows, setFundMasterRows] = useState<DataRow[]>([]);
-  const [fundCommitments, setFundCommitments] = useState<DataRow[]>([]);
-  const [financialPositions, setFinancialPositions] = useState<DataRow[]>([]);
-  const [pdfIntelligenceDocuments, setPdfIntelligenceDocuments] = useState<
-    DataRow[]
-  >([]);
-  const [investorDocuments, setInvestorDocuments] = useState<DataRow[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   async function loadInvestmentTeamWorkspace() {
+    if (!isFundContextReady) return;
+
     if (!isSupabaseConfigured || !supabase) {
       setErrorMessage(
-        "The sample Investment Team workspace is temporarily unavailable. Please request a walkthrough."
+        "The Investment Team workspace is unavailable because Supabase is not configured."
       );
       setLoading(false);
       return;
@@ -167,120 +152,198 @@ export default function InvestmentTeamAIPage() {
     setLoading(true);
     setErrorMessage("");
 
-    const db = supabase as any;
-
-    async function selectRows(
-      tableName: string,
-      options?: {
-        orderBy?: string;
-        ascending?: boolean;
-        eq?: {
-          column: string;
-          value: string;
-        };
-      }
-    ) {
-      try {
-        let query = db.from(tableName).select("*");
-
-        if (options?.eq) {
-          query = query.eq(options.eq.column, options.eq.value);
-        }
-
-        if (options?.orderBy) {
-          query = query.order(options.orderBy, {
-            ascending: options.ascending ?? false,
-          });
-        }
-
-        const { data, error } = await query;
-
-        if (error) {
-          console.warn(
-            `VENTIQ investment dashboard skipped ${tableName}:`,
-            error.message
-          );
-          return [] as DataRow[];
-        }
-
-        return (data ?? []) as DataRow[];
-      } catch (error) {
-        console.warn(`VENTIQ investment dashboard skipped ${tableName}:`, error);
-        return [] as DataRow[];
-      }
-    }
-
-    async function latestRow(tableName: string) {
-      try {
-        const { data, error } = await db
-          .from(tableName)
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (error) {
-          console.warn(
-            `VENTIQ investment dashboard skipped latest ${tableName}:`,
-            error.message
-          );
-          return null;
-        }
-
-        return (data as DataRow | null) ?? null;
-      } catch (error) {
-        console.warn(
-          `VENTIQ investment dashboard skipped latest ${tableName}:`,
-          error
-        );
-        return null;
-      }
-    }
-
     try {
       const [
-        portfolioInvestmentRows,
-        complianceRows,
-        fundMasterData,
-        fundCommitmentRows,
-        financialPositionRows,
-        pdfDocumentRows,
-        investorDocumentRows,
-
-        portfolioBatch,
-        pdfBatch,
-        fundBatch,
-        complianceBatch,
-        investorBatch,
+        fundOptionsResult,
+        activationResult,
+        portfolioRowsResult,
+        pdfRowsResult,
+        fundRowResult,
+        complianceRowsResult,
       ] = await Promise.all([
-        selectRows("portfolio_investments"),
-        selectRows("compliance_items"),
-        selectRows("fund_master"),
-        selectRows("fund_commitments"),
-        selectRows("investor_financial_positions"),
-        selectRows("pdf_intelligence_documents"),
-        selectRows("investor_documents"),
+        supabase.from("fund_master").select("fund_name").order("fund_name"),
 
-        latestRow("portfolio_data_migration_batches"),
-        latestRow("pdf_intelligence_batches"),
-        latestRow("fund_data_migration_batches"),
-        latestRow("compliance_data_migration_batches"),
-        latestRow("investor_import_batches"),
+        supabase
+          .from("fund_activation_status")
+          .select("*")
+          .eq("fund_name", activeFundName)
+          .maybeSingle(),
+
+        supabase
+          .from("portfolio_investments")
+          .select("*")
+          .eq("fund_name", activeFundName)
+          .order("created_at", { ascending: true }),
+
+        supabase
+          .from("pdf_intelligence_documents")
+          .select("*")
+          .eq("fund_name", activeFundName)
+          .order("created_at", { ascending: false }),
+
+        supabase
+          .from("fund_master")
+          .select("*")
+          .eq("fund_name", activeFundName)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+
+        supabase
+          .from("compliance_items")
+          .select("*")
+          .eq("fund_name", activeFundName)
+          .order("created_at", { ascending: true }),
       ]);
 
-      setPortfolioInvestments(portfolioInvestmentRows);
-      setComplianceItems(complianceRows);
-      setFundMasterRows(fundMasterData);
-      setFundCommitments(fundCommitmentRows);
-      setFinancialPositions(financialPositionRows);
-      setPdfIntelligenceDocuments(pdfDocumentRows);
-      setInvestorDocuments(investorDocumentRows);
+      const firstError =
+        fundOptionsResult.error ||
+        portfolioRowsResult.error ||
+        pdfRowsResult.error ||
+        fundRowResult.error ||
+        complianceRowsResult.error;
 
-      setLatestPortfolioBatch(portfolioBatch);
-      setLatestPdfBatch(pdfBatch);
-      setLatestFundBatch(fundBatch);
-      setLatestComplianceBatch(complianceBatch);
-      setLatestInvestorBatch(investorBatch);
+      if (firstError) {
+        throw new Error(firstError.message);
+      }
+
+      const availableFundNames = Array.from(
+        new Set(
+          ((fundOptionsResult.data ?? []) as DataRow[])
+            .map((row) => getString(row, ["fund_name"], ""))
+            .filter(Boolean)
+        )
+      );
+
+      if (!availableFundNames.includes(activeFundName)) {
+        availableFundNames.unshift(activeFundName);
+      }
+
+      setFundOptions(availableFundNames);
+
+      const activation = activationResult.error
+        ? null
+        : ((activationResult.data as DataRow | null) ?? null);
+
+      setActivationDetails(activation);
+      setActivationStatus(
+        getString(activation ?? undefined, ["status"], "Setup Not Started")
+      );
+
+      const portfolioRows = (portfolioRowsResult.data ?? []) as DataRow[];
+      const pdfRows = (pdfRowsResult.data ?? []) as DataRow[];
+      const complianceRows = (complianceRowsResult.data ?? []) as DataRow[];
+      const fundRow = (fundRowResult.data as DataRow | null) ?? null;
+
+      setPortfolioInvestments(portfolioRows);
+      setComplianceItems(complianceRows);
+
+      const portfolioInvestmentCost = portfolioRows.reduce(
+        (sum, row) => sum + getNumber(row, ["investment_cost"]),
+        0
+      );
+      const portfolioCurrentValue = portfolioRows.reduce(
+        (sum, row) => sum + getNumber(row, ["current_value"]),
+        0
+      );
+      const portfolioRealisedValue = portfolioRows.reduce(
+        (sum, row) => sum + getNumber(row, ["realised_value", "realized_value"]),
+        0
+      );
+      const portfolioExpectedExitValue = portfolioRows.reduce(
+        (sum, row) => sum + getNumber(row, ["expected_exit_value"]),
+        0
+      );
+      const atRiskCount = portfolioRows.filter((row) => {
+        const risk = getString(row, ["risk_status"], "").toLowerCase();
+        return risk.includes("risk") || risk.includes("watch");
+      }).length;
+      const repaymentCount = portfolioRows.filter((row) =>
+        Boolean(getString(row, ["repayment_due_date"], ""))
+      ).length;
+
+      setLatestPortfolioBatch(
+        portfolioRows.length > 0
+          ? {
+              id: `active-fund-${activeFundName}-portfolio`,
+              created_at: getString(
+                portfolioRows[portfolioRows.length - 1],
+                ["created_at", "investment_date"],
+                ""
+              ),
+              total_records: portfolioRows.length,
+              total_investment_cost: portfolioInvestmentCost,
+              current_portfolio_value: portfolioCurrentValue,
+              realised_value: portfolioRealisedValue,
+              expected_exit_value: portfolioExpectedExitValue,
+              portfolio_moic:
+                portfolioInvestmentCost > 0
+                  ? (portfolioCurrentValue + portfolioRealisedValue) /
+                    portfolioInvestmentCost
+                  : 0,
+              at_risk_count: atRiskCount,
+              repayment_count: repaymentCount,
+            }
+          : null
+      );
+
+      const pdfReviewCount = pdfRows.filter((row) => {
+        const status = getString(row, ["status"], "").toLowerCase();
+        return status.includes("review") || status.includes("unmatched");
+      }).length;
+
+      setLatestPdfBatch(
+        pdfRows.length > 0
+          ? {
+              id: `active-fund-${activeFundName}-pdf`,
+              created_at: getString(pdfRows[0], ["created_at"], ""),
+              total_files: pdfRows.length,
+              ready_files: pdfRows.length - pdfReviewCount,
+              review_files: pdfReviewCount,
+              unmatched_files: pdfRows.filter((row) =>
+                getString(row, ["status"], "").toLowerCase().includes("unmatched")
+              ).length,
+            }
+          : null
+      );
+
+      setLatestFundBatch(
+        fundRow
+          ? {
+              ...fundRow,
+              id: getString(fundRow, ["id"], `active-fund-${activeFundName}`),
+              total_funds: 1,
+              total_committed_capital: getNumber(fundRow, [
+                "committed_capital",
+                "target_corpus",
+              ]),
+            }
+          : null
+      );
+
+      const complianceHighRisk = complianceRows.filter(
+        (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
+      ).length;
+      const compliancePending = complianceRows.filter((row) => {
+        const status = getString(row, ["filing_status"], "").toLowerCase();
+        return ["pending", "review", "overdue", "draft"].includes(status);
+      }).length;
+
+      setLatestComplianceBatch(
+        complianceRows.length > 0
+          ? {
+              id: `active-fund-${activeFundName}-compliance`,
+              created_at: getString(
+                complianceRows[complianceRows.length - 1],
+                ["created_at", "due_date"],
+                ""
+              ),
+              total_items: complianceRows.length,
+              high_risk_count: complianceHighRisk,
+              pending_review_count: compliancePending,
+            }
+          : null
+      );
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -293,8 +356,12 @@ export default function InvestmentTeamAIPage() {
   }
 
   useEffect(() => {
-    loadInvestmentTeamWorkspace();
-  }, []);
+    if (isFundContextReady) {
+      void loadInvestmentTeamWorkspace();
+    }
+  }, [activeFundName, isFundContextReady]);
+
+  const isFundActive = activationStatus === "Active";
 
   const investmentMetrics = useMemo(() => {
     const totalRecords = getNumber(latestPortfolioBatch ?? undefined, [
@@ -332,32 +399,17 @@ export default function InvestmentTeamAIPage() {
     ]);
 
     const rowInvestmentCost = portfolioInvestments.reduce(
-      (sum, row) =>
-        sum +
-        getNumber(row, [
-          "investment_cost",
-          "original_investment_amount",
-          "cost",
-          "amount_invested",
-        ]),
+      (sum, row) => sum + getNumber(row, ["investment_cost"]),
       0
     );
 
     const rowCurrentValue = portfolioInvestments.reduce(
-      (sum, row) =>
-        sum +
-        getNumber(row, [
-          "current_value",
-          "current_fair_value",
-          "fair_value",
-          "valuation",
-        ]),
+      (sum, row) => sum + getNumber(row, ["current_value"]),
       0
     );
 
     const rowRealisedValue = portfolioInvestments.reduce(
-      (sum, row) =>
-        sum + getNumber(row, ["realised_value", "realized_value"]),
+      (sum, row) => sum + getNumber(row, ["realised_value", "realized_value"]),
       0
     );
 
@@ -373,27 +425,14 @@ export default function InvestmentTeamAIPage() {
 
     const moic =
       batchMoic ||
-      averageFromRows(portfolioInvestments, ["moic", "projected_moic"]) ||
-      (investmentCost > 0 ? (currentValue + realisedValue) / investmentCost : 0);
-
-    const irr = averageFromRows(portfolioInvestments, [
-      "irr",
-      "projected_irr",
-      "gross_irr",
-    ]);
-
-    const tvpi = averageFromRows(financialPositions, ["tvpi", "investor_tvpi"]);
-    const dpi = averageFromRows(financialPositions, ["dpi", "investor_dpi"]);
+      (investmentCost > 0
+        ? (currentValue + realisedValue) / investmentCost
+        : 0);
 
     const atRiskRows = portfolioInvestments.filter((row) => {
       const risk = getString(row, ["risk_status"], "").toLowerCase();
 
-      return (
-        risk.includes("risk") ||
-        risk.includes("watch") ||
-        risk.includes("attention") ||
-        risk.includes("high")
-      );
+      return risk.includes("risk") || risk.includes("watch");
     });
 
     const repaymentRows = portfolioInvestments.filter((row) =>
@@ -411,83 +450,25 @@ export default function InvestmentTeamAIPage() {
       );
     });
 
-    const pdfTotal = Math.max(
-      getNumber(latestPdfBatch ?? undefined, ["total_files"]),
-      pdfIntelligenceDocuments.length,
-      investorDocuments.length
-    );
+    const pdfTotal = getNumber(latestPdfBatch ?? undefined, ["total_files"]);
 
     const pdfReview =
       getNumber(latestPdfBatch ?? undefined, ["review_files"]) +
-      getNumber(latestPdfBatch ?? undefined, ["unmatched_files"]) +
-      pdfIntelligenceDocuments.filter((row) => {
-        const status = getString(row, ["status"], "").toLowerCase();
+      getNumber(latestPdfBatch ?? undefined, ["unmatched_files"]);
 
-        return (
-          status.includes("review") ||
-          status.includes("unmatched") ||
-          status.includes("failed")
-        );
-      }).length;
+    const complianceHighRisk = getNumber(latestComplianceBatch ?? undefined, [
+      "high_risk_count",
+    ]);
 
-    const pdfReady = Math.max(
-      getNumber(latestPdfBatch ?? undefined, ["ready_files"]),
-      pdfIntelligenceDocuments.filter((row) => {
-        const status = getString(row, ["status"], "").toLowerCase();
+    const compliancePending = getNumber(latestComplianceBatch ?? undefined, [
+      "pending_review_count",
+    ]);
 
-        return status.includes("ready") || status.includes("published");
-      }).length
-    );
+    const fundCommittedCapital = getNumber(latestFundBatch ?? undefined, [
+      "total_committed_capital",
+    ]);
 
-    const complianceHighRisk = Math.max(
-      getNumber(latestComplianceBatch ?? undefined, ["high_risk_count"]),
-      complianceItems.filter(
-        (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
-      ).length
-    );
-
-    const compliancePending = Math.max(
-      getNumber(latestComplianceBatch ?? undefined, ["pending_review_count"]),
-      complianceItems.filter((row) => {
-        const status = getString(row, ["filing_status", "migration_status"], "")
-          .toLowerCase();
-
-        return status === "pending" || status === "review" || status === "overdue";
-      }).length
-    );
-
-    const fundCommittedCapital =
-      getNumber(latestFundBatch ?? undefined, ["total_committed_capital"]) ||
-      fundMasterRows.reduce(
-        (sum, row) =>
-          sum +
-          getNumber(row, [
-            "committed_capital",
-            "total_committed_capital",
-            "commitment_amount",
-          ]),
-        0
-      ) ||
-      fundCommitments.reduce(
-        (sum, row) =>
-          sum +
-          getNumber(row, [
-            "commitment_amount",
-            "committed_amount",
-            "commitment",
-            "amount",
-          ]),
-        0
-      );
-
-    const activeFunds =
-      getNumber(latestFundBatch ?? undefined, ["total_funds"]) ||
-      fundMasterRows.length ||
-      new Set(
-        portfolioInvestments
-          .map((row) => getString(row, ["fund_name"], ""))
-          .filter(Boolean)
-      ).size;
+    const activeFunds = getNumber(latestFundBatch ?? undefined, ["total_funds"]);
 
     const riskCount = Math.max(batchAtRiskCount, atRiskRows.length);
     const repaymentCount = Math.max(batchRepaymentCount, repaymentRows.length);
@@ -502,8 +483,7 @@ export default function InvestmentTeamAIPage() {
           Math.min(20, activeCompanies * 5) +
           Math.min(15, exitRows.length * 4) +
           Math.min(10, repaymentCount * 3) +
-          Math.min(10, covenantRows.length * 2) +
-          Math.min(10, pdfReady * 2) -
+          Math.min(10, covenantRows.length * 2) -
           Math.min(15, riskCount * 5) -
           Math.min(10, pdfReview * 2)
       )
@@ -516,15 +496,11 @@ export default function InvestmentTeamAIPage() {
       realisedValue,
       expectedExitValue,
       moic,
-      irr,
-      tvpi,
-      dpi,
       riskCount,
       repaymentCount,
       exitPipelineCount: exitRows.length,
       covenantCount: covenantRows.length,
       pdfTotal,
-      pdfReady,
       pdfReview,
       complianceHighRisk,
       compliancePending,
@@ -538,12 +514,6 @@ export default function InvestmentTeamAIPage() {
     latestFundBatch,
     latestComplianceBatch,
     portfolioInvestments,
-    financialPositions,
-    pdfIntelligenceDocuments,
-    investorDocuments,
-    complianceItems,
-    fundMasterRows,
-    fundCommitments,
   ]);
 
   const atRiskInvestments = useMemo(() => {
@@ -551,12 +521,7 @@ export default function InvestmentTeamAIPage() {
       .filter((row) => {
         const risk = getString(row, ["risk_status"], "").toLowerCase();
 
-        return (
-          risk.includes("risk") ||
-          risk.includes("watch") ||
-          risk.includes("attention") ||
-          risk.includes("high")
-        );
+        return risk.includes("risk") || risk.includes("watch");
       })
       .slice(0, 6);
   }, [portfolioInvestments]);
@@ -630,9 +595,7 @@ export default function InvestmentTeamAIPage() {
           row,
           ["instrument_type"],
           "Instrument not provided"
-        )} • ${formatCurrencyCr(
-          getNumber(row, ["current_value", "current_fair_value", "valuation"])
-        )} current value.`,
+        )} • ${formatCurrencyCr(getNumber(row, ["current_value"]))} current value.`,
         status: riskStatus,
       });
 
@@ -782,6 +745,43 @@ export default function InvestmentTeamAIPage() {
           </a>
         </div>
 
+        <div className="preview-card investment-fund-context">
+          <div>
+            <p className="eyebrow">Active Fund Context</p>
+            <h2>{activeFundName}</h2>
+            <p>
+              Activation status: <strong>{activationStatus}</strong>
+              {getString(activationDetails ?? undefined, ["activated_by"], "")
+                ? ` · Activated by ${getString(
+                    activationDetails ?? undefined,
+                    ["activated_by"],
+                    ""
+                  )}`
+                : ""}
+            </p>
+          </div>
+
+          <div className="investment-fund-switcher">
+            <label htmlFor="investment-active-fund">Switch active fund</label>
+            <div className="investment-fund-switcher-row">
+              <select
+                id="investment-active-fund"
+                onChange={(event) => setActiveFundName(event.target.value)}
+                value={activeFundName}
+              >
+                {fundOptions.map((fundName) => (
+                  <option key={fundName} value={fundName}>
+                    {fundName}
+                  </option>
+                ))}
+              </select>
+              <a className="monitor-btn monitor-btn-secondary" href="/migration/activation">
+                Open Fund Activation
+              </a>
+            </div>
+          </div>
+        </div>
+
         <div className="sample-data-ribbon">
           Connected investment workspace · Reading migrated portfolio,
           repayment, valuation, PDF and compliance records
@@ -804,77 +804,29 @@ export default function InvestmentTeamAIPage() {
           </div>
         )}
 
-        {!loading && !errorMessage && (
-          <>
-            <div className="preview-card">
-              <div className="section-heading-row">
-                <div>
-                  <p className="eyebrow">Migration Data Connected</p>
-                  <h2>Live portfolio data is now powering this dashboard</h2>
-                </div>
-
-                <button
-                  className="monitor-btn monitor-btn-secondary"
-                  onClick={loadInvestmentTeamWorkspace}
-                  type="button"
-                >
-                  Refresh Dashboard Data
-                </button>
-              </div>
-
-              <div className="impact-grid">
-                <div className="impact-card">
-                  <h3>{portfolioInvestments.length}</h3>
-                  <p>Portfolio records</p>
-                </div>
-
-                <div className="impact-card">
-                  <h3>{fundMasterRows.length}</h3>
-                  <p>Fund records</p>
-                </div>
-
-                <div className="impact-card">
-                  <h3>{fundCommitments.length}</h3>
-                  <p>Commitment records</p>
-                </div>
-
-                <div className="impact-card">
-                  <h3>{financialPositions.length}</h3>
-                  <p>Financial position records</p>
-                </div>
-              </div>
-
-              <div className="impact-grid">
-                <div className="impact-card">
-                  <h3>{pdfIntelligenceDocuments.length}</h3>
-                  <p>PDF intelligence records</p>
-                </div>
-
-                <div className="impact-card">
-                  <h3>{complianceItems.length}</h3>
-                  <p>Compliance records</p>
-                </div>
-
-                <div className="impact-card">
-                  <h3>{formatCurrencyCr(investmentMetrics.currentValue)}</h3>
-                  <p>Current portfolio value</p>
-                </div>
-
-                <div className="impact-card">
-                  <h3>{formatCurrencyCr(investmentMetrics.expectedExitValue)}</h3>
-                  <p>Expected exit value</p>
-                </div>
-              </div>
-
-              <div className="explain-box">
-                This Investment Team dashboard now reads directly from
-                portfolio_investments, portfolio_data_migration_batches,
-                fund_master, fund_commitments, investor_financial_positions,
-                pdf_intelligence_documents, investor_documents and
-                compliance_items.
-              </div>
+        {!loading && !errorMessage && !isFundActive && (
+          <div className="preview-card investment-activation-lock">
+            <p className="eyebrow">Activation Required</p>
+            <h2>{activeFundName} is not active across VENTIQ</h2>
+            <div className="explain-box">
+              The Investment Team Workspace is locked because this fund has not
+              completed data validation, maker-checker approval and controlled
+              activation. Portfolio records remain visible only inside migration
+              review until the fund is activated.
             </div>
+            <div className="action-row">
+              <a className="monitor-btn monitor-btn-primary" href="/migration/activation">
+                Complete Fund Activation
+              </a>
+              <a className="monitor-btn monitor-btn-secondary" href="/migration/data-intake">
+                Open Data Intake
+              </a>
+            </div>
+          </div>
+        )}
 
+        {!loading && !errorMessage && isFundActive && (
+          <>
             <div className="preview-card">
               <h2>Investment Team Workspace Preview</h2>
 
@@ -951,27 +903,10 @@ export default function InvestmentTeamAIPage() {
 
             <div className="impact-grid">
               <div className="impact-card">
-                <h3>{formatCurrencyCr(investmentMetrics.realisedValue)}</h3>
-                <p>Realised value</p>
-              </div>
-
-              <div className="impact-card">
                 <h3>{formatCurrencyCr(investmentMetrics.expectedExitValue)}</h3>
                 <p>Expected exit value</p>
               </div>
 
-              <div className="impact-card">
-                <h3>{formatPercent(investmentMetrics.irr)}</h3>
-                <p>Projected IRR</p>
-              </div>
-
-              <div className="impact-card">
-                <h3>{investmentMetrics.investmentReadinessScore}%</h3>
-                <p>Investment readiness</p>
-              </div>
-            </div>
-
-            <div className="impact-grid">
               <div className="impact-card">
                 <h3>{investmentMetrics.riskCount}</h3>
                 <p>Risk / watchlist items</p>
@@ -983,13 +918,8 @@ export default function InvestmentTeamAIPage() {
               </div>
 
               <div className="impact-card">
-                <h3>{investmentMetrics.exitPipelineCount}</h3>
-                <p>Exit pipeline items</p>
-              </div>
-
-              <div className="impact-card">
-                <h3>{investmentMetrics.covenantCount}</h3>
-                <p>Covenant / security items</p>
+                <h3>{investmentMetrics.investmentReadinessScore}%</h3>
+                <p>Investment readiness</p>
               </div>
             </div>
 
@@ -1026,22 +956,10 @@ export default function InvestmentTeamAIPage() {
                         )}
                         <br />
                         Cost:{" "}
-                        {formatCurrencyCr(
-                          getNumber(row, [
-                            "investment_cost",
-                            "original_investment_amount",
-                            "cost",
-                          ])
-                        )}
+                        {formatCurrencyCr(getNumber(row, ["investment_cost"]))}
                         {" · "}
                         Current:{" "}
-                        {formatCurrencyCr(
-                          getNumber(row, [
-                            "current_value",
-                            "current_fair_value",
-                            "valuation",
-                          ])
-                        )}
+                        {formatCurrencyCr(getNumber(row, ["current_value"]))}
                         <br />
                         Status: {riskStatus}
                       </div>
@@ -1267,6 +1185,68 @@ export default function InvestmentTeamAIPage() {
           </>
         )}
       </section>
+
+      <style jsx>{`
+        .investment-fund-context {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(340px, 0.8fr);
+          gap: 28px;
+          align-items: center;
+        }
+
+        .investment-fund-context h2 {
+          margin: 2px 0 8px;
+        }
+
+        .investment-fund-context p {
+          margin-bottom: 0;
+        }
+
+        .investment-fund-switcher {
+          display: grid;
+          gap: 8px;
+        }
+
+        .investment-fund-switcher label {
+          font-size: 0.82rem;
+          font-weight: 800;
+        }
+
+        .investment-fund-switcher-row {
+          display: flex;
+          gap: 12px;
+          align-items: stretch;
+        }
+
+        .investment-fund-switcher select {
+          min-width: 0;
+          flex: 1;
+          border: 1px solid rgba(148, 163, 184, 0.35);
+          border-radius: 14px;
+          padding: 0 16px;
+          background: rgba(15, 23, 42, 0.72);
+          color: inherit;
+          font: inherit;
+        }
+
+        .investment-activation-lock {
+          border-color: rgba(59, 130, 246, 0.45);
+        }
+
+        @media (max-width: 860px) {
+          .investment-fund-context {
+            grid-template-columns: 1fr;
+          }
+
+          .investment-fund-switcher-row {
+            flex-direction: column;
+          }
+
+          .investment-fund-switcher select {
+            min-height: 48px;
+          }
+        }
+      `}</style>
     </main>
   );
 }

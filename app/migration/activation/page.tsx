@@ -1,1673 +1,1166 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
+import { useActiveFund } from "@/lib/useActiveFund";
 
-type LayerStatus = "Ready" | "Partial" | "Not Started" | "Needs Review";
-type MakerStatus = "Not Submitted" | "Submitted";
-type CheckerStatus = "Pending" | "Approved" | "Rejected";
-type ActivationStatus = "Inactive" | "Ready for Activation" | "Activated";
+type DataStatus = "Ready" | "Partial" | "Not Started" | "Needs Review";
+type ApprovalStatus = "Draft" | "Submitted" | "Changes Requested" | "Approved";
+type WorkflowRole = "Maker" | "Checker";
+type ActivationStatus =
+  | "Setup Not Started"
+  | "Data Upload in Progress"
+  | "Validation Required"
+  | "Under Review"
+  | "Changes Requested"
+  | "Ready for Activation"
+  | "Active";
+
+type LayerMetric = {
+  label: string;
+  value: string;
+};
 
 type LayerCard = {
   id: string;
   title: string;
-  shortTitle: string;
   description: string;
   route: string;
-  status: LayerStatus;
+  sourceTable: string;
+  status: DataStatus;
   countLabel: string;
   countValue: string;
+  batchId: string;
   batchName: string;
-  requiredFor: string[];
-  dashboardImpact: string[];
-  workflowImpact: string[];
-  metrics: {
-    label: string;
-    value: string;
-  }[];
-};
-
-type ActivationReview = {
-  layerId: string;
-  layerTitle: string;
-  makerStatus: MakerStatus;
-  checkerStatus: CheckerStatus;
-  activationStatus: ActivationStatus;
-  makerNote: string;
-  checkerNote: string;
+  updatedAt: string;
+  owner: string;
+  mandatory: boolean;
+  issues: string[];
+  metrics: LayerMetric[];
+  approvalStatus: ApprovalStatus;
+  makerName: string;
+  checkerName: string;
   submittedAt: string;
-  approvedAt: string;
-  activatedAt: string;
+  reviewedAt: string;
+  reviewComment: string;
 };
 
-type ActivationEvent = {
-  id: string;
-  eventType: string;
-  layerId: string;
-  layerTitle: string;
-  eventTitle: string;
-  eventDescription: string;
-  actorName: string;
-  createdAt: string;
+type ApprovalRow = {
+  layer_key?: string | null;
+  source_batch_id?: string | null;
+  status?: string | null;
+  maker_name?: string | null;
+  checker_name?: string | null;
+  submitted_at?: string | null;
+  reviewed_at?: string | null;
+  review_comment?: string | null;
 };
+
+type ActivationRow = {
+  status?: string | null;
+  readiness_score?: number | null;
+  activated_at?: string | null;
+  activated_by?: string | null;
+};
+
 
 type DataRow = Record<string, unknown>;
+
+type LatestBatchRows = {
+  batchId: string;
+  rows: DataRow[];
+};
+
+const DEFAULT_FUND_NAME = "VENTIQ Growth Fund II";
+const MAKER_NAME = "Migration Maker";
+const CHECKER_NAME = "Migration Checker";
 
 function formatCr(value: number) {
   return `₹${(value / 10000000).toFixed(2)} Cr`;
 }
 
-function safeString(value: unknown, fallback = "") {
-  return typeof value === "string" && value.trim() ? value : fallback;
+function formatDateTime(value: string) {
+  if (!value) return "Not available";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Not available";
+
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed);
 }
 
-function getStatusClass(status: string) {
-  return status.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+function textValue(row: DataRow, key: string, fallback = "") {
+  const value = row[key];
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number") return String(value);
+  return fallback;
 }
 
-function getLayerHealth(status: LayerStatus) {
+function numberValue(row: DataRow, key: string) {
+  const value = row[key];
+  const parsed = typeof value === "number" ? value : Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function booleanValue(row: DataRow, key: string) {
+  const value = row[key];
+  if (typeof value === "boolean") return value;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return ["yes", "true", "available", "complete", "ready", "filed"].includes(normalized);
+}
+
+function latestBatchRows(rows: DataRow[]): LatestBatchRows {
+  if (rows.length === 0) return { batchId: "", rows: [] };
+
+  const grouped = new Map<string, DataRow[]>();
+  rows.forEach((row) => {
+    const batchId = textValue(row, "batch_id", "unbatched");
+    grouped.set(batchId, [...(grouped.get(batchId) ?? []), row]);
+  });
+
+  let selectedBatchId = "";
+  let selectedRows: DataRow[] = [];
+  let selectedTime = -1;
+
+  grouped.forEach((batchRows, batchId) => {
+    const batchTime = batchRows.reduce((latest, row) => {
+      const timestamp = textValue(row, "updated_at") || textValue(row, "created_at");
+      const parsed = timestamp ? new Date(timestamp).getTime() : 0;
+      return Math.max(latest, Number.isFinite(parsed) ? parsed : 0);
+    }, 0);
+
+    if (batchTime > selectedTime || (batchTime === selectedTime && batchRows.length > selectedRows.length)) {
+      selectedBatchId = batchId === "unbatched" ? "" : batchId;
+      selectedRows = batchRows;
+      selectedTime = batchTime;
+    }
+  });
+
+  return { batchId: selectedBatchId, rows: selectedRows };
+}
+
+function uniqueCount(rows: DataRow[], key: string) {
+  const values = new Set(rows.map((row) => textValue(row, key)).filter(Boolean));
+  return values.size || rows.length;
+}
+
+function latestTimestamp(rows: DataRow[]) {
+  return rows
+    .map((row) => textValue(row, "updated_at") || textValue(row, "created_at"))
+    .filter(Boolean)
+    .sort()
+    .at(-1) ?? "";
+}
+
+function getDataStatusClass(status: DataStatus) {
   if (status === "Ready") return "healthy";
   if (status === "Partial") return "watch";
   if (status === "Needs Review") return "at-risk";
   return "neutral";
 }
 
+function getApprovalStatusClass(status: ApprovalStatus) {
+  if (status === "Approved") return "healthy";
+  if (status === "Submitted") return "watch";
+  if (status === "Changes Requested") return "at-risk";
+  return "neutral";
+}
+
+function getActivationStatusClass(status: ActivationStatus) {
+  if (status === "Active" || status === "Ready for Activation") return "healthy";
+  if (status === "Under Review" || status === "Data Upload in Progress") return "watch";
+  if (status === "Validation Required" || status === "Changes Requested") {
+    return "at-risk";
+  }
+  return "neutral";
+}
+
+function isMissingTableError(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("does not exist") ||
+    normalized.includes("could not find the table") ||
+    normalized.includes("schema cache") ||
+    normalized.includes("pgrst205")
+  );
+}
+
+function defaultLayer(input: {
+  id: string;
+  title: string;
+  description: string;
+  route: string;
+  sourceTable: string;
+  countLabel: string;
+  owner: string;
+  metrics: LayerMetric[];
+}): LayerCard {
+  return {
+    ...input,
+    status: "Not Started",
+    countValue: "0",
+    batchId: "",
+    batchName: "No batch loaded",
+    updatedAt: "",
+    mandatory: true,
+    issues: ["No migration batch has been loaded."],
+    approvalStatus: "Draft",
+    makerName: "Unassigned",
+    checkerName: "Unassigned",
+    submittedAt: "",
+    reviewedAt: "",
+    reviewComment: "",
+  };
+}
+
 const defaultLayers: LayerCard[] = [
-  {
+  defaultLayer({
     id: "investor",
     title: "Investor Data",
-    shortTitle: "Investor",
     description:
-      "Investor master, commitments, KYC status, capital accounts, contacts and investor financial records.",
+      "Investor master, commitments, KYC, bank status and investor financial records.",
     route: "/investor-import",
-    status: "Not Started",
+    sourceTable: "investor_import_batches",
     countLabel: "Investors",
-    countValue: "0",
-    batchName: "No batch loaded",
-    requiredFor: [
-      "Investor Portal",
-      "Capital Call",
-      "Distribution",
-      "Investor Reporting",
-    ],
-    dashboardImpact: [
-      "Finance Head Workspace",
-      "Investor Portal",
-      "Investor Relations",
-      "Managing Partner Dashboard",
-    ],
-    workflowImpact: [
-      "Capital Call Generator",
-      "Distribution Waterfall",
-      "Document Studio",
-      "Investor Reporting",
-    ],
+    owner: "Investor Relations",
     metrics: [
       { label: "Commitment", value: "₹0.00 Cr" },
-      { label: "Status", value: "Not started" },
+      { label: "Source status", value: "Not started" },
     ],
-  },
-  {
+  }),
+  defaultLayer({
     id: "pdf",
-    title: "PDF Dump & Intelligence",
-    shortTitle: "PDF Dump",
+    title: "PDF Intelligence",
     description:
-      "Historical PDFs, investor documents, notices, statements, fund reports and PDF classification review.",
+      "PDF extraction, investor matching, document classification and deficiency tracking.",
     route: "/migration/pdf-intelligence",
-    status: "Not Started",
+    sourceTable: "pdf_intelligence_batches",
     countLabel: "PDFs",
-    countValue: "0",
-    batchName: "No batch loaded",
-    requiredFor: [
-      "Data Room",
-      "Document Studio",
-      "Investor Portal",
-      "LP Deck Support",
-    ],
-    dashboardImpact: [
-      "Investor Relations",
-      "Investor Portal",
-      "Compliance View",
-      "Managing Partner Dashboard",
-    ],
-    workflowImpact: [
-      "PDF Classification",
-      "Investor Document Folders",
-      "Data Room Publishing",
-      "Document Evidence Pack",
-    ],
+    owner: "Investor Relations",
     metrics: [
       { label: "Ready", value: "0" },
-      { label: "Review", value: "0" },
+      { label: "Review / unmatched", value: "0" },
     ],
-  },
-  {
+  }),
+  defaultLayer({
     id: "portfolio",
     title: "Portfolio Data",
-    shortTitle: "Portfolio",
     description:
-      "Portfolio companies, borrowers, valuation records, repayment schedules, risk signals and exit assumptions.",
+      "Portfolio companies, valuations, repayment schedules, risk and exit visibility.",
     route: "/migration/portfolio-data",
-    status: "Not Started",
+    sourceTable: "portfolio_data_migration_batches",
     countLabel: "Investments",
-    countValue: "0",
-    batchName: "No batch loaded",
-    requiredFor: [
-      "Portfolio Intelligence",
-      "Investment Team",
-      "Managing Partner",
-      "Exit Strategy",
-    ],
-    dashboardImpact: [
-      "Investment Team Workspace",
-      "Managing Partner Dashboard",
-      "Portfolio Intelligence",
-      "Fundraising Workspace",
-    ],
-    workflowImpact: [
-      "Exit Strategy",
-      "LP Deck Generator",
-      "Debt LMS",
-      "Portfolio Risk Notes",
-    ],
+    owner: "Investment Team",
     metrics: [
       { label: "Current value", value: "₹0.00 Cr" },
       { label: "MOIC", value: "0.00x" },
     ],
-  },
-  {
+  }),
+  defaultLayer({
     id: "fund",
     title: "Fund Data",
-    shortTitle: "Fund",
     description:
-      "Fund master, scheme details, corpus, commitments, fees, carry, hurdle, NAV support and operating metrics.",
+      "Fund structure, close dates, corpus, fees, carry, hurdle, waterfall and parties.",
     route: "/migration/fund-data",
-    status: "Not Started",
+    sourceTable: "fund_data_migration_batches",
     countLabel: "Funds",
-    countValue: "0",
-    batchName: "No batch loaded",
-    requiredFor: [
-      "Managing Partner",
-      "Finance Head",
-      "IRR / DPI / TVPI",
-      "NAV Support",
-    ],
-    dashboardImpact: [
-      "Managing Partner Dashboard",
-      "Finance Head Workspace",
-      "Investor Portal",
-      "Fundraising Workspace",
-    ],
-    workflowImpact: [
-      "Capital Call",
-      "Distribution",
-      "Fee & Carry Engine",
-      "LP Deck Generator",
-    ],
+    owner: "Finance Team",
     metrics: [
       { label: "Committed", value: "₹0.00 Cr" },
       { label: "Carry", value: "0%" },
     ],
-  },
-  {
+  }),
+  defaultLayer({
     id: "compliance",
     title: "Compliance Data",
-    shortTitle: "Compliance",
     description:
-      "Compliance calendar, filing history, evidence status, Form 64C/64D, QCR/TCR and regulatory exceptions.",
+      "Regulatory filings, tax evidence, audit trail, valuation support and exceptions.",
     route: "/migration/compliance-data",
-    status: "Not Started",
+    sourceTable: "compliance_data_migration_batches",
     countLabel: "Items",
-    countValue: "0",
-    batchName: "No batch loaded",
-    requiredFor: [
-      "Compliance Dashboard",
-      "Audit Workflow",
-      "Knowledge Hub",
-      "Evidence Pack",
-    ],
-    dashboardImpact: [
-      "Compliance Officer View",
-      "Managing Partner Dashboard",
-      "Finance Head Workspace",
-      "Audit Workflow",
-    ],
-    workflowImpact: [
-      "Compliance Tracker",
-      "Knowledge Hub",
-      "Notice Generator",
-      "Evidence Review",
-    ],
+    owner: "Compliance Team",
     metrics: [
       { label: "Evidence", value: "0" },
       { label: "High risk", value: "0" },
     ],
-  },
+  }),
 ];
 
-const defaultReviews: Record<string, ActivationReview> = defaultLayers.reduce(
-  (accumulator, layer) => {
-    accumulator[layer.id] = {
-      layerId: layer.id,
-      layerTitle: layer.title,
-      makerStatus: "Not Submitted",
-      checkerStatus: "Pending",
-      activationStatus: "Inactive",
-      makerNote: "",
-      checkerNote: "",
-      submittedAt: "",
-      approvedAt: "",
-      activatedAt: "",
-    };
+function deriveActivationStatus(layers: LayerCard[]): ActivationStatus {
+  const loadedCount = layers.filter((layer) => layer.batchId).length;
+  const hasChangesRequested = layers.some(
+    (layer) => layer.approvalStatus === "Changes Requested"
+  );
+  const hasValidationIssue = layers.some(
+    (layer) => layer.status === "Needs Review" || layer.status === "Partial"
+  );
+  const submittedCount = layers.filter(
+    (layer) => layer.approvalStatus === "Submitted"
+  ).length;
+  const allApproved = layers.every(
+    (layer) =>
+      !layer.mandatory ||
+      (layer.status === "Ready" && layer.approvalStatus === "Approved")
+  );
 
-    return accumulator;
-  },
-  {} as Record<string, ActivationReview>
-);
-
-const dashboardImpactMap = [
-  {
-    title: "Managing Partner Dashboard",
-    href: "/managing-partner-ai",
-    layers: ["fund", "portfolio", "investor", "compliance"],
-    output:
-      "IRR, DPI, TVPI, dry powder, deployment, portfolio movement, exit visibility and LP narrative readiness.",
-  },
-  {
-    title: "Finance Head Workspace",
-    href: "/finance-head-ai",
-    layers: ["fund", "investor", "compliance"],
-    output:
-      "Capital calls, distributions, notices, investor statements, finance queues and approval actions.",
-  },
-  {
-    title: "Investment Team Workspace",
-    href: "/investment-team-ai",
-    layers: ["portfolio", "fund"],
-    output:
-      "Portfolio movement, valuation updates, repayment risk, follow-on watchlist and exit readiness.",
-  },
-  {
-    title: "Compliance Officer View",
-    href: "/compliance-ai",
-    layers: ["compliance", "fund", "pdf"],
-    output:
-      "Filing calendar, evidence gaps, circular impact, QCR/TCR and Form 64C/64D readiness.",
-  },
-  {
-    title: "IR, Fundraising & Data Room",
-    href: "/data-room",
-    layers: ["pdf", "investor", "fund", "portfolio"],
-    output:
-      "LP pipeline, DDQs, fundraising decks, investor files, data room readiness and engagement tracking.",
-  },
-  {
-    title: "Investor Portal",
-    href: "/investor-portal",
-    layers: ["investor", "pdf", "fund"],
-    output:
-      "Investor-specific statements, notices, reports, capital account, fund updates and approved documents.",
-  },
-];
-
-const workflowImpactMap = [
-  {
-    title: "Capital Call Generator",
-    href: "/capital-call",
-    layers: ["investor", "fund"],
-  },
-  {
-    title: "Distribution Waterfall",
-    href: "/distribution-waterfall",
-    layers: ["investor", "fund"],
-  },
-  {
-    title: "Document Studio",
-    href: "/document-studio",
-    layers: ["investor", "pdf", "fund", "compliance"],
-  },
-  {
-    title: "Debt LMS",
-    href: "/debt-lms",
-    layers: ["portfolio", "fund"],
-  },
-  {
-    title: "Bank MIS",
-    href: "/bank-reconciliation",
-    layers: ["fund", "investor"],
-  },
-  {
-    title: "Knowledge Hub",
-    href: "/knowledge-hub",
-    layers: ["compliance"],
-  },
-  {
-    title: "Activity Engine",
-    href: "/activity-engine",
-    layers: ["investor", "pdf", "portfolio", "fund", "compliance"],
-  },
-  {
-    title: "Stakeholder Launch",
-    href: "/migration/stakeholder-launch",
-    layers: ["investor", "pdf", "portfolio", "fund", "compliance"],
-  },
-];
-
-function mapReview(row: DataRow): ActivationReview {
-  return {
-    layerId: safeString(row.layer_id),
-    layerTitle: safeString(row.layer_title),
-    makerStatus: safeString(row.maker_status, "Not Submitted") as MakerStatus,
-    checkerStatus: safeString(row.checker_status, "Pending") as CheckerStatus,
-    activationStatus: safeString(
-      row.activation_status,
-      "Inactive"
-    ) as ActivationStatus,
-    makerNote: safeString(row.maker_note),
-    checkerNote: safeString(row.checker_note),
-    submittedAt: safeString(row.submitted_at),
-    approvedAt: safeString(row.approved_at),
-    activatedAt: safeString(row.activated_at),
-  };
-}
-
-function mapEvent(row: DataRow): ActivationEvent {
-  return {
-    id: safeString(row.id, crypto.randomUUID()),
-    eventType: safeString(row.event_type),
-    layerId: safeString(row.layer_id),
-    layerTitle: safeString(row.layer_title),
-    eventTitle: safeString(row.event_title),
-    eventDescription: safeString(row.event_description),
-    actorName: safeString(row.actor_name, "VENTIQ Admin"),
-    createdAt: safeString(row.created_at),
-  };
+  if (allApproved) return "Ready for Activation";
+  if (hasChangesRequested) return "Changes Requested";
+  if (submittedCount > 0) return "Under Review";
+  if (hasValidationIssue) return "Validation Required";
+  if (loadedCount > 0) return "Data Upload in Progress";
+  return "Setup Not Started";
 }
 
 export default function DataActivationDashboardPage() {
+  const {
+    activeFundName,
+    setActiveFundName,
+    isReady: fundContextReady,
+  } = useActiveFund(DEFAULT_FUND_NAME);
+  const [fundOptions, setFundOptions] = useState<string[]>([DEFAULT_FUND_NAME]);
   const [layers, setLayers] = useState<LayerCard[]>(defaultLayers);
-  const [reviews, setReviews] =
-    useState<Record<string, ActivationReview>>(defaultReviews);
-  const [events, setEvents] = useState<ActivationEvent[]>([]);
   const [loading, setLoading] = useState(false);
-  const [actionLoading, setActionLoading] = useState("");
+  const [actionLoadingId, setActionLoadingId] = useState("");
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "warning" | "error">(
+    "success"
+  );
+  const [workflowRole, setWorkflowRole] = useState<WorkflowRole>("Maker");
+  const [workflowConfigured, setWorkflowConfigured] = useState(true);
+  const [persistedActivation, setPersistedActivation] = useState<ActivationRow | null>(
+    null
+  );
 
-  async function addActivationEvent(
-    eventType: string,
-    layer: LayerCard | null,
-    title: string,
-    description: string
-  ) {
-    const eventPayload = {
-      event_type: eventType,
-      layer_id: layer?.id || null,
-      layer_title: layer?.title || null,
-      event_title: title,
-      event_description: description,
-      actor_name: "VENTIQ Admin",
-    };
+  const setNotice = useCallback(
+    (text: string, tone: "success" | "warning" | "error" = "success") => {
+      setMessage(text);
+      setMessageTone(tone);
+    },
+    []
+  );
 
-    const localEvent: ActivationEvent = {
-      id: crypto.randomUUID(),
-      eventType,
-      layerId: layer?.id || "",
-      layerTitle: layer?.title || "",
-      eventTitle: title,
-      eventDescription: description,
-      actorName: "VENTIQ Admin",
-      createdAt: new Date().toISOString(),
-    };
+  const loadFundOptions = useCallback(async () => {
+    const client = supabase;
+    if (!isSupabaseConfigured || !client) return;
 
-    setEvents((currentEvents) => [localEvent, ...currentEvents].slice(0, 8));
+    const { data, error } = await client
+      .from("fund_master")
+      .select("fund_name")
+      .not("fund_name", "is", null);
 
-    if (!isSupabaseConfigured || !supabase) return;
+    if (error) return;
 
-        await supabase.from("migration_activation_events").insert(eventPayload);
+    const names = Array.from(
+      new Set(
+        ((data ?? []) as DataRow[])
+          .map((row) => textValue(row, "fund_name"))
+          .filter(Boolean)
+      )
+    ).sort((first, second) => first.localeCompare(second));
 
-    await supabase.from("ventiq_enterprise_audit_logs").insert({
-      source_module: "Migration Activation",
-      linked_record_id: layer?.id || "fund-activation",
-      linked_record_type: layer ? "Migration Data Layer" : "Fund Activation",
-      event_type: eventType,
-      event_title: title,
-      event_description: description,
-      actor_name: "VENTIQ Admin",
-      actor_email: "admin@useventiq.com",
-      actor_role:
-        eventType === "Maker Submitted"
-          ? "Maker"
-          : eventType === "Checker Approved" || eventType === "Checker Rejected"
-            ? "Checker"
-            : "Fund Admin",
-      event_status: "Recorded",
-      risk_level:
-        eventType === "Checker Rejected"
-          ? "High"
-          : eventType === "Fund Activated"
-            ? "High"
-            : "Medium",
-    });
-  }
+    const nextOptions = names.length > 0 ? names : [DEFAULT_FUND_NAME];
+    setFundOptions(nextOptions);
 
-  async function loadActivationSnapshot() {
+    if (!nextOptions.includes(activeFundName)) {
+      setActiveFundName(nextOptions[0]);
+    }
+  }, [activeFundName, setActiveFundName]);
+
+  const loadActivationSnapshot = useCallback(async () => {
     const client = supabase;
 
     if (!isSupabaseConfigured || !client) {
-      setMessage("Supabase is not configured. Showing sample activation layer.");
+      setNotice("Supabase is not configured. Add the project credentials in .env.local.", "error");
       return;
     }
+
+    if (!fundContextReady || !activeFundName) return;
 
     setLoading(true);
-    setMessage("Loading migration readiness from Supabase...");
+    setNotice(`Loading ${activeFundName} readiness, approvals and activation status...`, "warning");
 
     try {
-      const nextLayers = [...defaultLayers];
+      let workflowAvailable = true;
 
-      const { data: investorBatch } = await client
-        .from("investor_import_batches")
-        .select("id, batch_name, total_records, total_commitment, status")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const nextLayers = defaultLayers.map((layer) => ({
+        ...layer,
+        issues: [...layer.issues],
+        metrics: layer.metrics.map((metric) => ({ ...metric })),
+      }));
 
-      if (investorBatch) {
-        const totalRecords = Number(investorBatch.total_records ?? 0);
-        const totalCommitment = Number(investorBatch.total_commitment ?? 0);
+      const [
+        investorRowsResult,
+        commitmentRowsResult,
+        pdfRowsResult,
+        portfolioRowsResult,
+        fundRowsResult,
+        complianceRowsResult,
+      ] = await Promise.all([
+        client.from("investor_master").select("*").eq("fund_name", activeFundName),
+        client.from("fund_commitments").select("*").eq("fund_name", activeFundName),
+        client.from("pdf_intelligence_documents").select("*").eq("fund_name", activeFundName),
+        client.from("portfolio_investments").select("*").eq("fund_name", activeFundName),
+        client.from("fund_master").select("*").eq("fund_name", activeFundName),
+        client.from("compliance_items").select("*").eq("fund_name", activeFundName),
+      ]);
 
-        nextLayers[0] = {
-          ...nextLayers[0],
-          status: totalRecords > 0 ? "Ready" : "Partial",
-          countValue: String(totalRecords),
-          batchName: investorBatch.batch_name ?? "Latest investor batch",
-          metrics: [
-            { label: "Commitment", value: formatCr(totalCommitment) },
-            { label: "Status", value: investorBatch.status ?? "published" },
-          ],
-        };
+      const sourceErrors = [
+        investorRowsResult.error,
+        commitmentRowsResult.error,
+        pdfRowsResult.error,
+        portfolioRowsResult.error,
+        fundRowsResult.error,
+        complianceRowsResult.error,
+      ].filter(Boolean);
+
+      if (sourceErrors.length > 0) throw sourceErrors[0];
+
+      const allInvestorRows = (investorRowsResult.data ?? []) as DataRow[];
+      const allCommitmentRows = (commitmentRowsResult.data ?? []) as DataRow[];
+      const allPdfRows = (pdfRowsResult.data ?? []) as DataRow[];
+      const allPortfolioRows = (portfolioRowsResult.data ?? []) as DataRow[];
+      const allFundRows = (fundRowsResult.data ?? []) as DataRow[];
+      const allComplianceRows = (complianceRowsResult.data ?? []) as DataRow[];
+
+      const investorBatch = latestBatchRows(
+        allCommitmentRows.length > 0 ? allCommitmentRows : allInvestorRows
+      );
+      const investorRows = investorBatch.batchId
+        ? allInvestorRows.filter((row) => textValue(row, "batch_id") === investorBatch.batchId)
+        : allInvestorRows;
+      const commitmentRows = investorBatch.batchId
+        ? allCommitmentRows.filter((row) => textValue(row, "batch_id") === investorBatch.batchId)
+        : allCommitmentRows;
+
+      const pdfBatch = latestBatchRows(allPdfRows);
+      const portfolioBatch = latestBatchRows(allPortfolioRows);
+      const fundBatch = latestBatchRows(allFundRows);
+      const complianceBatch = latestBatchRows(allComplianceRows);
+
+      const batchNameRequests = await Promise.all([
+        investorBatch.batchId
+          ? client.from("investor_import_batches").select("batch_name").eq("id", investorBatch.batchId).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        pdfBatch.batchId
+          ? client.from("pdf_intelligence_batches").select("batch_name").eq("id", pdfBatch.batchId).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        portfolioBatch.batchId
+          ? client.from("portfolio_data_migration_batches").select("batch_name").eq("id", portfolioBatch.batchId).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        fundBatch.batchId
+          ? client.from("fund_data_migration_batches").select("batch_name").eq("id", fundBatch.batchId).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        complianceBatch.batchId
+          ? client.from("compliance_data_migration_batches").select("batch_name").eq("id", complianceBatch.batchId).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+      ]);
+
+      const batchName = (index: number, fallback: string) => {
+        const data = batchNameRequests[index].data as DataRow | null;
+        return data ? textValue(data, "batch_name", fallback) : fallback;
+      };
+
+      const investorCount = uniqueCount(investorRows, "investor_code");
+      const totalCommitment = commitmentRows.reduce(
+        (total, row) => total + numberValue(row, "commitment_amount"),
+        0
+      );
+      const investorIssues: string[] = [];
+      if (investorCount === 0) investorIssues.push("No investor records are available for this fund.");
+      if (totalCommitment <= 0) investorIssues.push("Fund commitment data is missing or zero.");
+
+      nextLayers[0] = {
+        ...nextLayers[0],
+        status:
+          investorCount === 0
+            ? "Not Started"
+            : investorIssues.length > 0
+              ? "Partial"
+              : "Ready",
+        countValue: String(investorCount),
+        batchId: investorBatch.batchId,
+        batchName: batchName(0, "Latest fund-scoped investor batch"),
+        updatedAt: latestTimestamp([...investorRows, ...commitmentRows]),
+        issues: investorIssues,
+        metrics: [
+          { label: "Commitment", value: formatCr(totalCommitment) },
+          { label: "Commitment rows", value: String(commitmentRows.length) },
+        ],
+      };
+
+      const pdfRows = pdfBatch.rows;
+      const readyPdfCount = pdfRows.filter(
+        (row) => textValue(row, "status").toLowerCase() === "ready"
+      ).length;
+      const reviewPdfCount = pdfRows.filter((row) => {
+        const status = textValue(row, "status").toLowerCase();
+        return status === "review" || status === "needs review";
+      }).length;
+      const unmatchedPdfCount = pdfRows.filter((row) => {
+        const status = textValue(row, "status").toLowerCase();
+        return status === "unmatched" || status === "failed";
+      }).length;
+      const pdfIssues: string[] = [];
+      if (pdfRows.length === 0) pdfIssues.push("No PDF intelligence records are available for this fund.");
+      if (reviewPdfCount > 0) pdfIssues.push(`${reviewPdfCount} PDF file(s) require review.`);
+      if (unmatchedPdfCount > 0) pdfIssues.push(`${unmatchedPdfCount} PDF file(s) are unmatched or failed.`);
+
+      nextLayers[1] = {
+        ...nextLayers[1],
+        status:
+          pdfRows.length === 0
+            ? "Not Started"
+            : reviewPdfCount > 0 || unmatchedPdfCount > 0
+              ? "Needs Review"
+              : "Ready",
+        countValue: String(pdfRows.length),
+        batchId: pdfBatch.batchId,
+        batchName: batchName(1, "Latest fund-scoped PDF batch"),
+        updatedAt: latestTimestamp(pdfRows),
+        issues: pdfIssues,
+        metrics: [
+          { label: "Ready", value: String(readyPdfCount) },
+          { label: "Review / unmatched", value: String(reviewPdfCount + unmatchedPdfCount) },
+        ],
+      };
+
+      const portfolioRows = portfolioBatch.rows;
+      const investmentCost = portfolioRows.reduce(
+        (total, row) => total + numberValue(row, "investment_cost"),
+        0
+      );
+      const currentValue = portfolioRows.reduce(
+        (total, row) => total + numberValue(row, "current_value"),
+        0
+      );
+      const missingPortfolioValueCount = portfolioRows.filter(
+        (row) =>
+          !textValue(row, "portfolio_company") ||
+          numberValue(row, "investment_cost") <= 0 ||
+          numberValue(row, "current_value") < 0
+      ).length;
+      const atRiskCount = portfolioRows.filter((row) => {
+        const status = textValue(row, "risk_status").toLowerCase();
+        return status.includes("risk") || status.includes("watch") || status.includes("breach");
+      }).length;
+      const portfolioIssues: string[] = [];
+      if (portfolioRows.length === 0) portfolioIssues.push("No portfolio records are available for this fund.");
+      if (missingPortfolioValueCount > 0) {
+        portfolioIssues.push(`${missingPortfolioValueCount} portfolio record(s) have incomplete core values.`);
       }
 
-      const { data: pdfBatch } = await client
-        .from("pdf_intelligence_batches")
-        .select(
-          "id, batch_name, total_files, ready_files, review_files, unmatched_files, status"
-        )
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      nextLayers[2] = {
+        ...nextLayers[2],
+        status:
+          portfolioRows.length === 0
+            ? "Not Started"
+            : portfolioIssues.length > 0
+              ? "Partial"
+              : "Ready",
+        countValue: String(portfolioRows.length),
+        batchId: portfolioBatch.batchId,
+        batchName: batchName(2, "Latest fund-scoped portfolio batch"),
+        updatedAt: latestTimestamp(portfolioRows),
+        issues: portfolioIssues,
+        metrics: [
+          { label: "Current value", value: formatCr(currentValue) },
+          {
+            label: "MOIC / risk",
+            value: `${investmentCost > 0 ? (currentValue / investmentCost).toFixed(2) : "0.00"}x · ${atRiskCount} watch`,
+          },
+        ],
+      };
 
-      if (pdfBatch) {
-        const totalFiles = Number(pdfBatch.total_files ?? 0);
-        const reviewFiles = Number(pdfBatch.review_files ?? 0);
-        const unmatchedFiles = Number(pdfBatch.unmatched_files ?? 0);
-
-        nextLayers[1] = {
-          ...nextLayers[1],
-          status:
-            totalFiles === 0
-              ? "Not Started"
-              : reviewFiles > 0 || unmatchedFiles > 0
-                ? "Needs Review"
-                : "Ready",
-          countValue: String(totalFiles),
-          batchName: pdfBatch.batch_name ?? "Latest PDF batch",
-          metrics: [
-            { label: "Ready", value: String(pdfBatch.ready_files ?? 0) },
-            {
-              label: "Review / unmatched",
-              value: String(reviewFiles + unmatchedFiles),
-            },
-          ],
-        };
+      const fundRows = fundBatch.rows;
+      const committedCapital = fundRows.reduce(
+        (total, row) => total + numberValue(row, "committed_capital"),
+        0
+      );
+      const averageCarry =
+        fundRows.length === 0
+          ? 0
+          : fundRows.reduce((total, row) => total + numberValue(row, "carry_rate"), 0) /
+            fundRows.length;
+      const fundIssues: string[] = [];
+      if (fundRows.length === 0) fundIssues.push("No fund master record is available for this fund.");
+      if (committedCapital <= 0) fundIssues.push("Committed capital is missing or zero.");
+      if (averageCarry < 0 || averageCarry > 100) {
+        fundIssues.push("Carry is outside the expected 0% to 100% range.");
       }
 
-      const { data: portfolioBatch } = await client
-        .from("portfolio_data_migration_batches")
-        .select(
-          "id, batch_name, total_records, current_portfolio_value, portfolio_moic, at_risk_count, status"
-        )
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      nextLayers[3] = {
+        ...nextLayers[3],
+        status:
+          fundRows.length === 0
+            ? "Not Started"
+            : fundIssues.length > 0
+              ? "Partial"
+              : "Ready",
+        countValue: String(fundRows.length),
+        batchId: fundBatch.batchId,
+        batchName: batchName(3, "Latest fund-scoped fund batch"),
+        updatedAt: latestTimestamp(fundRows),
+        issues: fundIssues,
+        metrics: [
+          { label: "Committed", value: formatCr(committedCapital) },
+          { label: "Carry", value: `${averageCarry.toFixed(0)}%` },
+        ],
+      };
 
-      if (portfolioBatch) {
-        const totalRecords = Number(portfolioBatch.total_records ?? 0);
-        const atRiskCount = Number(portfolioBatch.at_risk_count ?? 0);
-
-        nextLayers[2] = {
-          ...nextLayers[2],
-          status:
-            totalRecords === 0
-              ? "Not Started"
-              : atRiskCount > 0
-                ? "Partial"
-                : "Ready",
-          countValue: String(totalRecords),
-          batchName: portfolioBatch.batch_name ?? "Latest portfolio batch",
-          metrics: [
-            {
-              label: "Current value",
-              value: formatCr(Number(portfolioBatch.current_portfolio_value ?? 0)),
-            },
-            {
-              label: "MOIC",
-              value: `${Number(portfolioBatch.portfolio_moic ?? 0).toFixed(2)}x`,
-            },
-          ],
-        };
+      const complianceRows = complianceBatch.rows;
+      const evidenceCount = complianceRows.filter((row) => booleanValue(row, "evidence_available")).length;
+      const highRiskCount = complianceRows.filter(
+        (row) => textValue(row, "risk_level").toLowerCase() === "high"
+      ).length;
+      const missingEvidenceCount = Math.max(complianceRows.length - evidenceCount, 0);
+      const missingCoreComplianceCount = complianceRows.filter(
+        (row) => !textValue(row, "item_type") || !textValue(row, "due_date")
+      ).length;
+      const complianceIssues: string[] = [];
+      if (complianceRows.length === 0) complianceIssues.push("No compliance records are available for this fund.");
+      if (missingEvidenceCount > 0) {
+        complianceIssues.push(`${missingEvidenceCount} compliance item(s) do not have evidence.`);
+      }
+      if (missingCoreComplianceCount > 0) {
+        complianceIssues.push(`${missingCoreComplianceCount} compliance item(s) are missing type or due date.`);
       }
 
-      const { data: fundBatch } = await client
-        .from("fund_data_migration_batches")
-        .select(
-          "id, batch_name, total_funds, total_committed_capital, average_carry, status"
-        )
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      nextLayers[4] = {
+        ...nextLayers[4],
+        status:
+          complianceRows.length === 0
+            ? "Not Started"
+            : complianceIssues.length > 0
+              ? "Partial"
+              : "Ready",
+        countValue: String(complianceRows.length),
+        batchId: complianceBatch.batchId,
+        batchName: batchName(4, "Latest fund-scoped compliance batch"),
+        updatedAt: latestTimestamp(complianceRows),
+        issues: complianceIssues,
+        metrics: [
+          { label: "Evidence", value: `${evidenceCount}/${complianceRows.length}` },
+          { label: "High risk", value: String(highRiskCount) },
+        ],
+      };
 
-      if (fundBatch) {
-        const totalFunds = Number(fundBatch.total_funds ?? 0);
-
-        nextLayers[3] = {
-          ...nextLayers[3],
-          status: totalFunds > 0 ? "Ready" : "Not Started",
-          countValue: String(totalFunds),
-          batchName: fundBatch.batch_name ?? "Latest fund batch",
-          metrics: [
-            {
-              label: "Committed",
-              value: formatCr(Number(fundBatch.total_committed_capital ?? 0)),
-            },
-            {
-              label: "Carry",
-              value: `${Number(fundBatch.average_carry ?? 0).toFixed(0)}%`,
-            },
-          ],
-        };
-      }
-
-      const { data: complianceBatch } = await client
-        .from("compliance_data_migration_batches")
-        .select(
-          "id, batch_name, total_items, evidence_available_count, pending_review_count, high_risk_count, status"
-        )
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (complianceBatch) {
-        const totalItems = Number(complianceBatch.total_items ?? 0);
-        const pendingReview = Number(complianceBatch.pending_review_count ?? 0);
-        const highRisk = Number(complianceBatch.high_risk_count ?? 0);
-
-        nextLayers[4] = {
-          ...nextLayers[4],
-          status:
-            totalItems === 0
-              ? "Not Started"
-              : highRisk > 0
-                ? "Needs Review"
-                : pendingReview > 0
-                  ? "Partial"
-                  : "Ready",
-          countValue: String(totalItems),
-          batchName: complianceBatch.batch_name ?? "Latest compliance batch",
-          metrics: [
-            {
-              label: "Evidence",
-              value: String(complianceBatch.evidence_available_count ?? 0),
-            },
-            {
-              label: "High risk",
-              value: String(highRisk),
-            },
-          ],
-        };
-      }
-
-      const { data: reviewData, error: reviewError } = await client
-        .from("migration_activation_reviews")
+      const approvalResult = await client
+        .from("migration_data_approvals")
         .select("*")
-        .order("updated_at", { ascending: false });
+        .eq("fund_name", activeFundName);
 
-      if (reviewError) throw new Error(reviewError.message);
+      if (approvalResult.error) {
+        if (isMissingTableError(approvalResult.error.message)) {
+          workflowAvailable = false;
+          setWorkflowConfigured(false);
+        } else {
+          throw approvalResult.error;
+        }
+      } else {
+        setWorkflowConfigured(true);
+        const approvalRows = (approvalResult.data ?? []) as ApprovalRow[];
 
-      const nextReviews = { ...defaultReviews };
-      if (reviewData) {
-        (reviewData as DataRow[]).forEach((row) => {
-          const mappedReview = mapReview(row);
-          if (mappedReview.layerId) {
-            nextReviews[mappedReview.layerId] = mappedReview;
-          }
-        });
-      }
-
-      const { data: eventData } = await client
-        .from("migration_activation_events")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(8);
-
-      setLayers(nextLayers);
-      setReviews(nextReviews);
-      setEvents(eventData ? (eventData as DataRow[]).map(mapEvent) : []);
-      setMessage("Migration readiness and activation approvals loaded.");
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to load activation dashboard."
-      );
-    }
-
-    setLoading(false);
-  }
-
-  useEffect(() => {
-    loadActivationSnapshot();
-  }, []);
-
-  const readiness = useMemo(() => {
-    const readyCount = layers.filter((layer) => layer.status === "Ready").length;
-    const reviewCount = layers.filter(
-      (layer) => layer.status === "Partial" || layer.status === "Needs Review"
-    ).length;
-    const notStartedCount = layers.filter(
-      (layer) => layer.status === "Not Started"
-    ).length;
-
-    const approvedCount = layers.filter(
-      (layer) => reviews[layer.id]?.checkerStatus === "Approved"
-    ).length;
-
-    const activatedCount = layers.filter(
-      (layer) => reviews[layer.id]?.activationStatus === "Activated"
-    ).length;
-
-    const readinessScore = Math.round((readyCount / layers.length) * 100);
-    const approvalScore = Math.round((approvedCount / layers.length) * 100);
-    const activationScore = Math.round((activatedCount / layers.length) * 100);
-
-    return {
-      readyCount,
-      reviewCount,
-      notStartedCount,
-      approvedCount,
-      activatedCount,
-      readinessScore,
-      approvalScore,
-      activationScore,
-      canActivate:
-        layers.every((layer) => layer.status === "Ready") &&
-        layers.every((layer) => reviews[layer.id]?.checkerStatus === "Approved"),
-      hasActivated:
-        layers.length > 0 &&
-        layers.every(
-          (layer) => reviews[layer.id]?.activationStatus === "Activated"
-        ),
-    };
-  }, [layers, reviews]);
-
-  function isImpactReady(requiredLayers: string[]) {
-    return requiredLayers.every(
-      (layerId) => reviews[layerId]?.activationStatus === "Activated"
-    );
-  }
-
-  async function submitLayer(layer: LayerCard) {
-    if (layer.status === "Not Started") {
-      setMessage(`${layer.title} cannot be submitted because no data is loaded.`);
-      return;
-    }
-
-    setActionLoading(`submit-${layer.id}`);
-
-    const now = new Date().toISOString();
-
-    const payload = {
-      layer_id: layer.id,
-      layer_title: layer.title,
-      readiness_status: layer.status,
-      maker_status: "Submitted",
-      checker_status: "Pending",
-      activation_status: "Inactive",
-      maker_note: `${layer.title} submitted for checker review from Migration Activation.`,
-      submitted_at: now,
-      updated_at: now,
-    };
-
-    try {
-      if (isSupabaseConfigured && supabase) {
-        const { error } = await supabase
-          .from("migration_activation_reviews")
-          .upsert(payload, { onConflict: "layer_id" });
-
-        if (error) throw new Error(error.message);
-      }
-
-      setReviews((currentReviews) => ({
-        ...currentReviews,
-        [layer.id]: {
-          ...currentReviews[layer.id],
-          makerStatus: "Submitted",
-          checkerStatus: "Pending",
-          activationStatus: "Inactive",
-          makerNote: payload.maker_note,
-          submittedAt: now,
-        },
-      }));
-
-      await addActivationEvent(
-        "Maker Submitted",
-        layer,
-        `${layer.title} submitted`,
-        "Maker submitted this migration layer for checker approval."
-      );
-
-      setMessage(`${layer.title} submitted for checker approval.`);
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Unable to submit layer."
-      );
-    } finally {
-      setActionLoading("");
-    }
-  }
-
-  async function approveLayer(layer: LayerCard) {
-    const review = reviews[layer.id];
-
-    if (review?.makerStatus !== "Submitted") {
-      setMessage(`${layer.title} must be submitted by maker before approval.`);
-      return;
-    }
-
-    setActionLoading(`approve-${layer.id}`);
-
-    const now = new Date().toISOString();
-
-    const payload = {
-      checker_status: "Approved",
-      activation_status: "Ready for Activation",
-      checker_note: `${layer.title} approved by checker. Ready for fund activation.`,
-      approved_at: now,
-      rejected_at: null,
-      updated_at: now,
-    };
-
-    try {
-      if (isSupabaseConfigured && supabase) {
-        const { error } = await supabase
-          .from("migration_activation_reviews")
-          .update(payload)
-          .eq("layer_id", layer.id);
-
-        if (error) throw new Error(error.message);
-      }
-
-      setReviews((currentReviews) => ({
-        ...currentReviews,
-        [layer.id]: {
-          ...currentReviews[layer.id],
-          checkerStatus: "Approved",
-          activationStatus: "Ready for Activation",
-          checkerNote: payload.checker_note,
-          approvedAt: now,
-        },
-      }));
-
-      await addActivationEvent(
-        "Checker Approved",
-        layer,
-        `${layer.title} approved`,
-        "Checker approved this migration layer for fund activation."
-      );
-
-      setMessage(`${layer.title} approved. It is ready for activation.`);
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Unable to approve layer."
-      );
-    } finally {
-      setActionLoading("");
-    }
-  }
-
-  async function rejectLayer(layer: LayerCard) {
-    setActionLoading(`reject-${layer.id}`);
-
-    const now = new Date().toISOString();
-
-    const payload = {
-      checker_status: "Rejected",
-      activation_status: "Inactive",
-      checker_note: `${layer.title} rejected. Review data gaps before resubmission.`,
-      rejected_at: now,
-      updated_at: now,
-    };
-
-    try {
-      if (isSupabaseConfigured && supabase) {
-        const { error } = await supabase
-          .from("migration_activation_reviews")
-          .update(payload)
-          .eq("layer_id", layer.id);
-
-        if (error) throw new Error(error.message);
-      }
-
-      setReviews((currentReviews) => ({
-        ...currentReviews,
-        [layer.id]: {
-          ...currentReviews[layer.id],
-          checkerStatus: "Rejected",
-          activationStatus: "Inactive",
-          checkerNote: payload.checker_note,
-        },
-      }));
-
-      await addActivationEvent(
-        "Checker Rejected",
-        layer,
-        `${layer.title} rejected`,
-        "Checker rejected this migration layer and requested review."
-      );
-
-      setMessage(`${layer.title} rejected. Maker should review the data.`);
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Unable to reject layer."
-      );
-    } finally {
-      setActionLoading("");
-    }
-  }
-
-  async function activateFundData() {
-    if (!readiness.canActivate) {
-      setMessage(
-        "Fund cannot be activated yet. All five layers must be Ready and Checker Approved."
-      );
-      return;
-    }
-
-    setActionLoading("activate-fund");
-
-    const now = new Date().toISOString();
-
-    try {
-      if (isSupabaseConfigured && supabase) {
-        const { error } = await supabase
-          .from("migration_activation_reviews")
-          .update({
-            activation_status: "Activated",
-            activated_at: now,
-            updated_at: now,
-          })
-          .in(
-            "layer_id",
-            layers.map((layer) => layer.id)
+        for (const layer of nextLayers) {
+          const matchingApproval = approvalRows.find(
+            (approval) =>
+              approval.layer_key === layer.id &&
+              String(approval.source_batch_id ?? "") === layer.batchId
           );
 
-        if (error) throw new Error(error.message);
+          if (!matchingApproval) continue;
+
+          layer.approvalStatus = (matchingApproval.status as ApprovalStatus) ?? "Draft";
+          layer.makerName = matchingApproval.maker_name ?? "Unassigned";
+          layer.checkerName = matchingApproval.checker_name ?? "Unassigned";
+          layer.submittedAt = matchingApproval.submitted_at ?? "";
+          layer.reviewedAt = matchingApproval.reviewed_at ?? "";
+          layer.reviewComment = matchingApproval.review_comment ?? "";
+        }
       }
 
-      setReviews((currentReviews) => {
-        const nextReviews = { ...currentReviews };
+      const activationResult = await client
+        .from("fund_activation_status")
+        .select("*")
+        .eq("fund_name", activeFundName)
+        .maybeSingle();
 
-        layers.forEach((layer) => {
-          nextReviews[layer.id] = {
-            ...nextReviews[layer.id],
-            activationStatus: "Activated",
-            activatedAt: now,
-          };
-        });
+      if (activationResult.error) {
+        if (!isMissingTableError(activationResult.error.message)) {
+          throw activationResult.error;
+        }
+        workflowAvailable = false;
+        setWorkflowConfigured(false);
+        setPersistedActivation(null);
+      } else {
+        setPersistedActivation((activationResult.data as ActivationRow | null) ?? null);
+      }
 
-        return nextReviews;
-      });
-
-      await addActivationEvent(
-        "Fund Activated",
-        null,
-        "Fund data activated",
-        "All five migration layers were activated. Stakeholder dashboards and workflow engines can now consume approved data."
-      );
-
-      setMessage(
-        "Fund activated. Approved data can now flow to stakeholder dashboards and workflow engines."
+      setLayers(nextLayers);
+      setNotice(
+        workflowAvailable
+          ? `${activeFundName} data readiness and maker-checker status loaded.`
+          : "Migration data loaded. Apply the activation workflow SQL to enable approvals and fund activation.",
+        workflowAvailable ? "success" : "warning"
       );
     } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Unable to activate fund."
-      );
+      const errorMessage = error instanceof Error ? error.message : "Unable to load readiness.";
+      setNotice(errorMessage, "error");
     } finally {
-      setActionLoading("");
+      setLoading(false);
+    }
+  }, [activeFundName, fundContextReady, setNotice]);
+
+  useEffect(() => {
+    if (!fundContextReady) return;
+    void loadFundOptions();
+  }, [fundContextReady, loadFundOptions]);
+
+  useEffect(() => {
+    if (!fundContextReady) return;
+    void loadActivationSnapshot();
+  }, [fundContextReady, loadActivationSnapshot]);
+
+  const readiness = useMemo(() => {
+    const mandatoryLayers = layers.filter((layer) => layer.mandatory);
+    const dataReadyCount = mandatoryLayers.filter((layer) => layer.status === "Ready").length;
+    const submittedCount = mandatoryLayers.filter(
+      (layer) => layer.approvalStatus === "Submitted"
+    ).length;
+    const approvedCount = mandatoryLayers.filter(
+      (layer) => layer.status === "Ready" && layer.approvalStatus === "Approved"
+    ).length;
+    const issueCount = mandatoryLayers.reduce((total, layer) => total + layer.issues.length, 0);
+    const readinessScore =
+      mandatoryLayers.length === 0
+        ? 0
+        : Math.round((approvedCount / mandatoryLayers.length) * 100);
+    const derivedStatus = deriveActivationStatus(layers);
+    const activationStatus =
+      persistedActivation?.status === "Active"
+        ? "Active"
+        : derivedStatus;
+    const canActivate =
+      workflowConfigured &&
+      activationStatus !== "Active" &&
+      mandatoryLayers.every(
+        (layer) => layer.status === "Ready" && layer.approvalStatus === "Approved"
+      );
+
+    return {
+      mandatoryCount: mandatoryLayers.length,
+      dataReadyCount,
+      submittedCount,
+      approvedCount,
+      issueCount,
+      readinessScore,
+      activationStatus: activationStatus as ActivationStatus,
+      canActivate,
+    };
+  }, [layers, persistedActivation, workflowConfigured]);
+
+  async function writeEvent(input: {
+    eventType: string;
+    layerKey?: string;
+    actorName: string;
+    actorRole: WorkflowRole | "System";
+    description: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    if (!supabase || !workflowConfigured) return;
+
+    const { error } = await supabase.from("migration_activation_events").insert({
+      fund_name: activeFundName,
+      event_type: input.eventType,
+      layer_key: input.layerKey ?? null,
+      actor_name: input.actorName,
+      actor_role: input.actorRole,
+      description: input.description,
+      metadata: input.metadata ?? {},
+    });
+
+    if (error && !isMissingTableError(error.message)) throw error;
+  }
+
+  async function updateApproval(layer: LayerCard, nextStatus: ApprovalStatus) {
+    if (!supabase || !workflowConfigured) {
+      setNotice("Apply the activation workflow SQL before using maker-checker actions.", "warning");
+      return;
+    }
+
+    if (!layer.batchId) {
+      setNotice(`Load a ${layer.title} batch before starting approval.`, "warning");
+      return;
+    }
+
+    if (nextStatus === "Submitted" && layer.status !== "Ready") {
+      setNotice(`Resolve the validation issues in ${layer.title} before submitting it.`, "warning");
+      return;
+    }
+
+    if ((nextStatus === "Approved" || nextStatus === "Changes Requested") && workflowRole !== "Checker") {
+      setNotice("Switch to Checker view to review submitted data.", "warning");
+      return;
+    }
+
+    const loadingId = `${nextStatus}-${layer.id}`;
+    setActionLoadingId(loadingId);
+
+    try {
+      const now = new Date().toISOString();
+      const reviewComment =
+        nextStatus === "Changes Requested"
+          ? layer.issues[0] ?? "Checker requested corrections before activation."
+          : nextStatus === "Approved"
+            ? "Validated and approved for fund activation."
+            : null;
+
+      const payload = {
+        fund_name: activeFundName,
+        layer_key: layer.id,
+        layer_name: layer.title,
+        source_table: layer.sourceTable,
+        source_batch_id: layer.batchId,
+        source_batch_name: layer.batchName,
+        status: nextStatus,
+        owner_name: layer.owner,
+        maker_name: nextStatus === "Submitted" ? MAKER_NAME : layer.makerName,
+        checker_name:
+          nextStatus === "Approved" || nextStatus === "Changes Requested"
+            ? CHECKER_NAME
+            : null,
+        submitted_at: nextStatus === "Submitted" ? now : layer.submittedAt || null,
+        reviewed_at:
+          nextStatus === "Approved" || nextStatus === "Changes Requested" ? now : null,
+        review_comment: reviewComment,
+        validation_issues: layer.issues,
+        updated_at: now,
+      };
+
+      const { error } = await supabase
+        .from("migration_data_approvals")
+        .upsert(payload, {
+          onConflict: "fund_name,layer_key,source_batch_id",
+        });
+
+      if (error) throw error;
+
+      await writeEvent({
+        eventType:
+          nextStatus === "Submitted"
+            ? "DATASET_SUBMITTED"
+            : nextStatus === "Approved"
+              ? "DATASET_APPROVED"
+              : "CHANGES_REQUESTED",
+        layerKey: layer.id,
+        actorName: workflowRole === "Maker" ? MAKER_NAME : CHECKER_NAME,
+        actorRole: workflowRole,
+        description: `${layer.title} moved to ${nextStatus}.`,
+        metadata: {
+          batchId: layer.batchId,
+          batchName: layer.batchName,
+          reviewComment,
+        },
+      });
+
+      setNotice(`${layer.title} moved to ${nextStatus}.`, "success");
+      await loadActivationSnapshot();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Approval update failed.";
+      setNotice(errorMessage, "error");
+    } finally {
+      setActionLoadingId("");
+    }
+  }
+
+  async function activateFund() {
+    if (!supabase || !workflowConfigured) {
+      setNotice("Apply the activation workflow SQL before activating the fund.", "warning");
+      return;
+    }
+
+    if (!readiness.canActivate) {
+      setNotice("All mandatory data layers must be validated and checker-approved first.", "warning");
+      return;
+    }
+
+    setActionLoadingId("activate-fund");
+
+    try {
+      const now = new Date().toISOString();
+      const approvedBatchMap = Object.fromEntries(
+        layers.map((layer) => [layer.id, layer.batchId])
+      );
+
+      const { error } = await supabase.from("fund_activation_status").upsert(
+        {
+          fund_name: activeFundName,
+          status: "Active",
+          readiness_score: 100,
+          activated_at: now,
+          activated_by: CHECKER_NAME,
+          approved_batch_map: approvedBatchMap,
+          updated_at: now,
+        },
+        { onConflict: "fund_name" }
+      );
+
+      if (error) throw error;
+
+      await writeEvent({
+        eventType: "FUND_ACTIVATED",
+        actorName: CHECKER_NAME,
+        actorRole: "Checker",
+        description: `${activeFundName} was activated across VENTIQ.`,
+        metadata: { approvedBatchMap, readinessScore: 100 },
+      });
+
+      setNotice("Fund activated. Approved data can now power VENTIQ dashboards and workflows.", "success");
+      await loadActivationSnapshot();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Fund activation failed.";
+      setNotice(errorMessage, "error");
+    } finally {
+      setActionLoadingId("");
     }
   }
 
   return (
     <main className="activation-page">
-      <style>{`
-        .activation-page {
-          min-height: 100vh;
-          background:
-            radial-gradient(circle at top left, rgba(37, 99, 235, 0.22), transparent 34rem),
-            radial-gradient(circle at top right, rgba(245, 200, 91, 0.14), transparent 32rem),
-            #070d1a;
-          color: #f8fbff;
-          font-family:
-            Inter,
-            ui-sans-serif,
-            system-ui,
-            -apple-system,
-            BlinkMacSystemFont,
-            "Segoe UI",
-            sans-serif;
-          padding: 32px;
-        }
-
-        .activation-shell {
-          max-width: 1280px;
-          margin: 0 auto;
-        }
-
-        .activation-nav {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 18px;
-          margin-bottom: 24px;
-        }
-
-        .activation-brand {
-          text-decoration: none;
-          color: #ffffff;
-          font-weight: 950;
-          letter-spacing: 0.16em;
-        }
-
-        .activation-nav-links {
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-          justify-content: flex-end;
-        }
-
-        .activation-hero,
-        .activation-card,
-        .activation-panel,
-        .activation-layer-card,
-        .activation-kpi-card,
-        .impact-card,
-        .event-card {
-          border: 1px solid rgba(147, 197, 253, 0.16);
-          background: rgba(15, 23, 42, 0.74);
-          box-shadow: 0 22px 70px rgba(0, 0, 0, 0.2);
-        }
-
-        .activation-hero {
-          border-radius: 34px;
-          padding: 34px;
-          display: grid;
-          grid-template-columns: 1.25fr 0.75fr;
-          gap: 22px;
-          align-items: stretch;
-          margin-bottom: 18px;
-        }
-
-        .activation-eyebrow {
-          color: #f5c85b;
-          text-transform: uppercase;
-          letter-spacing: 0.16em;
-          font-size: 12px;
-          font-weight: 950;
-          margin: 0 0 14px;
-        }
-
-        .activation-hero h1 {
-          margin: 0;
-          font-size: clamp(44px, 6vw, 76px);
-          line-height: 0.96;
-          letter-spacing: -0.06em;
-        }
-
-        .activation-hero p {
-          margin: 20px 0 0;
-          color: #c7d7f4;
-          font-size: 18px;
-          line-height: 1.65;
-          max-width: 850px;
-        }
-
-        .activation-actions {
-          display: flex;
-          gap: 12px;
-          flex-wrap: wrap;
-          margin-top: 24px;
-        }
-
-        .activation-primary-button,
-        .activation-secondary-button,
-        .activation-small-button,
-        .activation-danger-button {
-          border-radius: 999px;
-          border: 0;
-          text-decoration: none;
-          cursor: pointer;
-          font-family: inherit;
-          font-weight: 950;
-          white-space: nowrap;
-        }
-
-        .activation-primary-button {
-          background: #f5c85b;
-          color: #07101f;
-          padding: 13px 18px;
-          font-size: 14px;
-        }
-
-        .activation-secondary-button {
-          background: rgba(15, 23, 42, 0.72);
-          color: #dbeafe;
-          border: 1px solid rgba(147, 197, 253, 0.24);
-          padding: 13px 18px;
-          font-size: 14px;
-        }
-
-        .activation-small-button,
-        .activation-danger-button {
-          padding: 9px 12px;
-          font-size: 12px;
-        }
-
-        .activation-small-button {
-          background: rgba(245, 200, 91, 0.14);
-          border: 1px solid rgba(245, 200, 91, 0.26);
-          color: #fde68a;
-        }
-
-        .activation-danger-button {
-          background: rgba(239, 68, 68, 0.16);
-          border: 1px solid rgba(239, 68, 68, 0.26);
-          color: #fecaca;
-        }
-
-        button:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        .activation-score-card {
-          border: 1px solid rgba(245, 200, 91, 0.22);
-          background:
-            linear-gradient(180deg, rgba(245, 200, 91, 0.12), rgba(15, 23, 42, 0.7)),
-            rgba(15, 23, 42, 0.82);
-          border-radius: 28px;
-          padding: 28px;
-          display: grid;
-          align-content: center;
-        }
-
-        .activation-score-card span {
-          color: #fde68a;
-          font-size: 12px;
-          font-weight: 950;
-          text-transform: uppercase;
-          letter-spacing: 0.12em;
-        }
-
-        .activation-score-card strong {
-          display: block;
-          font-size: 70px;
-          letter-spacing: -0.08em;
-          margin: 10px 0;
-        }
-
-        .activation-score-card p {
-          margin: 0;
-          color: #dbeafe;
-        }
-
-        .activation-note {
-          border: 1px solid rgba(96, 165, 250, 0.24);
-          background: rgba(37, 99, 235, 0.13);
-          color: #dbeafe;
-          border-radius: 18px;
-          padding: 14px 16px;
-          font-weight: 850;
-          margin-bottom: 18px;
-          line-height: 1.5;
-        }
-
-        .activation-kpi-grid {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 14px;
-          margin-bottom: 18px;
-        }
-
-        .activation-kpi-card {
-          border-radius: 22px;
-          padding: 20px;
-        }
-
-        .activation-kpi-card span {
-          color: #f5c85b;
-          font-weight: 950;
-          font-size: 18px;
-        }
-
-        .activation-kpi-card p {
-          color: #9db3d7;
-          margin: 10px 0 6px;
-        }
-
-        .activation-kpi-card h3 {
-          margin: 0;
-          font-size: 32px;
-          letter-spacing: -0.04em;
-        }
-
-        .activation-panel {
-          border-radius: 28px;
-          padding: 26px;
-          margin-bottom: 18px;
-        }
-
-        .activation-panel h2 {
-          margin: 0;
-          font-size: 31px;
-          letter-spacing: -0.04em;
-        }
-
-        .activation-panel-copy {
-          color: #c7d7f4;
-          line-height: 1.6;
-          margin: 10px 0 0;
-        }
-
-        .activation-layer-grid {
-          display: grid;
-          grid-template-columns: repeat(5, minmax(0, 1fr));
-          gap: 14px;
-          margin-bottom: 18px;
-        }
-
-        .activation-layer-card {
-          border-radius: 24px;
-          padding: 18px;
-          display: grid;
-          gap: 14px;
-        }
-
-        .activation-layer-top {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 12px;
-        }
-
-        .activation-layer-id {
-          display: inline-flex;
-          border: 1px solid rgba(245, 200, 91, 0.24);
-          background: rgba(245, 200, 91, 0.1);
-          color: #fde68a;
-          border-radius: 999px;
-          padding: 6px 9px;
-          font-size: 10px;
-          font-weight: 950;
-          text-transform: uppercase;
-          letter-spacing: 0.08em;
-          margin-bottom: 10px;
-        }
-
-        .activation-layer-card h2 {
-          margin: 0;
-          font-size: 20px;
-          letter-spacing: -0.04em;
-        }
-
-        .activation-layer-description {
-          color: #c7d7f4;
-          line-height: 1.5;
-          font-size: 13px;
-          margin: 0;
-        }
-
-        .activation-status-pill {
-          display: inline-flex;
-          border-radius: 999px;
-          padding: 7px 10px;
-          font-size: 11px;
-          font-weight: 950;
-          white-space: nowrap;
-        }
-
-        .healthy,
-        .status-approved,
-        .status-activated,
-        .status-ready-for-activation {
-          background: rgba(22, 163, 74, 0.22);
-          color: #bbf7d0;
-        }
-
-        .watch,
-        .status-submitted,
-        .status-pending {
-          background: rgba(245, 158, 11, 0.2);
-          color: #fde68a;
-        }
-
-        .at-risk,
-        .status-rejected {
-          background: rgba(239, 68, 68, 0.2);
-          color: #fecaca;
-        }
-
-        .neutral,
-        .status-not-submitted,
-        .status-inactive {
-          background: rgba(59, 130, 246, 0.18);
-          color: #bfdbfe;
-        }
-
-        .activation-count-row,
-        .activation-metric-row {
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 10px;
-        }
-
-        .activation-count-row div,
-        .activation-metric-row div,
-        .approval-state-card {
-          border: 1px solid rgba(147, 197, 253, 0.12);
-          background: rgba(2, 6, 23, 0.24);
-          border-radius: 16px;
-          padding: 11px;
-        }
-
-        .activation-count-row small,
-        .activation-metric-row small,
-        .approval-state-card small {
-          display: block;
-          color: #9db3d7;
-          font-size: 11px;
-          margin-bottom: 6px;
-        }
-
-        .activation-count-row strong,
-        .activation-metric-row strong,
-        .approval-state-card strong {
-          display: block;
-          color: #ffffff;
-          font-size: 13px;
-          word-break: break-word;
-        }
-
-        .approval-grid {
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 8px;
-        }
-
-        .approval-actions {
-          display: grid;
-          gap: 8px;
-        }
-
-        .activation-card-link {
-          color: #93c5fd;
-          text-decoration: none;
-          font-weight: 950;
-          font-size: 13px;
-        }
-
-        .impact-grid {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 14px;
-          margin-top: 18px;
-        }
-
-        .impact-card {
-          border-radius: 22px;
-          padding: 18px;
-        }
-
-        .impact-card-top {
-          display: flex;
-          justify-content: space-between;
-          gap: 12px;
-          align-items: flex-start;
-        }
-
-        .impact-card h3 {
-          margin: 0;
-          font-size: 20px;
-          letter-spacing: -0.03em;
-        }
-
-        .impact-card p {
-          color: #c7d7f4;
-          line-height: 1.5;
-          font-size: 13px;
-        }
-
-        .impact-layer-list {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-          margin-top: 12px;
-        }
-
-        .impact-layer-list span {
-          border: 1px solid rgba(147, 197, 253, 0.14);
-          background: rgba(2, 6, 23, 0.24);
-          border-radius: 999px;
-          padding: 6px 9px;
-          font-size: 11px;
-          color: #dbeafe;
-          font-weight: 850;
-        }
-
-        .activation-flow-grid {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 14px;
-          margin-top: 18px;
-        }
-
-        .activation-flow-grid div {
-          border: 1px solid rgba(147, 197, 253, 0.14);
-          background: rgba(2, 6, 23, 0.24);
-          border-radius: 18px;
-          padding: 16px;
-        }
-
-        .activation-flow-grid span {
-          display: inline-grid;
-          place-items: center;
-          width: 32px;
-          height: 32px;
-          border-radius: 50%;
-          background: rgba(245, 200, 91, 0.14);
-          color: #fde68a;
-          font-weight: 950;
-          margin-bottom: 10px;
-        }
-
-        .activation-flow-grid strong {
-          display: block;
-          font-size: 16px;
-        }
-
-        .activation-flow-grid p {
-          color: #c7d7f4;
-          font-size: 13px;
-          line-height: 1.5;
-        }
-
-        .event-list {
-          display: grid;
-          gap: 10px;
-          margin-top: 18px;
-        }
-
-        .event-card {
-          border-radius: 18px;
-          padding: 14px;
-          display: flex;
-          justify-content: space-between;
-          gap: 14px;
-          align-items: flex-start;
-        }
-
-        .event-card strong {
-          display: block;
-          color: #ffffff;
-        }
-
-        .event-card p {
-          margin: 6px 0 0;
-          color: #c7d7f4;
-          line-height: 1.45;
-          font-size: 13px;
-        }
-
-        .event-card span {
-          color: #9db3d7;
-          font-size: 12px;
-          white-space: nowrap;
-        }
-
-        .activation-master-panel {
-          border: 1px solid rgba(245, 200, 91, 0.28);
-          background:
-            linear-gradient(90deg, rgba(245, 200, 91, 0.14), rgba(37, 99, 235, 0.12)),
-            rgba(15, 23, 42, 0.76);
-          border-radius: 28px;
-          padding: 26px;
-          margin-bottom: 18px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 18px;
-        }
-
-        .activation-master-panel h2 {
-          margin: 0;
-          font-size: 30px;
-          letter-spacing: -0.04em;
-        }
-
-        .activation-master-panel p {
-          color: #fde68a;
-          line-height: 1.55;
-          margin: 8px 0 0;
-        }
-
-        @media (max-width: 1180px) {
-          .activation-hero,
-          .activation-layer-grid,
-          .impact-grid,
-          .activation-flow-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .activation-master-panel,
-          .activation-nav {
-            flex-direction: column;
-            align-items: flex-start;
-          }
-
-          .activation-kpi-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-        }
-
-        @media (max-width: 720px) {
-          .activation-page {
-            padding: 20px;
-          }
-
-          .activation-kpi-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .activation-actions,
-          .activation-nav-links {
-            width: 100%;
-          }
-
-          .activation-primary-button,
-          .activation-secondary-button {
-            width: 100%;
-            text-align: center;
-          }
-        }
-      `}</style>
-
       <section className="activation-shell">
-        <nav className="activation-nav">
+        <div className="activation-topbar">
           <a className="activation-brand" href="/">
             VENTIQ
           </a>
-
-          <div className="activation-nav-links">
-            <a className="activation-secondary-button" href="/migration">
-              Migration Home
-            </a>
-            <a
-              className="activation-secondary-button"
-              href="/migration/data-intake"
+          <label className="activation-fund-context">
+            <span>Activation fund</span>
+            <select
+              aria-label="Select active fund"
+              disabled={loading || fundOptions.length === 0}
+              onChange={(event) => setActiveFundName(event.target.value)}
+              style={{
+                background: "rgba(7, 13, 26, 0.9)",
+                border: "1px solid rgba(147, 197, 253, 0.22)",
+                borderRadius: 10,
+                color: "#ffffff",
+                cursor: "pointer",
+                font: "inherit",
+                fontWeight: 800,
+                maxWidth: 320,
+                padding: "8px 10px",
+              }}
+              value={activeFundName}
             >
-              Data Intake
-            </a>
-            <a
-              className="activation-secondary-button"
-              href="/migration/stakeholder-launch"
-            >
-              Stakeholder Launch
-            </a>
+              {fundOptions.map((fundName) => (
+                <option key={fundName} value={fundName}>
+                  {fundName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="activation-role-switch" aria-label="Workflow role">
+            {(["Maker", "Checker"] as WorkflowRole[]).map((role) => (
+              <button
+                className={workflowRole === role ? "active" : ""}
+                key={role}
+                onClick={() => setWorkflowRole(role)}
+                type="button"
+              >
+                {role} View
+              </button>
+            ))}
           </div>
-        </nav>
+        </div>
 
-        <div className="activation-hero">
+        <div className="activation-hero activation-command-hero">
           <div>
             <p className="activation-eyebrow">
-              One Fund · Six Stakeholders · One Source of Truth
+              <span>VENTIQ</span> Data Readiness + Fund Activation
             </p>
-
-            <h1>Data Readiness & Fund Activation</h1>
-
+            <h1>Activation Control Centre</h1>
             <p>
-              Before VENTIQ launches stakeholder dashboards, the five migration
-              layers must be uploaded, validated, submitted by maker, approved by
-              checker and activated into the operating layer.
+              Validate migrated fund data, complete maker-checker approvals and activate only
+              controlled datasets across stakeholder dashboards, workflows and investor access.
             </p>
 
             <div className="activation-actions">
               <button
                 className="activation-primary-button"
                 disabled={loading}
-                onClick={loadActivationSnapshot}
+                onClick={() => void loadActivationSnapshot()}
                 type="button"
               >
                 {loading ? "Refreshing..." : "Refresh Readiness"}
               </button>
-
-              <a className="activation-secondary-button" href="/document-studio">
-                Open Document Studio
+              <a className="activation-secondary-button" href="/migration/data-intake">
+                Data Intake
               </a>
-
-              <a className="activation-secondary-button" href="/fund-onboarding">
-                Fund Onboarding
+              <a className="activation-secondary-button" href="/migration/stakeholder-launch">
+                Stakeholder Launch
+              </a>
+              <a className="activation-secondary-button" href="/admin/audit-workflow">
+                Audit Workflow
               </a>
             </div>
           </div>
 
-          <div className="activation-score-card">
-            <span>Fund Activation Score</span>
-            <strong>{readiness.activationScore}%</strong>
+          <div className="activation-score-card activation-gate-card">
+            <div className="activation-gate-heading">
+              <span>Activation readiness</span>
+              <span
+                className={`activation-status-pill ${getActivationStatusClass(
+                  readiness.activationStatus
+                )}`}
+              >
+                {readiness.activationStatus}
+              </span>
+            </div>
+            <strong>{readiness.readinessScore}%</strong>
+            <div className="activation-progress-track" aria-label="Activation readiness score">
+              <span style={{ width: `${readiness.readinessScore}%` }} />
+            </div>
             <p>
-              Readiness {readiness.readinessScore}% · Approval{" "}
-              {readiness.approvalScore}% · {readiness.activatedCount}/5
-              activated
+              {readiness.approvedCount} of {readiness.mandatoryCount} mandatory layers are
+              checker-approved and activation-ready.
             </p>
+            <button
+              className="activation-final-button"
+              disabled={!readiness.canActivate || actionLoadingId === "activate-fund"}
+              onClick={() => void activateFund()}
+              type="button"
+            >
+              {readiness.activationStatus === "Active"
+                ? "Fund Active"
+                : actionLoadingId === "activate-fund"
+                  ? "Activating..."
+                  : "Activate Fund Across VENTIQ"}
+            </button>
           </div>
         </div>
 
-        {message && <div className="activation-note">{message}</div>}
-
-        <div className="activation-kpi-grid">
-          <div className="activation-kpi-card">
-            <span>✓</span>
-            <p>Ready layers</p>
-            <h3>{readiness.readyCount}</h3>
+        {message && (
+          <div className={`activation-note ${messageTone}`} role="status">
+            {message}
           </div>
+        )}
 
-          <div className="activation-kpi-card">
-            <span>◷</span>
-            <p>Review layers</p>
-            <h3>{readiness.reviewCount}</h3>
+        {!workflowConfigured && (
+          <div className="activation-setup-warning">
+            <div>
+              <strong>Approval controls need database setup</strong>
+              <p>
+                The five migration sources are readable, but maker-checker and activation tables
+                have not been created yet. Run the provided SQL migration once in Supabase.
+              </p>
+            </div>
+            <span>SQL required</span>
           </div>
+        )}
 
+        <div className="activation-kpi-grid activation-command-kpis">
           <div className="activation-kpi-card">
-            <span>◇</span>
-            <p>Not started</p>
-            <h3>{readiness.notStartedCount}</h3>
+            <span>01</span>
+            <p>Data-ready layers</p>
+            <h3>{readiness.dataReadyCount}/{readiness.mandatoryCount}</h3>
           </div>
-
           <div className="activation-kpi-card">
-            <span>◎</span>
-            <p>Checker approved</p>
+            <span>02</span>
+            <p>Awaiting checker</p>
+            <h3>{readiness.submittedCount}</h3>
+          </div>
+          <div className="activation-kpi-card">
+            <span>03</span>
+            <p>Checker-approved</p>
             <h3>{readiness.approvedCount}</h3>
           </div>
-        </div>
-
-        <div className="activation-master-panel">
-          <div>
-            <p className="activation-eyebrow">Activation Control</p>
-            <h2>
-              {readiness.hasActivated
-                ? "Fund data is activated"
-                : "Activate only after maker-checker approval"}
-            </h2>
-            <p>
-              Raw uploaded data should not update dashboards directly. Approved
-              migration data becomes the source for dashboards, workflows,
-              documents and investor access.
-            </p>
+          <div className="activation-kpi-card">
+            <span>04</span>
+            <p>Open validation issues</p>
+            <h3>{readiness.issueCount}</h3>
           </div>
-
-          <button
-            className="activation-primary-button"
-            disabled={!readiness.canActivate || actionLoading === "activate-fund"}
-            onClick={activateFundData}
-            type="button"
-          >
-            {actionLoading === "activate-fund"
-              ? "Activating..."
-              : "Activate Fund Data"}
-          </button>
         </div>
 
-        <div className="activation-layer-grid">
+        <div className="activation-section-heading">
+          <div>
+            <p className="activation-eyebrow">Mandatory activation checks</p>
+            <h2>Five controlled data layers</h2>
+          </div>
+          <p>
+            Source readiness and checker approval are separate controls. A technically complete
+            batch is not operational until it is reviewed and approved.
+          </p>
+        </div>
+
+        <div className="activation-layer-grid activation-control-grid">
           {layers.map((layer) => {
-            const review = reviews[layer.id];
+            const submitLoading = actionLoadingId === `Submitted-${layer.id}`;
+            const approveLoading = actionLoadingId === `Approved-${layer.id}`;
+            const changesLoading = actionLoadingId === `Changes Requested-${layer.id}`;
+            const canSubmit =
+              workflowRole === "Maker" &&
+              workflowConfigured &&
+              layer.status === "Ready" &&
+              (layer.approvalStatus === "Draft" ||
+                layer.approvalStatus === "Changes Requested");
+            const canReview =
+              workflowRole === "Checker" &&
+              workflowConfigured &&
+              layer.status === "Ready" &&
+              layer.approvalStatus === "Submitted";
 
             return (
-              <div className="activation-layer-card" key={layer.id}>
+              <article className="activation-layer-card activation-control-card" key={layer.id}>
                 <div className="activation-layer-top">
                   <div>
-                    <span className="activation-layer-id">{layer.shortTitle}</span>
+                    <span className="activation-layer-id">{layer.id}</span>
                     <h2>{layer.title}</h2>
                   </div>
-
-                  <span
-                    className={`activation-status-pill ${getLayerHealth(
-                      layer.status
-                    )}`}
-                  >
-                    {layer.status}
-                  </span>
+                  <div className="activation-card-statuses">
+                    <span
+                      className={`activation-status-pill ${getDataStatusClass(layer.status)}`}
+                    >
+                      Data: {layer.status}
+                    </span>
+                    <span
+                      className={`activation-status-pill ${getApprovalStatusClass(
+                        layer.approvalStatus
+                      )}`}
+                    >
+                      Approval: {layer.approvalStatus}
+                    </span>
+                  </div>
                 </div>
 
-                <p className="activation-layer-description">
-                  {layer.description}
-                </p>
+                <p className="activation-layer-description">{layer.description}</p>
+
+                <div className="activation-source-line">
+                  <div>
+                    <small>Latest source batch</small>
+                    <strong>{layer.batchName}</strong>
+                  </div>
+                  <div>
+                    <small>Last updated</small>
+                    <strong>{formatDateTime(layer.updatedAt)}</strong>
+                  </div>
+                  <div>
+                    <small>Responsible owner</small>
+                    <strong>{layer.owner}</strong>
+                  </div>
+                </div>
 
                 <div className="activation-count-row">
                   <div>
                     <small>{layer.countLabel}</small>
                     <strong>{layer.countValue}</strong>
                   </div>
-
                   <div>
-                    <small>Latest batch</small>
-                    <strong>{layer.batchName}</strong>
+                    <small>Source table</small>
+                    <strong>{layer.sourceTable}</strong>
                   </div>
                 </div>
 
@@ -1680,248 +1173,115 @@ export default function DataActivationDashboardPage() {
                   ))}
                 </div>
 
-                <div className="approval-grid">
-                  <div className="approval-state-card">
+                <div className="activation-validation-box">
+                  <div>
+                    <strong>Validation findings</strong>
+                    <span>{layer.issues.length === 0 ? "No blocking issue" : `${layer.issues.length} open`}</span>
+                  </div>
+                  {layer.issues.length === 0 ? (
+                    <p className="activation-clear-message">✓ Mandatory source checks passed.</p>
+                  ) : (
+                    <ul>
+                      {layer.issues.slice(0, 3).map((issue) => (
+                        <li key={issue}>{issue}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="activation-approval-trail">
+                  <div>
                     <small>Maker</small>
-                    <strong>
-                      <span
-                        className={`activation-status-pill status-${getStatusClass(
-                          review?.makerStatus || "Not Submitted"
-                        )}`}
-                      >
-                        {review?.makerStatus || "Not Submitted"}
-                      </span>
-                    </strong>
+                    <strong>{layer.makerName}</strong>
+                    <span>{formatDateTime(layer.submittedAt)}</span>
                   </div>
-
-                  <div className="approval-state-card">
+                  <div>
                     <small>Checker</small>
-                    <strong>
-                      <span
-                        className={`activation-status-pill status-${getStatusClass(
-                          review?.checkerStatus || "Pending"
-                        )}`}
-                      >
-                        {review?.checkerStatus || "Pending"}
-                      </span>
-                    </strong>
-                  </div>
-
-                  <div className="approval-state-card">
-                    <small>Activation</small>
-                    <strong>
-                      <span
-                        className={`activation-status-pill status-${getStatusClass(
-                          review?.activationStatus || "Inactive"
-                        )}`}
-                      >
-                        {review?.activationStatus || "Inactive"}
-                      </span>
-                    </strong>
+                    <strong>{layer.checkerName}</strong>
+                    <span>{formatDateTime(layer.reviewedAt)}</span>
                   </div>
                 </div>
 
-                <div className="approval-actions">
-                  <button
-                    className="activation-small-button"
-                    disabled={actionLoading === `submit-${layer.id}`}
-                    onClick={() => submitLayer(layer)}
-                    type="button"
-                  >
-                    {actionLoading === `submit-${layer.id}`
-                      ? "Submitting..."
-                      : "Maker Submit"}
-                  </button>
+                {layer.reviewComment && (
+                  <div className="activation-review-comment">
+                    <small>Review comment</small>
+                    <p>{layer.reviewComment}</p>
+                  </div>
+                )}
 
-                  <button
-                    className="activation-small-button"
-                    disabled={actionLoading === `approve-${layer.id}`}
-                    onClick={() => approveLayer(layer)}
-                    type="button"
-                  >
-                    {actionLoading === `approve-${layer.id}`
-                      ? "Approving..."
-                      : "Checker Approve"}
-                  </button>
+                <div className="activation-card-actions">
+                  <a className="activation-card-link" href={layer.route}>
+                    Open workspace →
+                  </a>
 
-                  <button
-                    className="activation-danger-button"
-                    disabled={actionLoading === `reject-${layer.id}`}
-                    onClick={() => rejectLayer(layer)}
-                    type="button"
-                  >
-                    {actionLoading === `reject-${layer.id}`
-                      ? "Rejecting..."
-                      : "Reject"}
-                  </button>
+                  {workflowRole === "Maker" ? (
+                    <button
+                      className="activation-submit-button"
+                      disabled={!canSubmit || actionLoadingId.length > 0}
+                      onClick={() => void updateApproval(layer, "Submitted")}
+                      type="button"
+                    >
+                      {submitLoading ? "Submitting..." : "Submit for Review"}
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        className="activation-request-button"
+                        disabled={!canReview || actionLoadingId.length > 0}
+                        onClick={() => void updateApproval(layer, "Changes Requested")}
+                        type="button"
+                      >
+                        {changesLoading ? "Updating..." : "Request Changes"}
+                      </button>
+                      <button
+                        className="activation-approve-button"
+                        disabled={!canReview || actionLoadingId.length > 0}
+                        onClick={() => void updateApproval(layer, "Approved")}
+                        type="button"
+                      >
+                        {approveLoading ? "Approving..." : "Approve Dataset"}
+                      </button>
+                    </>
+                  )}
                 </div>
-
-                <a className="activation-card-link" href={layer.route}>
-                  Open data workspace →
-                </a>
-              </div>
+              </article>
             );
           })}
         </div>
 
-        <div className="activation-panel">
-          <p className="activation-eyebrow">Dashboard Impact Map</p>
-          <h2>Which stakeholder dashboards go live after activation?</h2>
-          <p className="activation-panel-copy">
-            This keeps the VENTIQ promise clear: the migration layer powers six
-            role-specific dashboards from one fund data source.
-          </p>
-
-          <div className="impact-grid">
-            {dashboardImpactMap.map((item) => {
-              const ready = isImpactReady(item.layers);
-
-              return (
-                <div className="impact-card" key={item.title}>
-                  <div className="impact-card-top">
-                    <h3>{item.title}</h3>
-                    <span
-                      className={`activation-status-pill ${
-                        ready ? "healthy" : "neutral"
-                      }`}
-                    >
-                      {ready ? "Live" : "Waiting"}
-                    </span>
-                  </div>
-
-                  <p>{item.output}</p>
-
-                  <div className="impact-layer-list">
-                    {item.layers.map((layerId) => (
-                      <span key={`${item.title}-${layerId}`}>{layerId}</span>
-                    ))}
-                  </div>
-
-                  <div className="activation-actions">
-                    <a className="activation-card-link" href={item.href}>
-                      Open dashboard →
-                    </a>
-                  </div>
-                </div>
-              );
-            })}
+        <div className="activation-panel activation-impact-panel">
+          <div className="activation-section-heading activation-impact-heading">
+            <div>
+              <p className="activation-eyebrow">Activation impact map</p>
+              <h2>What approved data unlocks</h2>
+            </div>
+            <p>
+              Activation freezes the approved batch references as the operational source for the
+              next connected VENTIQ workflows.
+            </p>
           </div>
-        </div>
 
-        <div className="activation-panel">
-          <p className="activation-eyebrow">Workflow Activation Map</p>
-          <h2>Which workflow engines become usable?</h2>
-          <p className="activation-panel-copy">
-            Workflows are not separate tools. They are execution engines that
-            keep dashboards, approvals, documents and investor access current.
-          </p>
-
-          <div className="impact-grid">
-            {workflowImpactMap.map((item) => {
-              const ready = isImpactReady(item.layers);
-
-              return (
-                <div className="impact-card" key={item.title}>
-                  <div className="impact-card-top">
-                    <h3>{item.title}</h3>
-                    <span
-                      className={`activation-status-pill ${
-                        ready ? "healthy" : "neutral"
-                      }`}
-                    >
-                      {ready ? "Activated" : "Waiting"}
-                    </span>
-                  </div>
-
-                  <div className="impact-layer-list">
-                    {item.layers.map((layerId) => (
-                      <span key={`${item.title}-${layerId}`}>{layerId}</span>
-                    ))}
-                  </div>
-
-                  <div className="activation-actions">
-                    <a className="activation-card-link" href={item.href}>
-                      Open workflow →
-                    </a>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="activation-panel">
-          <p className="activation-eyebrow">Activation Sequence</p>
-          <h2>The commercial onboarding logic</h2>
-
-          <div className="activation-flow-grid">
+          <div className="activation-flow-grid activation-impact-grid">
             <div>
-              <span>1</span>
-              <strong>Upload five data layers</strong>
-              <p>
-                Investor data, PDF dump, portfolio data, fund data and
-                compliance data enter VENTIQ through migration.
-              </p>
+              <span>01</span>
+              <strong>Stakeholder Dashboards</strong>
+              <p>Managing Partner, Finance, Investment, Compliance and IR views use approved data.</p>
             </div>
-
             <div>
-              <span>2</span>
-              <strong>Maker submits</strong>
-              <p>
-                The operations owner confirms the uploaded layer is complete
-                enough for checker review.
-              </p>
+              <span>02</span>
+              <strong>Capital Calls & Distributions</strong>
+              <p>Investor and fund records become controlled source data for operating workflows.</p>
             </div>
-
             <div>
-              <span>3</span>
-              <strong>Checker approves</strong>
-              <p>
-                Approved data becomes eligible for dashboard and workflow
-                activation.
-              </p>
+              <span>03</span>
+              <strong>Investor Portal</strong>
+              <p>Only approved investor, financial and document outputs become publishable.</p>
             </div>
-
             <div>
-              <span>4</span>
-              <strong>Fund activates</strong>
-              <p>
-                Stakeholder dashboards, workflow engines, data room and investor
-                portal consume approved data only.
-              </p>
+              <span>04</span>
+              <strong>Activity & Audit Trail</strong>
+              <p>Submission, review, approval and activation events remain linked to the fund.</p>
             </div>
-          </div>
-        </div>
-
-        <div className="activation-panel">
-          <p className="activation-eyebrow">Recent Activation Activity</p>
-          <h2>Audit trail for migration activation</h2>
-
-          <div className="event-list">
-            {events.length === 0 && (
-              <div className="event-card">
-                <div>
-                  <strong>No activation events yet</strong>
-                  <p>
-                    Submit, approve or activate a layer to create the first
-                    activation audit event.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {events.map((event) => (
-              <div className="event-card" key={event.id}>
-                <div>
-                  <strong>{event.eventTitle}</strong>
-                  <p>{event.eventDescription}</p>
-                </div>
-
-                <span>
-                  {event.createdAt ? event.createdAt.slice(0, 10) : "Today"}
-                </span>
-              </div>
-            ))}
           </div>
         </div>
       </section>

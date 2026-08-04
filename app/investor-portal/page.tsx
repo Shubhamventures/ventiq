@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { useActiveFund } from "../../lib/useActiveFund";
 
 type Investor = {
   id: string;
@@ -96,6 +97,7 @@ type InvestorCashflow = {
 
 type DataRoomEvent = {
   id: string;
+  fund_name?: string | null;
   investor_name?: string | null;
   investor_email?: string | null;
   document_name?: string | null;
@@ -106,6 +108,7 @@ type DataRoomEvent = {
 
 type DataRoomQuestion = {
   id: string;
+  fund_name?: string | null;
   investor_name?: string | null;
   investor_email?: string | null;
   document_name?: string | null;
@@ -119,6 +122,7 @@ type DataRoomQuestion = {
 
 type DataRoomDocument = {
   id: string;
+  fund_name?: string | null;
   file_name?: string | null;
   detected_type?: string | null;
   suggested_folder?: string | null;
@@ -329,6 +333,29 @@ function investorMatchesText(
       (incomingName && investorName && incomingName === investorName)
   );
 }
+function getFundName(row: DataRow) {
+  return getString(
+    row,
+    ["fund_name", "scheme_name", "fund", "fund_title"],
+    ""
+  ).trim();
+}
+
+function filterRowsForFund<T extends DataRow>(
+  rows: T[],
+  fundName: string,
+  includeGlobalRows = false
+) {
+  const normalizedFundName = fundName.trim().toLowerCase();
+
+  return rows.filter((row) => {
+    const rowFundName = getFundName(row).toLowerCase();
+
+    if (!rowFundName) return includeGlobalRows;
+    return rowFundName === normalizedFundName;
+  });
+}
+
 const investorDocumentKits = [
   {
     label: "Statement of Account",
@@ -492,6 +519,18 @@ function documentMatchesExpectedType(
 }
 
 export default function InvestorPortalPage() {
+  const {
+    activeFundName,
+    setActiveFundName,
+    isReady: fundContextReady,
+  } = useActiveFund("VENTIQ Growth Fund II");
+  const [availableFunds, setAvailableFunds] = useState<string[]>([
+    "VENTIQ Growth Fund II",
+  ]);
+  const [fundActivationStatus, setFundActivationStatus] =
+    useState("Setup Not Started");
+  const [fundActivatedAt, setFundActivatedAt] = useState("");
+  const [fundActivatedBy, setFundActivatedBy] = useState("");
   const [investors, setInvestors] = useState<Investor[]>([]);
   const [selectedInvestorId, setSelectedInvestorId] = useState("");
   const [commitments, setCommitments] = useState<Commitment[]>([]);
@@ -524,6 +563,8 @@ export default function InvestorPortalPage() {
 
   useEffect(() => {
     async function loadInvestors() {
+      if (!fundContextReady) return;
+
       if (!isSupabaseConfigured || !supabase) {
         setErrorMessage(
           "The sample Investor Portal is temporarily unavailable. Please request a walkthrough."
@@ -538,6 +579,9 @@ export default function InvestorPortalPage() {
       try {
         const [
           investorsResult,
+          activeFundCommitmentsResult,
+          fundOptionsResult,
+          activationResult,
           investorBatchResult,
           pdfBatchResult,
           complianceBatchResult,
@@ -551,8 +595,25 @@ export default function InvestorPortalPage() {
             .order("investor_code", { ascending: true }),
 
           supabase
+            .from("fund_commitments")
+            .select("investor_id, fund_name")
+            .eq("fund_name", activeFundName),
+
+          supabase
+            .from("fund_master")
+            .select("fund_name")
+            .not("fund_name", "is", null),
+
+          supabase
+            .from("fund_activation_status")
+            .select("status, activated_at, activated_by, readiness_score")
+            .eq("fund_name", activeFundName)
+            .maybeSingle(),
+
+          supabase
             .from("investor_import_batches")
             .select("*")
+            .eq("fund_name", activeFundName)
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle(),
@@ -560,6 +621,7 @@ export default function InvestorPortalPage() {
           supabase
             .from("pdf_intelligence_batches")
             .select("*")
+            .eq("fund_name", activeFundName)
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle(),
@@ -567,6 +629,7 @@ export default function InvestorPortalPage() {
           supabase
             .from("compliance_data_migration_batches")
             .select("*")
+            .eq("fund_name", activeFundName)
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle(),
@@ -583,20 +646,60 @@ export default function InvestorPortalPage() {
           return;
         }
 
+        const activeInvestorIds = new Set(
+          (activeFundCommitmentsResult.data ?? [])
+            .map((row) => String(row.investor_id ?? ""))
+            .filter(Boolean)
+        );
+
         const investorData =
-          investorsResult.data?.map((investor) => ({
-            id: investor.id,
-            investor_code: investor.investor_code ?? null,
-            name: investor.investor_name ?? "Unknown Investor",
-            investor_type: investor.investor_type ?? null,
-            email: investor.email ?? null,
-            country: "India",
-            kyc_status: investor.kyc_status ?? null,
-            bank_status: investor.bank_status ?? null,
-            source: "migration" as const,
-          })) ?? [];
+          investorsResult.data
+            ?.map((investor) => ({
+              id: investor.id,
+              investor_code: investor.investor_code ?? null,
+              name: investor.investor_name ?? "Unknown Investor",
+              investor_type: investor.investor_type ?? null,
+              email: investor.email ?? null,
+              country: "India",
+              kyc_status: investor.kyc_status ?? null,
+              bank_status: investor.bank_status ?? null,
+              source: "migration" as const,
+            }))
+            .filter((investor) => activeInvestorIds.has(investor.id)) ?? [];
 
         setInvestors(investorData);
+
+        if (!fundOptionsResult.error) {
+          const fundNames = Array.from(
+            new Set(
+              (fundOptionsResult.data ?? [])
+                .map((row) => String(row.fund_name ?? "").trim())
+                .filter(Boolean)
+            )
+          ).sort();
+
+          setAvailableFunds(
+            fundNames.length > 0
+              ? fundNames
+              : [activeFundName || "VENTIQ Growth Fund II"]
+          );
+        }
+
+        if (!activationResult.error && activationResult.data) {
+          setFundActivationStatus(
+            String(activationResult.data.status ?? "Setup Not Started")
+          );
+          setFundActivatedAt(
+            String(activationResult.data.activated_at ?? "")
+          );
+          setFundActivatedBy(
+            String(activationResult.data.activated_by ?? "")
+          );
+        } else {
+          setFundActivationStatus("Setup Not Started");
+          setFundActivatedAt("");
+          setFundActivatedBy("");
+        }
 
         if (!investorBatchResult.error) {
           setLatestInvestorBatch(
@@ -616,7 +719,11 @@ export default function InvestorPortalPage() {
 
         if (!dataRoomDocumentsResult.error) {
           setDataRoomDocuments(
-            (dataRoomDocumentsResult.data ?? []) as DataRoomDocument[]
+            filterRowsForFund(
+              (dataRoomDocumentsResult.data ?? []) as unknown as DataRow[],
+              activeFundName,
+              true
+            ) as unknown as DataRoomDocument[]
           );
         }
 
@@ -648,7 +755,7 @@ export default function InvestorPortalPage() {
     }
 
     loadInvestors();
-  }, []);
+  }, [activeFundName, fundContextReady]);
 
   useEffect(() => {
     async function loadInvestorPortalData() {
@@ -676,18 +783,21 @@ export default function InvestorPortalPage() {
               "id, investor_id, fund_name, class_name, commitment_amount, unfunded_commitment, commitment_status"
             )
             .eq("investor_id", selectedInvestorId)
+            .eq("fund_name", activeFundName)
             .order("commitment_amount", { ascending: false }),
 
           supabase
             .from("investor_documents")
             .select("*")
             .eq("investor_id", selectedInvestorId)
+            .eq("fund_name", activeFundName)
             .order("published_at", { ascending: false }),
 
           supabase
             .from("investor_financial_positions")
             .select("*")
             .eq("investor_id", selectedInvestorId)
+            .eq("fund_name", activeFundName)
             .order("created_at", { ascending: false })
             .limit(1),
 
@@ -695,6 +805,7 @@ export default function InvestorPortalPage() {
             .from("investor_cashflows")
             .select("*")
             .eq("investor_id", selectedInvestorId)
+            .eq("fund_name", activeFundName)
             .order("cashflow_date", { ascending: false })
             .limit(20),
 
@@ -749,6 +860,7 @@ export default function InvestorPortalPage() {
           const fallbackDocumentsResult = await supabase
             .from("investor_documents")
             .select("*")
+            .eq("fund_name", activeFundName)
             .order("published_at", { ascending: false })
             .limit(500);
 
@@ -830,7 +942,7 @@ export default function InvestorPortalPage() {
     }
 
     loadInvestorPortalData();
-  }, [selectedInvestorId, investors]);
+  }, [selectedInvestorId, activeFundName, investors]);
 
   const selectedInvestor = investors.find(
     (investor) => investor.id === selectedInvestorId
@@ -1086,8 +1198,12 @@ const displayedManagementFee = financialPosition
  const documentTypeOptions = useMemo(() => {
   const standardGroups = investorDocumentKits.map((kit) => kit.label);
 
-  const actualGroups = Array.from(
-    new Set(documents.map((documentRecord) => getInvestorDocumentGroup(documentRecord)))
+  const actualGroups: string[] = Array.from(
+    new Set<string>(
+      documents.map((documentRecord) =>
+        getInvestorDocumentGroup(documentRecord)
+      )
+    )
   ).filter((group) => group && group !== "Other Documents");
 
   return [
@@ -1227,6 +1343,73 @@ const displayedManagementFee = financialPosition
           </a>
         </div>
 
+        <div
+          className="preview-card"
+          style={{ marginBottom: 18, padding: 22 }}
+        >
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">Active Fund Context</p>
+              <h2 style={{ marginBottom: 8 }}>{activeFundName}</h2>
+              <p style={{ margin: 0 }}>
+                Activation status: <strong>{fundActivationStatus}</strong>
+                {fundActivatedAt
+                  ? ` · Activated ${formatDateTime(fundActivatedAt)}`
+                  : ""}
+                {fundActivatedBy ? ` by ${fundActivatedBy}` : ""}
+              </p>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-end",
+                flexWrap: "wrap",
+                gap: 10,
+              }}
+            >
+              <label style={{ display: "grid", gap: 6, minWidth: 270 }}>
+                <span style={{ fontSize: 12, fontWeight: 800 }}>
+                  Switch active fund
+                </span>
+                <select
+                  aria-label="Select active fund"
+                  disabled={!fundContextReady || loading}
+                  onChange={(event) => setActiveFundName(event.target.value)}
+                  style={{
+                    background: "#0f172a",
+                    border: "1px solid rgba(148, 163, 184, 0.35)",
+                    borderRadius: 12,
+                    color: "#f8fafc",
+                    minHeight: 42,
+                    padding: "0 12px",
+                  }}
+                  value={activeFundName}
+                >
+                  {availableFunds.map((fundName) => (
+                    <option key={fundName} value={fundName}>
+                      {fundName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <a
+                className="monitor-btn monitor-btn-secondary"
+                href="/migration/activation"
+              >
+                Open Fund Activation
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div className="sample-data-ribbon">
+          {activeFundName} · {fundActivationStatus} · Connected investor portal
+          reading this fund&apos;s investors, commitments, cashflows, documents
+          and DDQ records
+        </div>
+
         {loading && (
           <div className="preview-card">
             <h2>Preparing Investor Portal...</h2>
@@ -1246,13 +1429,39 @@ const displayedManagementFee = financialPosition
           </div>
         )}
 
-        {!loading && !errorMessage && (
-          <>
-            <div className="sample-data-ribbon">
-              Connected investor portal · Reading migrated investor master,
-              commitments, financial positions, cashflows, PDFs and documents
+        {!loading &&
+          !errorMessage &&
+          fundActivationStatus !== "Active" && (
+            <div className="preview-card">
+              <p className="eyebrow">Activation Required</p>
+              <h2>{activeFundName} is not active across VENTIQ</h2>
+              <div className="explain-box">
+                The Investor Portal is locked because this fund has not completed
+                controlled activation. Complete data validation and maker-checker
+                approval before publishing investor balances, cashflows, notices
+                and documents from the operational data layer.
+              </div>
+              <div className="action-row">
+                <a
+                  className="monitor-btn monitor-btn-primary"
+                  href="/migration/activation"
+                >
+                  Complete Fund Activation
+                </a>
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/fundraising-ai"
+                >
+                  Open Investor Relations
+                </a>
+              </div>
             </div>
+          )}
 
+        {!loading &&
+          !errorMessage &&
+          fundActivationStatus === "Active" && (
+          <>
             <div className="preview-card">
               <h2>Investor Access</h2>
 
