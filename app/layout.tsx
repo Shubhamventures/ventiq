@@ -1,3 +1,4 @@
+import Providers from "./providers";
 import DebtLmsFloatingNav from "./components/DebtLmsFloatingNav";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
@@ -12,7 +13,6 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
-
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://useventiq.com"),
@@ -95,10 +95,12 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-    <body className="min-h-full flex flex-col">
-  {children}
-  <DebtLmsFloatingNav />
-</body>
+      <body className="min-h-full flex flex-col">
+        <Providers>
+          {children}
+          <DebtLmsFloatingNav />
+        </Providers>
+      </body>
     </html>
   );
 }
