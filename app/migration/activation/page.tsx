@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
-import { useActiveFund } from "@/lib/useActiveFund";
+import { useVentiqAuth } from "../../../lib/auth/AuthProvider";
 
 type DataStatus = "Ready" | "Partial" | "Not Started" | "Needs Review";
 type ApprovalStatus = "Draft" | "Submitted" | "Changes Requested" | "Approved";
-type WorkflowRole = "Maker" | "Checker";
+type WorkflowRole = "Maker" | "Checker" | "Fund Admin" | "Read Only";
 type ActivationStatus =
   | "Setup Not Started"
   | "Data Upload in Progress"
@@ -63,17 +63,7 @@ type ActivationRow = {
   activated_by?: string | null;
 };
 
-
-type DataRow = Record<string, unknown>;
-
-type LatestBatchRows = {
-  batchId: string;
-  rows: DataRow[];
-};
-
-const DEFAULT_FUND_NAME = "VENTIQ Growth Fund II";
-const MAKER_NAME = "Migration Maker";
-const CHECKER_NAME = "Migration Checker";
+const ACTIVE_FUND_NAME = "VENTIQ Growth Fund II";
 
 function formatCr(value: number) {
   return `₹${(value / 10000000).toFixed(2)} Cr`;
@@ -92,70 +82,6 @@ function formatDateTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(parsed);
-}
-
-
-function textValue(row: DataRow, key: string, fallback = "") {
-  const value = row[key];
-  if (typeof value === "string" && value.trim()) return value.trim();
-  if (typeof value === "number") return String(value);
-  return fallback;
-}
-
-function numberValue(row: DataRow, key: string) {
-  const value = row[key];
-  const parsed = typeof value === "number" ? value : Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function booleanValue(row: DataRow, key: string) {
-  const value = row[key];
-  if (typeof value === "boolean") return value;
-  const normalized = String(value ?? "").trim().toLowerCase();
-  return ["yes", "true", "available", "complete", "ready", "filed"].includes(normalized);
-}
-
-function latestBatchRows(rows: DataRow[]): LatestBatchRows {
-  if (rows.length === 0) return { batchId: "", rows: [] };
-
-  const grouped = new Map<string, DataRow[]>();
-  rows.forEach((row) => {
-    const batchId = textValue(row, "batch_id", "unbatched");
-    grouped.set(batchId, [...(grouped.get(batchId) ?? []), row]);
-  });
-
-  let selectedBatchId = "";
-  let selectedRows: DataRow[] = [];
-  let selectedTime = -1;
-
-  grouped.forEach((batchRows, batchId) => {
-    const batchTime = batchRows.reduce((latest, row) => {
-      const timestamp = textValue(row, "updated_at") || textValue(row, "created_at");
-      const parsed = timestamp ? new Date(timestamp).getTime() : 0;
-      return Math.max(latest, Number.isFinite(parsed) ? parsed : 0);
-    }, 0);
-
-    if (batchTime > selectedTime || (batchTime === selectedTime && batchRows.length > selectedRows.length)) {
-      selectedBatchId = batchId === "unbatched" ? "" : batchId;
-      selectedRows = batchRows;
-      selectedTime = batchTime;
-    }
-  });
-
-  return { batchId: selectedBatchId, rows: selectedRows };
-}
-
-function uniqueCount(rows: DataRow[], key: string) {
-  const values = new Set(rows.map((row) => textValue(row, key)).filter(Boolean));
-  return values.size || rows.length;
-}
-
-function latestTimestamp(rows: DataRow[]) {
-  return rows
-    .map((row) => textValue(row, "updated_at") || textValue(row, "created_at"))
-    .filter(Boolean)
-    .sort()
-    .at(-1) ?? "";
 }
 
 function getDataStatusClass(status: DataStatus) {
@@ -318,12 +244,8 @@ function deriveActivationStatus(layers: LayerCard[]): ActivationStatus {
 }
 
 export default function DataActivationDashboardPage() {
-  const {
-    activeFundName,
-    setActiveFundName,
-    isReady: fundContextReady,
-  } = useActiveFund(DEFAULT_FUND_NAME);
-  const [fundOptions, setFundOptions] = useState<string[]>([DEFAULT_FUND_NAME]);
+  const { session, profile, activeRole, loading: authLoading } = useVentiqAuth();
+
   const [layers, setLayers] = useState<LayerCard[]>(defaultLayers);
   const [loading, setLoading] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState("");
@@ -331,8 +253,28 @@ export default function DataActivationDashboardPage() {
   const [messageTone, setMessageTone] = useState<"success" | "warning" | "error">(
     "success"
   );
-  const [workflowRole, setWorkflowRole] = useState<WorkflowRole>("Maker");
   const [workflowConfigured, setWorkflowConfigured] = useState(true);
+
+  const canSubmitApprovals =
+    activeRole === "maker" || activeRole === "fund_admin";
+  const canReviewApprovals =
+    activeRole === "checker" || activeRole === "fund_admin";
+  const canActivateFund =
+    activeRole === "checker" || activeRole === "fund_admin";
+
+  const workflowRole: WorkflowRole =
+    activeRole === "maker"
+      ? "Maker"
+      : activeRole === "checker"
+        ? "Checker"
+        : activeRole === "fund_admin"
+          ? "Fund Admin"
+          : "Read Only";
+
+  const actorName =
+    profile?.full_name?.trim() ||
+    session?.user?.email ||
+    "VENTIQ User";
   const [persistedActivation, setPersistedActivation] = useState<ActivationRow | null>(
     null
   );
@@ -345,33 +287,6 @@ export default function DataActivationDashboardPage() {
     []
   );
 
-  const loadFundOptions = useCallback(async () => {
-    const client = supabase;
-    if (!isSupabaseConfigured || !client) return;
-
-    const { data, error } = await client
-      .from("fund_master")
-      .select("fund_name")
-      .not("fund_name", "is", null);
-
-    if (error) return;
-
-    const names = Array.from(
-      new Set(
-        ((data ?? []) as DataRow[])
-          .map((row) => textValue(row, "fund_name"))
-          .filter(Boolean)
-      )
-    ).sort((first, second) => first.localeCompare(second));
-
-    const nextOptions = names.length > 0 ? names : [DEFAULT_FUND_NAME];
-    setFundOptions(nextOptions);
-
-    if (!nextOptions.includes(activeFundName)) {
-      setActiveFundName(nextOptions[0]);
-    }
-  }, [activeFundName, setActiveFundName]);
-
   const loadActivationSnapshot = useCallback(async () => {
     const client = supabase;
 
@@ -380,10 +295,8 @@ export default function DataActivationDashboardPage() {
       return;
     }
 
-    if (!fundContextReady || !activeFundName) return;
-
     setLoading(true);
-    setNotice(`Loading ${activeFundName} readiness, approvals and activation status...`, "warning");
+    setNotice("Loading migration readiness, approvals and activation status...", "warning");
 
     try {
       let workflowAvailable = true;
@@ -394,266 +307,221 @@ export default function DataActivationDashboardPage() {
         metrics: layer.metrics.map((metric) => ({ ...metric })),
       }));
 
-      const [
-        investorRowsResult,
-        commitmentRowsResult,
-        pdfRowsResult,
-        portfolioRowsResult,
-        fundRowsResult,
-        complianceRowsResult,
-      ] = await Promise.all([
-        client.from("investor_master").select("*").eq("fund_name", activeFundName),
-        client.from("fund_commitments").select("*").eq("fund_name", activeFundName),
-        client.from("pdf_intelligence_documents").select("*").eq("fund_name", activeFundName),
-        client.from("portfolio_investments").select("*").eq("fund_name", activeFundName),
-        client.from("fund_master").select("*").eq("fund_name", activeFundName),
-        client.from("compliance_items").select("*").eq("fund_name", activeFundName),
-      ]);
+      const [investorResult, pdfResult, portfolioResult, fundResult, complianceResult] =
+        await Promise.all([
+          client
+            .from("investor_import_batches")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          client
+            .from("pdf_intelligence_batches")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          client
+            .from("portfolio_data_migration_batches")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          client
+            .from("fund_data_migration_batches")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          client
+            .from("compliance_data_migration_batches")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
 
-      const sourceErrors = [
-        investorRowsResult.error,
-        commitmentRowsResult.error,
-        pdfRowsResult.error,
-        portfolioRowsResult.error,
-        fundRowsResult.error,
-        complianceRowsResult.error,
+      const batchErrors = [
+        investorResult.error,
+        pdfResult.error,
+        portfolioResult.error,
+        fundResult.error,
+        complianceResult.error,
       ].filter(Boolean);
 
-      if (sourceErrors.length > 0) throw sourceErrors[0];
-
-      const allInvestorRows = (investorRowsResult.data ?? []) as DataRow[];
-      const allCommitmentRows = (commitmentRowsResult.data ?? []) as DataRow[];
-      const allPdfRows = (pdfRowsResult.data ?? []) as DataRow[];
-      const allPortfolioRows = (portfolioRowsResult.data ?? []) as DataRow[];
-      const allFundRows = (fundRowsResult.data ?? []) as DataRow[];
-      const allComplianceRows = (complianceRowsResult.data ?? []) as DataRow[];
-
-      const investorBatch = latestBatchRows(
-        allCommitmentRows.length > 0 ? allCommitmentRows : allInvestorRows
-      );
-      const investorRows = investorBatch.batchId
-        ? allInvestorRows.filter((row) => textValue(row, "batch_id") === investorBatch.batchId)
-        : allInvestorRows;
-      const commitmentRows = investorBatch.batchId
-        ? allCommitmentRows.filter((row) => textValue(row, "batch_id") === investorBatch.batchId)
-        : allCommitmentRows;
-
-      const pdfBatch = latestBatchRows(allPdfRows);
-      const portfolioBatch = latestBatchRows(allPortfolioRows);
-      const fundBatch = latestBatchRows(allFundRows);
-      const complianceBatch = latestBatchRows(allComplianceRows);
-
-      const batchNameRequests = await Promise.all([
-        investorBatch.batchId
-          ? client.from("investor_import_batches").select("batch_name").eq("id", investorBatch.batchId).maybeSingle()
-          : Promise.resolve({ data: null, error: null }),
-        pdfBatch.batchId
-          ? client.from("pdf_intelligence_batches").select("batch_name").eq("id", pdfBatch.batchId).maybeSingle()
-          : Promise.resolve({ data: null, error: null }),
-        portfolioBatch.batchId
-          ? client.from("portfolio_data_migration_batches").select("batch_name").eq("id", portfolioBatch.batchId).maybeSingle()
-          : Promise.resolve({ data: null, error: null }),
-        fundBatch.batchId
-          ? client.from("fund_data_migration_batches").select("batch_name").eq("id", fundBatch.batchId).maybeSingle()
-          : Promise.resolve({ data: null, error: null }),
-        complianceBatch.batchId
-          ? client.from("compliance_data_migration_batches").select("batch_name").eq("id", complianceBatch.batchId).maybeSingle()
-          : Promise.resolve({ data: null, error: null }),
-      ]);
-
-      const batchName = (index: number, fallback: string) => {
-        const data = batchNameRequests[index].data as DataRow | null;
-        return data ? textValue(data, "batch_name", fallback) : fallback;
-      };
-
-      const investorCount = uniqueCount(investorRows, "investor_code");
-      const totalCommitment = commitmentRows.reduce(
-        (total, row) => total + numberValue(row, "commitment_amount"),
-        0
-      );
-      const investorIssues: string[] = [];
-      if (investorCount === 0) investorIssues.push("No investor records are available for this fund.");
-      if (totalCommitment <= 0) investorIssues.push("Fund commitment data is missing or zero.");
-
-      nextLayers[0] = {
-        ...nextLayers[0],
-        status:
-          investorCount === 0
-            ? "Not Started"
-            : investorIssues.length > 0
-              ? "Partial"
-              : "Ready",
-        countValue: String(investorCount),
-        batchId: investorBatch.batchId,
-        batchName: batchName(0, "Latest fund-scoped investor batch"),
-        updatedAt: latestTimestamp([...investorRows, ...commitmentRows]),
-        issues: investorIssues,
-        metrics: [
-          { label: "Commitment", value: formatCr(totalCommitment) },
-          { label: "Commitment rows", value: String(commitmentRows.length) },
-        ],
-      };
-
-      const pdfRows = pdfBatch.rows;
-      const readyPdfCount = pdfRows.filter(
-        (row) => textValue(row, "status").toLowerCase() === "ready"
-      ).length;
-      const reviewPdfCount = pdfRows.filter((row) => {
-        const status = textValue(row, "status").toLowerCase();
-        return status === "review" || status === "needs review";
-      }).length;
-      const unmatchedPdfCount = pdfRows.filter((row) => {
-        const status = textValue(row, "status").toLowerCase();
-        return status === "unmatched" || status === "failed";
-      }).length;
-      const pdfIssues: string[] = [];
-      if (pdfRows.length === 0) pdfIssues.push("No PDF intelligence records are available for this fund.");
-      if (reviewPdfCount > 0) pdfIssues.push(`${reviewPdfCount} PDF file(s) require review.`);
-      if (unmatchedPdfCount > 0) pdfIssues.push(`${unmatchedPdfCount} PDF file(s) are unmatched or failed.`);
-
-      nextLayers[1] = {
-        ...nextLayers[1],
-        status:
-          pdfRows.length === 0
-            ? "Not Started"
-            : reviewPdfCount > 0 || unmatchedPdfCount > 0
-              ? "Needs Review"
-              : "Ready",
-        countValue: String(pdfRows.length),
-        batchId: pdfBatch.batchId,
-        batchName: batchName(1, "Latest fund-scoped PDF batch"),
-        updatedAt: latestTimestamp(pdfRows),
-        issues: pdfIssues,
-        metrics: [
-          { label: "Ready", value: String(readyPdfCount) },
-          { label: "Review / unmatched", value: String(reviewPdfCount + unmatchedPdfCount) },
-        ],
-      };
-
-      const portfolioRows = portfolioBatch.rows;
-      const investmentCost = portfolioRows.reduce(
-        (total, row) => total + numberValue(row, "investment_cost"),
-        0
-      );
-      const currentValue = portfolioRows.reduce(
-        (total, row) => total + numberValue(row, "current_value"),
-        0
-      );
-      const missingPortfolioValueCount = portfolioRows.filter(
-        (row) =>
-          !textValue(row, "portfolio_company") ||
-          numberValue(row, "investment_cost") <= 0 ||
-          numberValue(row, "current_value") < 0
-      ).length;
-      const atRiskCount = portfolioRows.filter((row) => {
-        const status = textValue(row, "risk_status").toLowerCase();
-        return status.includes("risk") || status.includes("watch") || status.includes("breach");
-      }).length;
-      const portfolioIssues: string[] = [];
-      if (portfolioRows.length === 0) portfolioIssues.push("No portfolio records are available for this fund.");
-      if (missingPortfolioValueCount > 0) {
-        portfolioIssues.push(`${missingPortfolioValueCount} portfolio record(s) have incomplete core values.`);
+      if (batchErrors.length > 0) {
+        throw batchErrors[0];
       }
 
-      nextLayers[2] = {
-        ...nextLayers[2],
-        status:
-          portfolioRows.length === 0
-            ? "Not Started"
-            : portfolioIssues.length > 0
-              ? "Partial"
-              : "Ready",
-        countValue: String(portfolioRows.length),
-        batchId: portfolioBatch.batchId,
-        batchName: batchName(2, "Latest fund-scoped portfolio batch"),
-        updatedAt: latestTimestamp(portfolioRows),
-        issues: portfolioIssues,
-        metrics: [
-          { label: "Current value", value: formatCr(currentValue) },
-          {
-            label: "MOIC / risk",
-            value: `${investmentCost > 0 ? (currentValue / investmentCost).toFixed(2) : "0.00"}x · ${atRiskCount} watch`,
-          },
-        ],
-      };
+      const investorBatch = investorResult.data;
+      if (investorBatch) {
+        const totalRecords = Number(investorBatch.total_records ?? 0);
+        const totalCommitment = Number(investorBatch.total_commitment ?? 0);
+        const sourceStatus = String(investorBatch.status ?? "imported");
+        const issues: string[] = [];
 
-      const fundRows = fundBatch.rows;
-      const committedCapital = fundRows.reduce(
-        (total, row) => total + numberValue(row, "committed_capital"),
-        0
-      );
-      const averageCarry =
-        fundRows.length === 0
-          ? 0
-          : fundRows.reduce((total, row) => total + numberValue(row, "carry_rate"), 0) /
-            fundRows.length;
-      const fundIssues: string[] = [];
-      if (fundRows.length === 0) fundIssues.push("No fund master record is available for this fund.");
-      if (committedCapital <= 0) fundIssues.push("Committed capital is missing or zero.");
-      if (averageCarry < 0 || averageCarry > 100) {
-        fundIssues.push("Carry is outside the expected 0% to 100% range.");
+        if (totalRecords === 0) issues.push("Investor batch contains no records.");
+        if (totalCommitment <= 0) issues.push("Total commitment is missing or zero.");
+        if (sourceStatus !== "imported" && sourceStatus !== "published") {
+          issues.push(`Source batch is still marked ${sourceStatus}.`);
+        }
+
+        nextLayers[0] = {
+          ...nextLayers[0],
+          status: issues.length === 0 ? "Ready" : "Partial",
+          countValue: String(totalRecords),
+          batchId: String(investorBatch.id ?? ""),
+          batchName: investorBatch.batch_name ?? "Latest investor batch",
+          updatedAt: investorBatch.updated_at ?? investorBatch.created_at ?? "",
+          issues,
+          metrics: [
+            { label: "Commitment", value: formatCr(totalCommitment) },
+            { label: "Source status", value: sourceStatus },
+          ],
+        };
       }
 
-      nextLayers[3] = {
-        ...nextLayers[3],
-        status:
-          fundRows.length === 0
-            ? "Not Started"
-            : fundIssues.length > 0
-              ? "Partial"
-              : "Ready",
-        countValue: String(fundRows.length),
-        batchId: fundBatch.batchId,
-        batchName: batchName(3, "Latest fund-scoped fund batch"),
-        updatedAt: latestTimestamp(fundRows),
-        issues: fundIssues,
-        metrics: [
-          { label: "Committed", value: formatCr(committedCapital) },
-          { label: "Carry", value: `${averageCarry.toFixed(0)}%` },
-        ],
-      };
+      const pdfBatch = pdfResult.data;
+      if (pdfBatch) {
+        const totalFiles = Number(pdfBatch.total_files ?? 0);
+        const readyFiles = Number(pdfBatch.ready_files ?? 0);
+        const reviewFiles = Number(pdfBatch.review_files ?? 0);
+        const unmatchedFiles = Number(pdfBatch.unmatched_files ?? 0);
+        const issues: string[] = [];
 
-      const complianceRows = complianceBatch.rows;
-      const evidenceCount = complianceRows.filter((row) => booleanValue(row, "evidence_available")).length;
-      const highRiskCount = complianceRows.filter(
-        (row) => textValue(row, "risk_level").toLowerCase() === "high"
-      ).length;
-      const missingEvidenceCount = Math.max(complianceRows.length - evidenceCount, 0);
-      const missingCoreComplianceCount = complianceRows.filter(
-        (row) => !textValue(row, "item_type") || !textValue(row, "due_date")
-      ).length;
-      const complianceIssues: string[] = [];
-      if (complianceRows.length === 0) complianceIssues.push("No compliance records are available for this fund.");
-      if (missingEvidenceCount > 0) {
-        complianceIssues.push(`${missingEvidenceCount} compliance item(s) do not have evidence.`);
-      }
-      if (missingCoreComplianceCount > 0) {
-        complianceIssues.push(`${missingCoreComplianceCount} compliance item(s) are missing type or due date.`);
+        if (totalFiles === 0) issues.push("PDF batch contains no files.");
+        if (reviewFiles > 0) issues.push(`${reviewFiles} PDF file(s) require review.`);
+        if (unmatchedFiles > 0) issues.push(`${unmatchedFiles} PDF file(s) are unmatched or failed.`);
+        if (readyFiles + reviewFiles + unmatchedFiles < totalFiles) {
+          issues.push("Some PDF files do not have a final classification status.");
+        }
+
+        nextLayers[1] = {
+          ...nextLayers[1],
+          status:
+            totalFiles === 0
+              ? "Not Started"
+              : reviewFiles > 0 || unmatchedFiles > 0
+                ? "Needs Review"
+                : "Ready",
+          countValue: String(totalFiles),
+          batchId: String(pdfBatch.id ?? ""),
+          batchName: pdfBatch.batch_name ?? "Latest PDF batch",
+          updatedAt: pdfBatch.updated_at ?? pdfBatch.created_at ?? "",
+          issues,
+          metrics: [
+            { label: "Ready", value: String(readyFiles) },
+            { label: "Review / unmatched", value: String(reviewFiles + unmatchedFiles) },
+          ],
+        };
       }
 
-      nextLayers[4] = {
-        ...nextLayers[4],
-        status:
-          complianceRows.length === 0
-            ? "Not Started"
-            : complianceIssues.length > 0
-              ? "Partial"
-              : "Ready",
-        countValue: String(complianceRows.length),
-        batchId: complianceBatch.batchId,
-        batchName: batchName(4, "Latest fund-scoped compliance batch"),
-        updatedAt: latestTimestamp(complianceRows),
-        issues: complianceIssues,
-        metrics: [
-          { label: "Evidence", value: `${evidenceCount}/${complianceRows.length}` },
-          { label: "High risk", value: String(highRiskCount) },
-        ],
-      };
+      const portfolioBatch = portfolioResult.data;
+      if (portfolioBatch) {
+        const totalRecords = Number(portfolioBatch.total_records ?? 0);
+        const atRiskCount = Number(portfolioBatch.at_risk_count ?? 0);
+        const currentValue = Number(portfolioBatch.current_portfolio_value ?? 0);
+        const issues: string[] = [];
+
+        if (totalRecords === 0) issues.push("Portfolio batch contains no investments.");
+        if (currentValue <= 0) issues.push("Current portfolio value is missing or zero.");
+
+        // Portfolio risk is an investment-monitoring signal, not a migration-data
+        // completeness failure. A valid at-risk/watchlist position must not block
+        // fund activation when the portfolio dataset itself is complete.
+        nextLayers[2] = {
+          ...nextLayers[2],
+          status:
+            totalRecords === 0
+              ? "Not Started"
+              : currentValue <= 0
+                ? "Partial"
+                : "Ready",
+          countValue: String(totalRecords),
+          batchId: String(portfolioBatch.id ?? ""),
+          batchName: portfolioBatch.batch_name ?? "Latest portfolio batch",
+          updatedAt: portfolioBatch.updated_at ?? portfolioBatch.created_at ?? "",
+          issues,
+          metrics: [
+            { label: "Current value", value: formatCr(currentValue) },
+            {
+              label: "MOIC",
+              value: `${Number(portfolioBatch.portfolio_moic ?? 0).toFixed(2)}x`,
+            },
+            { label: "At-risk investments", value: String(atRiskCount) },
+          ],
+        };
+      }
+
+      const fundBatch = fundResult.data;
+      if (fundBatch) {
+        const totalFunds = Number(fundBatch.total_funds ?? 0);
+        const committedCapital = Number(fundBatch.total_committed_capital ?? 0);
+        const averageCarry = Number(fundBatch.average_carry ?? 0);
+        const issues: string[] = [];
+
+        if (totalFunds === 0) issues.push("Fund batch contains no fund records.");
+        if (committedCapital <= 0) issues.push("Committed capital is missing or zero.");
+        if (averageCarry < 0 || averageCarry > 100) {
+          issues.push("Average carry is outside the expected 0% to 100% range.");
+        }
+
+        nextLayers[3] = {
+          ...nextLayers[3],
+          status: issues.length === 0 ? "Ready" : totalFunds === 0 ? "Not Started" : "Partial",
+          countValue: String(totalFunds),
+          batchId: String(fundBatch.id ?? ""),
+          batchName: fundBatch.batch_name ?? "Latest fund batch",
+          updatedAt: fundBatch.updated_at ?? fundBatch.created_at ?? "",
+          issues,
+          metrics: [
+            { label: "Committed", value: formatCr(committedCapital) },
+            { label: "Carry", value: `${averageCarry.toFixed(0)}%` },
+          ],
+        };
+      }
+
+      const complianceBatch = complianceResult.data;
+      if (complianceBatch) {
+        const totalItems = Number(complianceBatch.total_items ?? 0);
+        const pendingReview = Number(complianceBatch.pending_review_count ?? 0);
+        const highRisk = Number(complianceBatch.high_risk_count ?? 0);
+        const evidenceAvailable = Number(complianceBatch.evidence_available_count ?? 0);
+        const issues: string[] = [];
+
+        if (totalItems === 0) issues.push("Compliance batch contains no items.");
+        if (pendingReview > 0) issues.push(`${pendingReview} compliance item(s) require review.`);
+        if (highRisk > 0) issues.push(`${highRisk} high-risk compliance item(s) remain open.`);
+        if (evidenceAvailable < totalItems) {
+          issues.push(`${totalItems - evidenceAvailable} item(s) do not have evidence attached.`);
+        }
+
+        nextLayers[4] = {
+          ...nextLayers[4],
+          status:
+            totalItems === 0
+              ? "Not Started"
+              : highRisk > 0
+                ? "Needs Review"
+                : pendingReview > 0 || evidenceAvailable < totalItems
+                  ? "Partial"
+                  : "Ready",
+          countValue: String(totalItems),
+          batchId: String(complianceBatch.id ?? ""),
+          batchName: complianceBatch.batch_name ?? "Latest compliance batch",
+          updatedAt: complianceBatch.updated_at ?? complianceBatch.created_at ?? "",
+          issues,
+          metrics: [
+            { label: "Evidence", value: `${evidenceAvailable}/${totalItems}` },
+            { label: "High risk", value: String(highRisk) },
+          ],
+        };
+      }
 
       const approvalResult = await client
         .from("migration_data_approvals")
         .select("*")
-        .eq("fund_name", activeFundName);
+        .eq("fund_name", ACTIVE_FUND_NAME);
 
       if (approvalResult.error) {
         if (isMissingTableError(approvalResult.error.message)) {
@@ -687,7 +555,7 @@ export default function DataActivationDashboardPage() {
       const activationResult = await client
         .from("fund_activation_status")
         .select("*")
-        .eq("fund_name", activeFundName)
+        .eq("fund_name", ACTIVE_FUND_NAME)
         .maybeSingle();
 
       if (activationResult.error) {
@@ -704,7 +572,7 @@ export default function DataActivationDashboardPage() {
       setLayers(nextLayers);
       setNotice(
         workflowAvailable
-          ? `${activeFundName} data readiness and maker-checker status loaded.`
+          ? "Data readiness and maker-checker status loaded."
           : "Migration data loaded. Apply the activation workflow SQL to enable approvals and fund activation.",
         workflowAvailable ? "success" : "warning"
       );
@@ -714,17 +582,11 @@ export default function DataActivationDashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeFundName, fundContextReady, setNotice]);
+  }, [setNotice]);
 
   useEffect(() => {
-    if (!fundContextReady) return;
-    void loadFundOptions();
-  }, [fundContextReady, loadFundOptions]);
-
-  useEffect(() => {
-    if (!fundContextReady) return;
     void loadActivationSnapshot();
-  }, [fundContextReady, loadActivationSnapshot]);
+  }, [loadActivationSnapshot]);
 
   const readiness = useMemo(() => {
     const mandatoryLayers = layers.filter((layer) => layer.mandatory);
@@ -775,7 +637,7 @@ export default function DataActivationDashboardPage() {
     if (!supabase || !workflowConfigured) return;
 
     const { error } = await supabase.from("migration_activation_events").insert({
-      fund_name: activeFundName,
+      fund_name: ACTIVE_FUND_NAME,
       event_type: input.eventType,
       layer_key: input.layerKey ?? null,
       actor_name: input.actorName,
@@ -803,8 +665,16 @@ export default function DataActivationDashboardPage() {
       return;
     }
 
-    if ((nextStatus === "Approved" || nextStatus === "Changes Requested") && workflowRole !== "Checker") {
-      setNotice("Switch to Checker view to review submitted data.", "warning");
+    if (nextStatus === "Submitted" && !canSubmitApprovals) {
+      setNotice("Your authenticated role cannot submit migration data for review.", "warning");
+      return;
+    }
+
+    if (
+      (nextStatus === "Approved" || nextStatus === "Changes Requested") &&
+      !canReviewApprovals
+    ) {
+      setNotice("Checker approval permission is required for this action.", "warning");
       return;
     }
 
@@ -820,35 +690,64 @@ export default function DataActivationDashboardPage() {
             ? "Validated and approved for fund activation."
             : null;
 
-      const payload = {
-        fund_name: activeFundName,
-        layer_key: layer.id,
-        layer_name: layer.title,
-        source_table: layer.sourceTable,
-        source_batch_id: layer.batchId,
-        source_batch_name: layer.batchName,
-        status: nextStatus,
-        owner_name: layer.owner,
-        maker_name: nextStatus === "Submitted" ? MAKER_NAME : layer.makerName,
-        checker_name:
-          nextStatus === "Approved" || nextStatus === "Changes Requested"
-            ? CHECKER_NAME
-            : null,
-        submitted_at: nextStatus === "Submitted" ? now : layer.submittedAt || null,
-        reviewed_at:
-          nextStatus === "Approved" || nextStatus === "Changes Requested" ? now : null,
-        review_comment: reviewComment,
-        validation_issues: layer.issues,
-        updated_at: now,
-      };
+      if (nextStatus === "Submitted") {
+        const payload = {
+          fund_name: ACTIVE_FUND_NAME,
+          layer_key: layer.id,
+          layer_name: layer.title,
+          source_table: layer.sourceTable,
+          source_batch_id: layer.batchId,
+          source_batch_name: layer.batchName,
+          status: nextStatus,
+          owner_name: layer.owner,
+          maker_name: actorName,
+          checker_name: null,
+          submitted_at: now,
+          reviewed_at: null,
+          review_comment: null,
+          validation_issues: layer.issues,
+          updated_at: now,
+        };
 
-      const { error } = await supabase
-        .from("migration_data_approvals")
-        .upsert(payload, {
-          onConflict: "fund_name,layer_key,source_batch_id",
-        });
+        const { data, error } = await supabase
+          .from("migration_data_approvals")
+          .upsert(payload, {
+            onConflict: "fund_name,layer_key,source_batch_id",
+          })
+          .select("id")
+          .single();
 
-      if (error) throw error;
+        if (error) throw error;
+        if (!data) {
+          throw new Error("The maker submission was not persisted.");
+        }
+      } else {
+        const checkerPayload = {
+          status: nextStatus,
+          checker_name: actorName,
+          reviewed_at: now,
+          review_comment: reviewComment,
+          validation_issues: layer.issues,
+          updated_at: now,
+        };
+
+        const { data, error } = await supabase
+          .from("migration_data_approvals")
+          .update(checkerPayload)
+          .eq("fund_name", ACTIVE_FUND_NAME)
+          .eq("layer_key", layer.id)
+          .eq("source_batch_id", layer.batchId)
+          .eq("status", "Submitted")
+          .select("id")
+          .maybeSingle();
+
+        if (error) throw error;
+        if (!data) {
+          throw new Error(
+            "The checker transition was not applied. Refresh the page and confirm the layer is still Submitted."
+          );
+        }
+      }
 
       await writeEvent({
         eventType:
@@ -858,7 +757,7 @@ export default function DataActivationDashboardPage() {
               ? "DATASET_APPROVED"
               : "CHANGES_REQUESTED",
         layerKey: layer.id,
-        actorName: workflowRole === "Maker" ? MAKER_NAME : CHECKER_NAME,
+        actorName,
         actorRole: workflowRole,
         description: `${layer.title} moved to ${nextStatus}.`,
         metadata: {
@@ -884,6 +783,11 @@ export default function DataActivationDashboardPage() {
       return;
     }
 
+    if (!canActivateFund) {
+      setNotice("Checker or Fund Admin permission is required to activate the fund.", "warning");
+      return;
+    }
+
     if (!readiness.canActivate) {
       setNotice("All mandatory data layers must be validated and checker-approved first.", "warning");
       return;
@@ -899,11 +803,11 @@ export default function DataActivationDashboardPage() {
 
       const { error } = await supabase.from("fund_activation_status").upsert(
         {
-          fund_name: activeFundName,
+          fund_name: ACTIVE_FUND_NAME,
           status: "Active",
           readiness_score: 100,
           activated_at: now,
-          activated_by: CHECKER_NAME,
+          activated_by: actorName,
           approved_batch_map: approvedBatchMap,
           updated_at: now,
         },
@@ -914,9 +818,9 @@ export default function DataActivationDashboardPage() {
 
       await writeEvent({
         eventType: "FUND_ACTIVATED",
-        actorName: CHECKER_NAME,
-        actorRole: "Checker",
-        description: `${activeFundName} was activated across VENTIQ.`,
+        actorName,
+        actorRole: workflowRole,
+        description: `${ACTIVE_FUND_NAME} was activated across VENTIQ.`,
         metadata: { approvedBatchMap, readinessScore: 100 },
       });
 
@@ -937,43 +841,14 @@ export default function DataActivationDashboardPage() {
           <a className="activation-brand" href="/">
             VENTIQ
           </a>
-          <label className="activation-fund-context">
+          <div className="activation-fund-context">
             <span>Activation fund</span>
-            <select
-              aria-label="Select active fund"
-              disabled={loading || fundOptions.length === 0}
-              onChange={(event) => setActiveFundName(event.target.value)}
-              style={{
-                background: "rgba(7, 13, 26, 0.9)",
-                border: "1px solid rgba(147, 197, 253, 0.22)",
-                borderRadius: 10,
-                color: "#ffffff",
-                cursor: "pointer",
-                font: "inherit",
-                fontWeight: 800,
-                maxWidth: 320,
-                padding: "8px 10px",
-              }}
-              value={activeFundName}
-            >
-              {fundOptions.map((fundName) => (
-                <option key={fundName} value={fundName}>
-                  {fundName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="activation-role-switch" aria-label="Workflow role">
-            {(["Maker", "Checker"] as WorkflowRole[]).map((role) => (
-              <button
-                className={workflowRole === role ? "active" : ""}
-                key={role}
-                onClick={() => setWorkflowRole(role)}
-                type="button"
-              >
-                {role} View
-              </button>
-            ))}
+            <strong>{ACTIVE_FUND_NAME}</strong>
+          </div>
+          <div className="activation-role-switch" aria-label="Authenticated workflow role">
+            <button className="active" disabled type="button">
+              {authLoading ? "Loading Role..." : `${workflowRole} · Authenticated`}
+            </button>
           </div>
         </div>
 
@@ -991,7 +866,7 @@ export default function DataActivationDashboardPage() {
             <div className="activation-actions">
               <button
                 className="activation-primary-button"
-                disabled={loading}
+                disabled={loading || authLoading}
                 onClick={() => void loadActivationSnapshot()}
                 type="button"
               >
@@ -1030,7 +905,11 @@ export default function DataActivationDashboardPage() {
             </p>
             <button
               className="activation-final-button"
-              disabled={!readiness.canActivate || actionLoadingId === "activate-fund"}
+              disabled={
+                !readiness.canActivate ||
+                !canActivateFund ||
+                actionLoadingId === "activate-fund"
+              }
               onClick={() => void activateFund()}
               type="button"
             >
@@ -1102,13 +981,13 @@ export default function DataActivationDashboardPage() {
             const approveLoading = actionLoadingId === `Approved-${layer.id}`;
             const changesLoading = actionLoadingId === `Changes Requested-${layer.id}`;
             const canSubmit =
-              workflowRole === "Maker" &&
+              canSubmitApprovals &&
               workflowConfigured &&
               layer.status === "Ready" &&
               (layer.approvalStatus === "Draft" ||
                 layer.approvalStatus === "Changes Requested");
             const canReview =
-              workflowRole === "Checker" &&
+              canReviewApprovals &&
               workflowConfigured &&
               layer.status === "Ready" &&
               layer.approvalStatus === "Submitted";
@@ -1214,7 +1093,7 @@ export default function DataActivationDashboardPage() {
                     Open workspace →
                   </a>
 
-                  {workflowRole === "Maker" ? (
+                  {canSubmitApprovals && (
                     <button
                       className="activation-submit-button"
                       disabled={!canSubmit || actionLoadingId.length > 0}
@@ -1223,7 +1102,9 @@ export default function DataActivationDashboardPage() {
                     >
                       {submitLoading ? "Submitting..." : "Submit for Review"}
                     </button>
-                  ) : (
+                  )}
+
+                  {canReviewApprovals && (
                     <>
                       <button
                         className="activation-request-button"
@@ -1242,6 +1123,10 @@ export default function DataActivationDashboardPage() {
                         {approveLoading ? "Approving..." : "Approve Dataset"}
                       </button>
                     </>
+                  )}
+
+                  {!canSubmitApprovals && !canReviewApprovals && (
+                    <span className="activation-status-pill neutral">Read only</span>
                   )}
                 </div>
               </article>

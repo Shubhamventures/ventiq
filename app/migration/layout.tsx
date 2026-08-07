@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
+
+import ProtectedWorkspace from "../../components/auth/ProtectedWorkspace";
 
 export const metadata: Metadata = {
   title: "Migration & Modular Adoption | VENTIQ",
@@ -9,7 +12,13 @@ export const metadata: Metadata = {
 export default function MigrationLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
-  return children;
+  return (
+    <ProtectedWorkspace
+      allowedRoles={["fund_admin", "maker", "checker"]}
+    >
+      {children}
+    </ProtectedWorkspace>
+  );
 }
