@@ -87,6 +87,8 @@ type SecurityTrackerRow = {
 
 type NoticeRow = {
   id: string;
+  loanId: string;
+  repaymentScheduleId: string;
   borrowerName: string;
   noticeType: string;
   dueDate: string;
@@ -98,6 +100,8 @@ type NoticeRow = {
 
 type BankMatchRow = {
   id: string;
+  loanId: string;
+  repaymentScheduleId: string;
   borrowerName: string;
   expectedAmount: number;
   receivedAmount: number;
@@ -105,7 +109,6 @@ type BankMatchRow = {
   matchStatus: "Matched" | "Partial Match" | "Unmatched";
   action: string;
 };
-
 type BankReconReceipt = {
   id: string;
   borrowerName: string;
@@ -585,6 +588,8 @@ const sampleSecurityRows: SecurityTrackerRow[] = [
 const sampleNoticeRows: NoticeRow[] = [
   {
     id: "notice-001",
+    loanId: "",
+    repaymentScheduleId: "",
     borrowerName: "Alpha Fintech Pvt Ltd",
     noticeType: "Pre-due reminder",
     dueDate: "2026-08-15",
@@ -595,6 +600,8 @@ const sampleNoticeRows: NoticeRow[] = [
   },
   {
     id: "notice-002",
+    loanId: "",
+    repaymentScheduleId: "",
     borrowerName: "Nova Health Systems",
     noticeType: "Penalty notice",
     dueDate: "2026-08-05",
@@ -605,6 +612,8 @@ const sampleNoticeRows: NoticeRow[] = [
   },
   {
     id: "notice-003",
+    loanId: "",
+    repaymentScheduleId: "",
     borrowerName: "Kinetic Mobility",
     noticeType: "Default watch notice",
     dueDate: "2026-08-10",
@@ -618,6 +627,8 @@ const sampleNoticeRows: NoticeRow[] = [
 const sampleBankMatches: BankMatchRow[] = [
   {
     id: "bank-001",
+    loanId: "",
+    repaymentScheduleId: "",
     borrowerName: "Nova Health Systems",
     expectedAmount: 5120000,
     receivedAmount: 2980000,
@@ -627,6 +638,8 @@ const sampleBankMatches: BankMatchRow[] = [
   },
   {
     id: "bank-002",
+    loanId: "",
+    repaymentScheduleId: "",
     borrowerName: "Alpha Fintech Pvt Ltd",
     expectedAmount: 3875000,
     receivedAmount: 0,
@@ -636,6 +649,8 @@ const sampleBankMatches: BankMatchRow[] = [
   },
   {
     id: "bank-003",
+    loanId: "",
+    repaymentScheduleId: "",
     borrowerName: "Orbit SaaS Technologies",
     expectedAmount: 4600000,
     receivedAmount: 0,
@@ -933,12 +948,16 @@ function mapSecurityTracker(row: DataRow): SecurityTrackerRow {
 function mapNotice(row: DataRow): NoticeRow {
   return {
     id: getString(row, ["id"], crypto.randomUUID()),
+    loanId: getString(row, ["loan_id"], ""),
+    repaymentScheduleId: getString(row, ["repayment_schedule_id"], ""),
     borrowerName: getString(row, ["borrower_name"], "Borrower"),
     noticeType: getString(row, ["notice_type"], "Repayment reminder"),
     dueDate: getDateString(row, ["due_date"], "2026-01-01"),
     amount: getNumber(row, ["total_due", "penalty_due", "principal_due"]),
     emailTo: getString(row, ["recipient_email"], "finance@borrower.com"),
-    status: normalizeNoticeStatus(getString(row, ["notice_status"], "Draft")),
+    status: normalizeNoticeStatus(
+      getString(row, ["notice_status"], "Draft")
+    ),
     linkedDocument: getString(row, ["pdf_file_name"], "Notice PDF"),
   };
 }
@@ -946,11 +965,15 @@ function mapNotice(row: DataRow): NoticeRow {
 function mapBankMatch(row: DataRow): BankMatchRow {
   return {
     id: getString(row, ["id"], crypto.randomUUID()),
+    loanId: getString(row, ["loan_id"], ""),
+    repaymentScheduleId: getString(row, ["repayment_schedule_id"], ""),
     borrowerName: getString(row, ["borrower_name"], "Borrower"),
     expectedAmount: getNumber(row, ["expected_amount"]),
     receivedAmount: getNumber(row, ["received_amount"]),
     bankNarration: getString(row, ["bank_narration"], "No narration"),
-    matchStatus: normalizeMatchStatus(getString(row, ["match_status"], "Unmatched")),
+    matchStatus: normalizeMatchStatus(
+      getString(row, ["match_status"], "Unmatched")
+    ),
     action: getString(row, ["action_required"], "Review match"),
   };
 }
@@ -1073,6 +1096,8 @@ function buildBankMatchFromBankReconReceipt(
 
   return {
     id: crypto.randomUUID(),
+    loanId: row.loanId,
+    repaymentScheduleId: row.id,
     borrowerName: row.borrowerName,
     expectedAmount: row.totalDue,
     receivedAmount,
@@ -1215,6 +1240,8 @@ function buildNoticeFromRepayment(row: RepaymentRow): NoticeRow {
 
   return {
     id: crypto.randomUUID(),
+    loanId: row.loanId,
+    repaymentScheduleId: row.id,
     borrowerName: row.borrowerName,
     noticeType,
     dueDate: row.dueDate,
@@ -1532,35 +1559,50 @@ export default function DebtLMSPage() {
           throw new Error(bankMatchesResult.error.message);
         }
 
-        const nextLoans =
-          loansResult.data && loansResult.data.length > 0
-            ? (loansResult.data as DataRow[]).map(mapLoan)
-            : sampleLoans;
+        const hasRealLoans = Boolean(loansResult.data && loansResult.data.length > 0);
+
+        // Once the workspace has real Supabase-backed loans, empty child tables must
+        // remain empty. Falling back to sample child rows would mix demo data into a
+        // live fund workspace and can mislead users about notices, covenants, security
+        // items or bank matches that do not actually exist in the database.
+        const nextLoans = hasRealLoans
+          ? (loansResult.data as DataRow[]).map(mapLoan)
+          : sampleLoans;
 
         const nextRepayments =
           repaymentResult.data && repaymentResult.data.length > 0
             ? (repaymentResult.data as DataRow[]).map(mapRepayment)
-            : sampleRepaymentRows;
+            : hasRealLoans
+              ? []
+              : sampleRepaymentRows;
 
         const nextCovenants =
           covenantsResult.data && covenantsResult.data.length > 0
             ? (covenantsResult.data as DataRow[]).map(mapCovenant)
-            : sampleCovenantRows;
+            : hasRealLoans
+              ? []
+              : sampleCovenantRows;
 
         const nextSecurityRows =
           securityResult.data && securityResult.data.length > 0
             ? (securityResult.data as DataRow[]).map(mapSecurityTracker)
-            : sampleSecurityRows;
+            : hasRealLoans
+              ? []
+              : sampleSecurityRows;
 
         const nextNotices =
           noticesResult.data && noticesResult.data.length > 0
             ? (noticesResult.data as DataRow[]).map(mapNotice)
-            : sampleNoticeRows;
+            : hasRealLoans
+              ? []
+              : sampleNoticeRows;
 
         const nextBankMatches =
           bankMatchesResult.data && bankMatchesResult.data.length > 0
             ? (bankMatchesResult.data as DataRow[]).map(mapBankMatch)
-            : sampleBankMatches;
+            : hasRealLoans
+              ? []
+              : sampleBankMatches;
 
         setLoans(nextLoans);
         setRepaymentRows(nextRepayments);
@@ -1571,7 +1613,7 @@ export default function DebtLMSPage() {
         setSelectedLoanId(nextLoans[0]?.id || sampleLoans[0].id);
 
         setDataMessage(
-          loansResult.data && loansResult.data.length > 0
+          hasRealLoans
             ? "Connected to Debt LMS Supabase records."
             : "Debt LMS tables are ready. Showing sample data until loans are added."
         );
@@ -1831,7 +1873,7 @@ export default function DebtLMSPage() {
       setIsGeneratingSchedule(false);
     }
   }
-    async function generateRepaymentNotices() {
+  async function generateRepaymentNotices() {
     setNoticeMessage("");
 
     const rowsNeedingNotice = repaymentRows.filter(
@@ -1848,6 +1890,8 @@ export default function DebtLMSPage() {
     try {
       const generatedNotices = rowsNeedingNotice.map(buildNoticeFromRepayment);
 
+      // Sample/local data may still be used for the offline demo experience,
+      // but it must never be persisted into Supabase.
       if (!isSupabaseConfigured || !supabase) {
         setNoticeRows((currentRows) => [...generatedNotices, ...currentRows]);
         setNoticeMessage(
@@ -1856,14 +1900,25 @@ export default function DebtLMSPage() {
         return;
       }
 
+      const persistableRows = rowsNeedingNotice.filter(
+        (row) => isUuid(row.id) && isUuid(row.loanId)
+      );
+
+      if (persistableRows.length === 0) {
+        setNoticeMessage(
+          "No database-backed repayment rows are available for notice generation."
+        );
+        return;
+      }
+
       const db = supabase as any;
 
-      const payload = rowsNeedingNotice.map((row) => {
+      const payload = persistableRows.map((row) => {
         const noticeType = getNoticeTypeForRepayment(row);
 
         return {
-          repayment_schedule_id: isUuid(row.id) ? row.id : null,
-          loan_id: isUuid(row.loanId) ? row.loanId : null,
+          repayment_schedule_id: row.id,
+          loan_id: row.loanId,
           borrower_name: row.borrowerName,
           notice_type: noticeType,
           notice_title: `${noticeType} - ${row.borrowerName}`,
@@ -1878,7 +1933,7 @@ export default function DebtLMSPage() {
           email_subject: `${noticeType} for repayment due on ${formatDate(
             row.dueDate
           )}`,
-          email_body: `Dear Team,\n\nThis is a ${noticeType.toLowerCase()} for the repayment due on ${formatDate(
+          email_body: `Dear Team\n\nThis is a ${noticeType.toLowerCase()} for the repayment due on ${formatDate(
             row.dueDate
           )}. Total pending amount is ${formatCurrency(
             row.pendingAmount || row.totalDue
@@ -1898,10 +1953,13 @@ export default function DebtLMSPage() {
         throw new Error(error.message);
       }
 
+      const generatedPersistableNotices =
+        persistableRows.map(buildNoticeFromRepayment);
+
       const savedNotices =
         data && data.length > 0
           ? (data as DataRow[]).map(mapNotice)
-          : generatedNotices;
+          : generatedPersistableNotices;
 
       setNoticeRows((currentRows) => [...savedNotices, ...currentRows]);
 
@@ -1918,14 +1976,16 @@ export default function DebtLMSPage() {
       setIsGeneratingNotices(false);
     }
   }
-    async function queueEmailsFromGeneratedNotices() {
+
+  async function queueEmailsFromGeneratedNotices() {
     setEmailQueueMessage("");
 
-    const noticesToQueue = noticeRows.filter(
-      (notice) => notice.status === "Draft" || notice.status === "Queued"
+    // Only Draft notices are eligible. Queued notices must never be queued twice.
+    const draftNotices = noticeRows.filter(
+      (notice) => notice.status === "Draft"
     );
 
-    if (noticesToQueue.length === 0) {
+    if (draftNotices.length === 0) {
       setEmailQueueMessage("No draft notices available for email queue.");
       return;
     }
@@ -1933,17 +1993,30 @@ export default function DebtLMSPage() {
     setIsQueuingEmails(true);
 
     try {
+      // Preserve the offline/sample demo experience without writing sample IDs
+      // into Supabase.
       if (!isSupabaseConfigured || !supabase) {
         setNoticeRows((currentRows) =>
           currentRows.map((notice) =>
-            noticesToQueue.some((queuedNotice) => queuedNotice.id === notice.id)
+            draftNotices.some((queuedNotice) => queuedNotice.id === notice.id)
               ? { ...notice, status: "Queued" }
               : notice
           )
         );
 
         setEmailQueueMessage(
-          `${noticesToQueue.length} email(s) queued locally.`
+          `${draftNotices.length} email(s) queued locally.`
+        );
+        return;
+      }
+
+      const noticesToQueue = draftNotices.filter(
+        (notice) => isUuid(notice.id) && isUuid(notice.loanId)
+      );
+
+      if (noticesToQueue.length === 0) {
+        setEmailQueueMessage(
+          "No database-backed draft notices are available for email queue."
         );
         return;
       }
@@ -1951,13 +2024,13 @@ export default function DebtLMSPage() {
       const db = supabase as any;
 
       const payload = noticesToQueue.map((notice) => ({
-        notice_id: isUuid(notice.id) ? notice.id : null,
-        loan_id: null,
+        notice_id: notice.id,
+        loan_id: notice.loanId,
         borrower_name: notice.borrowerName,
         recipient_email: notice.emailTo,
         cc_emails: [],
         email_subject: `${notice.noticeType} - ${notice.borrowerName}`,
-        email_body: `Dear Team,\n\nPlease find the ${notice.noticeType.toLowerCase()} for repayment due on ${formatDate(
+        email_body: `Dear Team\n\nPlease find the ${notice.noticeType.toLowerCase()} for repayment due on ${formatDate(
           notice.dueDate
         )}. Total pending amount is ${formatCurrency(
           notice.amount
@@ -1974,22 +2047,18 @@ export default function DebtLMSPage() {
         throw new Error(emailError.message);
       }
 
-      const noticeIds = noticesToQueue
-        .map((notice) => notice.id)
-        .filter((id) => isUuid(id));
+      const noticeIds = noticesToQueue.map((notice) => notice.id);
 
-      if (noticeIds.length > 0) {
-        const { error: updateError } = await db
-          .from("debt_lms_notices")
-          .update({
-            notice_status: "Queued",
-            queued_at: new Date().toISOString(),
-          })
-          .in("id", noticeIds);
+      const { error: updateError } = await db
+        .from("debt_lms_notices")
+        .update({
+          notice_status: "Queued",
+          queued_at: new Date().toISOString(),
+        })
+        .in("id", noticeIds);
 
-        if (updateError) {
-          throw new Error(updateError.message);
-        }
+      if (updateError) {
+        throw new Error(updateError.message);
       }
 
       setNoticeRows((currentRows) =>
@@ -2013,6 +2082,7 @@ export default function DebtLMSPage() {
       setIsQueuingEmails(false);
     }
   }
+
   function openReceiptUpdate(row: RepaymentRow) {
     setReceiptRow(row);
     setReceiptForm({
@@ -2241,6 +2311,8 @@ export default function DebtLMSPage() {
 
         if (nextBankMatches.length > 0) {
           const bankMatchPayload = nextBankMatches.map((match) => ({
+            loan_id: match.loanId,
+            repayment_schedule_id: match.repaymentScheduleId,
             borrower_name: match.borrowerName,
             expected_amount: match.expectedAmount,
             received_amount: match.receivedAmount,
@@ -2927,7 +2999,9 @@ export default function DebtLMSPage() {
 
       if (nextRow.status === "Breached") {
         const breachNotice: NoticeRow = {
-          id: crypto.randomUUID(),
+          id: `local-${crypto.randomUUID()}`,
+          loanId: nextRow.loanId,
+          repaymentScheduleId: "",
           borrowerName: nextRow.borrowerName,
           noticeType: "Covenant breach notice",
           dueDate: nextRow.dueDate,

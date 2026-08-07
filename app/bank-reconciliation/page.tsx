@@ -34,6 +34,9 @@ type BankTransaction = {
   explanation: string;
   action: string;
   borrowerName?: string;
+  fundName?: string;
+  loanId?: string;
+  repaymentScheduleId?: string;
   dueDate?: string;
   principalReceived?: number;
   interestReceived?: number;
@@ -41,6 +44,12 @@ type BankTransaction = {
   penaltyReceived?: number;
   otherReceived?: number;
   bankReference?: string;
+};
+
+type DebtReceiptLineage = {
+  fundName: string;
+  loanId: string;
+  repaymentScheduleId: string;
 };
 
 type LearningRule = {
@@ -247,7 +256,16 @@ function statusClass(value: string) {
   return value.toLowerCase().replace(/\s+/g, "-");
 }
 
-function buildDebtReceiptPayload(transaction: BankTransaction) {
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value
+  );
+}
+
+function buildDebtReceiptPayload(
+  transaction: BankTransaction,
+  lineage: DebtReceiptLineage
+) {
   const principalReceived = transaction.principalReceived || 0;
   const interestReceived = transaction.interestReceived || 0;
   const feesReceived = transaction.feesReceived || 0;
@@ -255,7 +273,10 @@ function buildDebtReceiptPayload(transaction: BankTransaction) {
   const otherReceived = transaction.otherReceived || 0;
 
   return {
+    fund_name: lineage.fundName,
     borrower_name: transaction.borrowerName || transaction.counterparty,
+    loan_id: lineage.loanId,
+    repayment_schedule_id: lineage.repaymentScheduleId,
     due_date: transaction.dueDate || transaction.date,
     receipt_date: transaction.date,
     bank_reference: transaction.bankReference || transaction.id,
@@ -275,6 +296,110 @@ function buildDebtReceiptPayload(transaction: BankTransaction) {
     sync_status: "Ready",
     confidence: transaction.confidence,
     remarks: "Approved from Bank MIS / Bank Reconciliation",
+  };
+}
+
+async function resolveDebtReceiptLineage(
+  transaction: BankTransaction
+): Promise<DebtReceiptLineage> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase is not configured.");
+  }
+
+  const db = supabase as any;
+  const borrowerName = (transaction.borrowerName || transaction.counterparty).trim();
+  const dueDate = transaction.dueDate || transaction.date;
+
+  if (!borrowerName) {
+    throw new Error("Borrower name is required to resolve Debt LMS lineage.");
+  }
+
+  let scheduleQuery = db
+    .from("debt_lms_repayment_schedule")
+    .select("id, loan_id, borrower_name, due_date")
+    .limit(10);
+
+  if (transaction.repaymentScheduleId) {
+    if (!isUuid(transaction.repaymentScheduleId)) {
+      throw new Error("Repayment schedule ID is not a valid UUID.");
+    }
+
+    scheduleQuery = scheduleQuery.eq("id", transaction.repaymentScheduleId);
+  } else {
+    scheduleQuery = scheduleQuery
+      .eq("due_date", dueDate)
+      .ilike("borrower_name", borrowerName);
+  }
+
+  if (transaction.loanId) {
+    if (!isUuid(transaction.loanId)) {
+      throw new Error("Loan ID is not a valid UUID.");
+    }
+
+    scheduleQuery = scheduleQuery.eq("loan_id", transaction.loanId);
+  }
+
+  const { data: scheduleData, error: scheduleError } = await scheduleQuery;
+
+  if (scheduleError) {
+    throw new Error(`Unable to resolve Debt LMS repayment schedule: ${scheduleError.message}`);
+  }
+
+  const scheduleRows = (scheduleData ?? []) as Array<{
+    id: string;
+    loan_id: string;
+    borrower_name: string | null;
+    due_date: string | null;
+  }>;
+
+  if (scheduleRows.length === 0) {
+    throw new Error(
+      `No accessible Debt LMS repayment schedule found for ${borrowerName} due ${dueDate}.`
+    );
+  }
+
+  if (scheduleRows.length > 1) {
+    throw new Error(
+      `Multiple Debt LMS repayment schedules match ${borrowerName} due ${dueDate}. Select an explicit loan / schedule before sync.`
+    );
+  }
+
+  const schedule = scheduleRows[0];
+
+  if (!isUuid(schedule.id) || !isUuid(schedule.loan_id)) {
+    throw new Error("Resolved Debt LMS schedule does not contain valid UUID lineage.");
+  }
+
+  const { data: loanData, error: loanError } = await db
+    .from("debt_lms_loans")
+    .select("id, fund_name, borrower_name")
+    .eq("id", schedule.loan_id)
+    .maybeSingle();
+
+  if (loanError) {
+    throw new Error(`Unable to resolve Debt LMS loan: ${loanError.message}`);
+  }
+
+  if (!loanData?.id || !isUuid(String(loanData.id))) {
+    throw new Error("Resolved repayment schedule has no accessible Debt LMS loan parent.");
+  }
+
+  const fundName = String(loanData.fund_name || "").trim();
+
+  if (!fundName) {
+    throw new Error("Resolved Debt LMS loan has no fund name.");
+  }
+
+  if (transaction.fundName && transaction.fundName.trim() !== fundName) {
+    throw new Error(
+      `Fund mismatch: bank transaction is mapped to ${transaction.fundName}, but the Debt LMS loan belongs to ${fundName}.`
+    );
+  }
+
+  return {
+    fundName,
+    loanId: String(loanData.id),
+    repaymentScheduleId: schedule.id,
   };
 }
 
@@ -377,12 +502,28 @@ export default function BankReconciliationPage() {
     try {
       if (isSupabaseConfigured && supabase) {
         const db = supabase as any;
-        const { error } = await db
-          .from("bank_reconciliation_debt_receipts")
-          .insert(buildDebtReceiptPayload(transaction));
+        const lineage = await resolveDebtReceiptLineage(transaction);
+        const payload = buildDebtReceiptPayload(transaction, lineage);
 
-        if (error) {
-          throw new Error(error.message);
+        const { data: existingRows, error: existingError } = await db
+          .from("bank_reconciliation_debt_receipts")
+          .select("id, sync_status")
+          .eq("bank_reference", payload.bank_reference)
+          .eq("loan_id", lineage.loanId)
+          .limit(1);
+
+        if (existingError) {
+          throw new Error(existingError.message);
+        }
+
+        if (!existingRows || existingRows.length === 0) {
+          const { error } = await db
+            .from("bank_reconciliation_debt_receipts")
+            .insert(payload);
+
+          if (error) {
+            throw new Error(error.message);
+          }
         }
       }
 
@@ -424,12 +565,36 @@ export default function BankReconciliationPage() {
     try {
       if (isSupabaseConfigured && supabase) {
         const db = supabase as any;
-        const { error } = await db
-          .from("bank_reconciliation_debt_receipts")
-          .insert(debtReceipts.map(buildDebtReceiptPayload));
+        const payloads = [];
 
-        if (error) {
-          throw new Error(error.message);
+        for (const transaction of debtReceipts) {
+          const lineage = await resolveDebtReceiptLineage(transaction);
+          const payload = buildDebtReceiptPayload(transaction, lineage);
+
+          const { data: existingRows, error: existingError } = await db
+            .from("bank_reconciliation_debt_receipts")
+            .select("id")
+            .eq("bank_reference", payload.bank_reference)
+            .eq("loan_id", lineage.loanId)
+            .limit(1);
+
+          if (existingError) {
+            throw new Error(existingError.message);
+          }
+
+          if (!existingRows || existingRows.length === 0) {
+            payloads.push(payload);
+          }
+        }
+
+        if (payloads.length > 0) {
+          const { error } = await db
+            .from("bank_reconciliation_debt_receipts")
+            .insert(payloads);
+
+          if (error) {
+            throw new Error(error.message);
+          }
         }
       }
 
