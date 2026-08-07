@@ -3,8 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
+import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 
 type DataRow = Record<string, unknown>;
+
+type PerformanceCalculationResponse = {
+  run?: DataRow | null;
+  fundMetric?: DataRow | null;
+  portfolioMetrics?: DataRow[];
+  investorMetrics?: DataRow[];
+  reconciliations?: DataRow[];
+  portfolioValuations?: DataRow[];
+  error?: string;
+};
 
 type InvestmentActivityEvent = {
   id: string;
@@ -59,6 +70,30 @@ function formatCurrencyCr(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "₹0 Cr";
 
   return `₹${(value / 10000000).toFixed(1)} Cr`;
+}
+
+function formatCurrencyInr(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "₹0";
+
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return "0.0%";
+
+  return `${value.toFixed(1)}%`;
+}
+
+function getStoredRatePercent(row: DataRow | undefined, keys: string[]) {
+  const value = getNumber(row, keys);
+
+  if (!Number.isFinite(value)) return 0;
+
+  return Math.abs(value) <= 1 ? value * 100 : value;
 }
 
 function formatMultiple(value: number) {
@@ -120,6 +155,7 @@ export default function InvestmentTeamAIPage() {
     setActiveFundName,
     isReady: isFundContextReady,
   } = useActiveFund("VENTIQ Growth Fund II");
+  const { session } = useVentiqAuth();
 
   const [fundOptions, setFundOptions] = useState<string[]>([]);
   const [activationStatus, setActivationStatus] = useState("Setup Not Started");
@@ -133,7 +169,20 @@ export default function InvestmentTeamAIPage() {
     useState<DataRow | null>(null);
 
   const [portfolioInvestments, setPortfolioInvestments] = useState<DataRow[]>([]);
+  const [debtRepaymentSchedules, setDebtRepaymentSchedules] = useState<DataRow[]>([]);
   const [complianceItems, setComplianceItems] = useState<DataRow[]>([]);
+
+  const [latestCalculationRun, setLatestCalculationRun] =
+    useState<DataRow | null>(null);
+  const [calculatedFundMetric, setCalculatedFundMetric] =
+    useState<DataRow | null>(null);
+  const [calculatedPortfolioMetrics, setCalculatedPortfolioMetrics] = useState<
+    DataRow[]
+  >([]);
+  const [calculationReconciliations, setCalculationReconciliations] = useState<
+    DataRow[]
+  >([]);
+  const [calculationLoadMessage, setCalculationLoadMessage] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -152,53 +201,150 @@ export default function InvestmentTeamAIPage() {
     setLoading(true);
     setErrorMessage("");
 
+    async function loadLatestPerformanceCalculation(): Promise<PerformanceCalculationResponse | null> {
+      const accessToken = session?.access_token ?? "";
+
+      if (!accessToken) {
+        return null;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/metrics/calculate?fundName=${encodeURIComponent(activeFundName)}`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            cache: "no-store",
+          }
+        );
+        const result = (await response.json()) as PerformanceCalculationResponse;
+
+        if (!response.ok) {
+          throw new Error(
+            result.error || "Unable to load verified portfolio calculations."
+          );
+        }
+
+        setCalculationLoadMessage("");
+        return result;
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Unable to load verified portfolio calculations.";
+
+        console.warn(
+          "VENTIQ Investment Team workspace could not load calculated metrics:",
+          message
+        );
+        setCalculationLoadMessage(message);
+        return null;
+      }
+    }
+
     try {
+      const performanceCalculationData =
+        await loadLatestPerformanceCalculation();
+      const calculationRun = performanceCalculationData?.run ?? null;
+      const calculationSourceBatchIds = calculationRun?.source_batch_ids;
+      const calculationSourceBatch = Array.isArray(
+        calculationSourceBatchIds
+      )
+        ? String(calculationSourceBatchIds[0] ?? "")
+        : "";
+
+      const db = supabase as any;
+
+      function createFundBatchQuery(
+        tableName: string,
+        orderBy: string,
+        ascending: boolean
+      ) {
+        let query = db
+          .from(tableName)
+          .select("*")
+          .eq("fund_name", activeFundName);
+
+        if (calculationSourceBatch) {
+          query = query.eq("source_batch_id", calculationSourceBatch);
+        }
+
+        return query.order(orderBy, { ascending });
+      }
+
+      let fundRowQuery = db
+        .from("fund_master")
+        .select("*")
+        .eq("fund_name", activeFundName);
+
+      if (calculationSourceBatch) {
+        fundRowQuery = fundRowQuery.eq(
+          "source_batch_id",
+          calculationSourceBatch
+        );
+      }
+
       const [
         fundOptionsResult,
         activationResult,
         portfolioRowsResult,
+        valuationRowsResult,
+        repaymentRowsResult,
         pdfRowsResult,
         fundRowResult,
         complianceRowsResult,
       ] = await Promise.all([
-        supabase.from("fund_master").select("fund_name").order("fund_name"),
+        db.from("fund_master").select("fund_name").order("fund_name"),
 
-        supabase
+        db
           .from("fund_activation_status")
           .select("*")
           .eq("fund_name", activeFundName)
           .maybeSingle(),
 
-        supabase
-          .from("portfolio_investments")
-          .select("*")
-          .eq("fund_name", activeFundName)
-          .order("created_at", { ascending: true }),
+        createFundBatchQuery(
+          "portfolio_investments",
+          "created_at",
+          true
+        ),
 
-        supabase
+        createFundBatchQuery(
+          "portfolio_valuations",
+          "valuation_date",
+          false
+        ),
+
+        createFundBatchQuery(
+          "debt_repayment_schedules",
+          "due_date",
+          true
+        ),
+
+        db
           .from("pdf_intelligence_documents")
           .select("*")
           .eq("fund_name", activeFundName)
           .order("created_at", { ascending: false }),
 
-        supabase
-          .from("fund_master")
-          .select("*")
-          .eq("fund_name", activeFundName)
+        fundRowQuery
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
 
-        supabase
-          .from("compliance_items")
-          .select("*")
-          .eq("fund_name", activeFundName)
-          .order("created_at", { ascending: true }),
+        createFundBatchQuery(
+          "compliance_items",
+          "created_at",
+          true
+        ),
       ]);
 
       const firstError =
         fundOptionsResult.error ||
         portfolioRowsResult.error ||
+        valuationRowsResult.error ||
+        repaymentRowsResult.error ||
         pdfRowsResult.error ||
         fundRowResult.error ||
         complianceRowsResult.error;
@@ -230,13 +376,118 @@ export default function InvestmentTeamAIPage() {
         getString(activation ?? undefined, ["status"], "Setup Not Started")
       );
 
-      const portfolioRows = (portfolioRowsResult.data ?? []) as DataRow[];
+      const rawPortfolioRows = (portfolioRowsResult.data ?? []) as DataRow[];
+      const authenticatedValuationRows =
+        performanceCalculationData?.portfolioValuations ?? [];
+      const directValuationRows = (valuationRowsResult.data ?? []) as DataRow[];
+      const valuationRows =
+        authenticatedValuationRows.length > 0
+          ? authenticatedValuationRows
+          : directValuationRows;
+      const rawRepaymentRows = (repaymentRowsResult.data ?? []) as DataRow[];
       const pdfRows = (pdfRowsResult.data ?? []) as DataRow[];
       const complianceRows = (complianceRowsResult.data ?? []) as DataRow[];
       const fundRow = (fundRowResult.data as DataRow | null) ?? null;
+      const calculationPortfolioRows =
+        performanceCalculationData?.portfolioMetrics ?? [];
+
+      const latestValuationByPortfolio = new Map<string, DataRow>();
+
+      valuationRows.forEach((row) => {
+        const portfolioCode = getString(row, ["portfolio_code"], "");
+
+        if (portfolioCode && !latestValuationByPortfolio.has(portfolioCode)) {
+          latestValuationByPortfolio.set(portfolioCode, row);
+        }
+      });
+
+      const calculationByPortfolio = new Map<string, DataRow>();
+
+      calculationPortfolioRows.forEach((row) => {
+        const portfolioCode = getString(row, ["portfolio_code"], "");
+
+        if (portfolioCode) {
+          calculationByPortfolio.set(portfolioCode, row);
+        }
+      });
+
+      const portfolioRows = rawPortfolioRows.map((row) => {
+        const portfolioCode = getString(row, ["portfolio_code"], "");
+        const valuation = latestValuationByPortfolio.get(portfolioCode);
+        const calculation = calculationByPortfolio.get(portfolioCode);
+
+        return {
+          ...row,
+          current_value: valuation
+            ? getNumber(valuation, ["fair_value"])
+            : calculation
+              ? getNumber(calculation, ["terminal_fair_value"])
+              : getNumber(row, ["current_value"]),
+          realised_value: valuation
+            ? getNumber(valuation, [
+                "realised_value_to_date",
+                "realized_value_to_date",
+              ])
+            : calculation
+              ? getNumber(calculation, ["realised_proceeds"])
+              : getNumber(row, ["realised_value", "realized_value"]),
+          expected_exit_value: valuation
+            ? getNumber(valuation, ["expected_exit_value"])
+            : getNumber(row, ["expected_exit_value"]),
+          expected_exit_date: valuation
+            ? getString(valuation, ["expected_exit_date"], "")
+            : getString(row, ["expected_exit_date"], ""),
+          valuation_date: valuation
+            ? getString(valuation, ["valuation_date"], "")
+            : getString(row, ["valuation_date"], ""),
+          gross_moic: calculation
+            ? getNumber(calculation, ["gross_moic"])
+            : getNumber(row, ["gross_moic", "moic"]),
+          gross_irr: calculation
+            ? getNumber(calculation, ["gross_irr"])
+            : getNumber(row, ["gross_irr"]),
+        } as DataRow;
+      });
+
+      const portfolioByCode = new Map<string, DataRow>();
+
+      portfolioRows.forEach((row) => {
+        const portfolioCode = getString(row, ["portfolio_code"], "");
+
+        if (portfolioCode) {
+          portfolioByCode.set(portfolioCode, row);
+        }
+      });
+
+      const repaymentRows = rawRepaymentRows.map((row) => {
+        const portfolioCode = getString(row, ["portfolio_code"], "");
+        const portfolio = portfolioByCode.get(portfolioCode);
+
+        return {
+          ...row,
+          repayment_due_date: getString(row, ["due_date"], ""),
+          security_or_charge: getString(
+            portfolio,
+            ["security_or_charge"],
+            "Security not provided"
+          ),
+          interest_rate: getNumber(portfolio, [
+            "interest_rate",
+            "coupon_or_interest_rate",
+          ]),
+          risk_status: getString(portfolio, ["risk_status"], "Review"),
+        } as DataRow;
+      });
 
       setPortfolioInvestments(portfolioRows);
+      setDebtRepaymentSchedules(repaymentRows);
       setComplianceItems(complianceRows);
+      setLatestCalculationRun(performanceCalculationData?.run ?? null);
+      setCalculatedFundMetric(performanceCalculationData?.fundMetric ?? null);
+      setCalculatedPortfolioMetrics(calculationPortfolioRows);
+      setCalculationReconciliations(
+        performanceCalculationData?.reconciliations ?? []
+      );
 
       const portfolioInvestmentCost = portfolioRows.reduce(
         (sum, row) => sum + getNumber(row, ["investment_cost"]),
@@ -258,9 +509,7 @@ export default function InvestmentTeamAIPage() {
         const risk = getString(row, ["risk_status"], "").toLowerCase();
         return risk.includes("risk") || risk.includes("watch");
       }).length;
-      const repaymentCount = portfolioRows.filter((row) =>
-        Boolean(getString(row, ["repayment_due_date"], ""))
-      ).length;
+      const repaymentCount = repaymentRows.length;
 
       setLatestPortfolioBatch(
         portfolioRows.length > 0
@@ -359,7 +608,7 @@ export default function InvestmentTeamAIPage() {
     if (isFundContextReady) {
       void loadInvestmentTeamWorkspace();
     }
-  }, [activeFundName, isFundContextReady]);
+  }, [activeFundName, isFundContextReady, session?.access_token]);
 
   const isFundActive = activationStatus === "Active";
 
@@ -418,12 +667,36 @@ export default function InvestmentTeamAIPage() {
       0
     );
 
-    const investmentCost = batchInvestmentCost || rowInvestmentCost;
-    const currentValue = batchCurrentValue || rowCurrentValue;
-    const realisedValue = batchRealisedValue || rowRealisedValue;
+    const calculatedInvestmentCost = getNumber(
+      calculatedFundMetric ?? undefined,
+      ["portfolio_investment_cost"]
+    );
+    const calculatedCurrentValue = getNumber(
+      calculatedFundMetric ?? undefined,
+      ["portfolio_terminal_fair_value"]
+    );
+    const calculatedRealisedValue = getNumber(
+      calculatedFundMetric ?? undefined,
+      ["portfolio_realised_proceeds"]
+    );
+    const calculatedMoic = getNumber(calculatedFundMetric ?? undefined, [
+      "gross_moic",
+    ]);
+    const calculatedGrossIrr = getStoredRatePercent(
+      calculatedFundMetric ?? undefined,
+      ["gross_irr"]
+    );
+
+    const investmentCost =
+      calculatedInvestmentCost || batchInvestmentCost || rowInvestmentCost;
+    const currentValue =
+      calculatedCurrentValue || batchCurrentValue || rowCurrentValue;
+    const realisedValue =
+      calculatedRealisedValue || batchRealisedValue || rowRealisedValue;
     const expectedExitValue = batchExpectedExitValue || rowExpectedExitValue;
 
     const moic =
+      calculatedMoic ||
       batchMoic ||
       (investmentCost > 0
         ? (currentValue + realisedValue) / investmentCost
@@ -435,9 +708,7 @@ export default function InvestmentTeamAIPage() {
       return risk.includes("risk") || risk.includes("watch");
     });
 
-    const repaymentRows = portfolioInvestments.filter((row) =>
-      Boolean(getString(row, ["repayment_due_date"], ""))
-    );
+    const repaymentRows = debtRepaymentSchedules;
 
     const exitRows = portfolioInvestments.filter((row) =>
       Boolean(getString(row, ["expected_exit_date"], ""))
@@ -473,7 +744,17 @@ export default function InvestmentTeamAIPage() {
     const riskCount = Math.max(batchAtRiskCount, atRiskRows.length);
     const repaymentCount = Math.max(batchRepaymentCount, repaymentRows.length);
 
-    const activeCompanies = totalRecords || portfolioInvestments.length;
+    const activeCompanies =
+      calculatedPortfolioMetrics.length || totalRecords || portfolioInvestments.length;
+
+    const calculationPassCount = calculationReconciliations.filter(
+      (row) => getString(row, ["reconciliation_status"], "").toLowerCase() === "pass"
+    ).length;
+    const calculationControlCount = calculationReconciliations.length;
+    const sourceBatchIds = latestCalculationRun?.source_batch_ids;
+    const calculationSourceBatch = Array.isArray(sourceBatchIds)
+      ? String(sourceBatchIds[0] ?? "")
+      : "";
 
     const investmentReadinessScore = Math.min(
       95,
@@ -496,6 +777,7 @@ export default function InvestmentTeamAIPage() {
       realisedValue,
       expectedExitValue,
       moic,
+      grossIrr: calculatedGrossIrr,
       riskCount,
       repaymentCount,
       exitPipelineCount: exitRows.length,
@@ -507,6 +789,20 @@ export default function InvestmentTeamAIPage() {
       fundCommittedCapital,
       activeFunds,
       investmentReadinessScore,
+      calculationVersion: getString(
+        latestCalculationRun ?? undefined,
+        ["calculation_version"],
+        ""
+      ),
+      calculationAsOfDate: getString(
+        latestCalculationRun ?? undefined,
+        ["as_of_date"],
+        ""
+      ),
+      calculationPassCount,
+      calculationControlCount,
+      calculationSourceBatch,
+      calculationPortfolioCount: calculatedPortfolioMetrics.length,
     };
   }, [
     latestPortfolioBatch,
@@ -514,6 +810,11 @@ export default function InvestmentTeamAIPage() {
     latestFundBatch,
     latestComplianceBatch,
     portfolioInvestments,
+    debtRepaymentSchedules,
+    latestCalculationRun,
+    calculatedFundMetric,
+    calculatedPortfolioMetrics,
+    calculationReconciliations,
   ]);
 
   const atRiskInvestments = useMemo(() => {
@@ -527,20 +828,19 @@ export default function InvestmentTeamAIPage() {
   }, [portfolioInvestments]);
 
   const repaymentScheduleRows = useMemo(() => {
-    return portfolioInvestments
-      .filter((row) => Boolean(getString(row, ["repayment_due_date"], "")))
+    return [...debtRepaymentSchedules]
       .sort((a, b) => {
         const aTime = new Date(
-          getString(a, ["repayment_due_date"], "")
+          getString(a, ["due_date", "repayment_due_date"], "")
         ).getTime();
         const bTime = new Date(
-          getString(b, ["repayment_due_date"], "")
+          getString(b, ["due_date", "repayment_due_date"], "")
         ).getTime();
 
         return aTime - bTime;
       })
       .slice(0, 6);
-  }, [portfolioInvestments]);
+  }, [debtRepaymentSchedules]);
 
   const exitPipelineRows = useMemo(() => {
     return portfolioInvestments
@@ -560,6 +860,25 @@ export default function InvestmentTeamAIPage() {
 
   const investmentActivityEvents = useMemo(() => {
     const events: InvestmentActivityEvent[] = [];
+
+    if (latestCalculationRun) {
+      events.push({
+        id: `calculation-${getId(latestCalculationRun)}`,
+        time: getString(
+          latestCalculationRun,
+          ["completed_at", "created_at"],
+          ""
+        ),
+        module: "Performance Calculation",
+        title: "Verified deal metrics restored",
+        description: `Calculation Engine v${getString(
+          latestCalculationRun,
+          ["calculation_version"],
+          "-"
+        )} calculated ${calculatedPortfolioMetrics.length} portfolio record(s).`,
+        status: "valuation calculated",
+      });
+    }
 
     if (latestPortfolioBatch) {
       events.push({
@@ -680,6 +999,8 @@ export default function InvestmentTeamAIPage() {
   }, [
     latestPortfolioBatch,
     latestPdfBatch,
+    latestCalculationRun,
+    calculatedPortfolioMetrics,
     portfolioInvestments,
     complianceItems,
   ]);
@@ -831,10 +1152,11 @@ export default function InvestmentTeamAIPage() {
               <h2>Investment Team Workspace Preview</h2>
 
               <div className="explain-box">
-                VENTIQ reviewed {investmentMetrics.activeCompanies} migrated
-                portfolio investment record(s),{" "}
-                {formatCurrencyCr(investmentMetrics.currentValue)} current
-                portfolio value, {investmentMetrics.repaymentCount} repayment
+                VENTIQ reviewed {investmentMetrics.activeCompanies} portfolio
+                investment record(s), including verified Calculation Engine
+                outputs where available, with {formatCurrencyCr(
+                  investmentMetrics.currentValue
+                )} terminal fair value, {investmentMetrics.repaymentCount} repayment
                 schedule item(s), {investmentMetrics.exitPipelineCount} exit
                 pipeline item(s), {investmentMetrics.pdfReview} PDF review
                 item(s) and {investmentMetrics.riskCount} portfolio risk
@@ -879,6 +1201,20 @@ export default function InvestmentTeamAIPage() {
               </div>
             </div>
 
+            {investmentMetrics.calculationVersion ? (
+              <div className="explain-box investment-calculation-status">
+                Verified Calculation Engine v{investmentMetrics.calculationVersion} ·
+                as of {formatDate(investmentMetrics.calculationAsOfDate)} · {" "}
+                {investmentMetrics.calculationPassCount}/
+                {investmentMetrics.calculationControlCount} reconciliation controls passed · {" "}
+                {investmentMetrics.calculationPortfolioCount} deal-level calculations.
+              </div>
+            ) : calculationLoadMessage ? (
+              <div className="explain-box">
+                Verified deal metrics could not be restored: {calculationLoadMessage}
+              </div>
+            ) : null}
+
             <div className="impact-grid">
               <div className="impact-card">
                 <h3>{investmentMetrics.activeCompanies}</h3>
@@ -897,7 +1233,12 @@ export default function InvestmentTeamAIPage() {
 
               <div className="impact-card">
                 <h3>{formatMultiple(investmentMetrics.moic)}</h3>
-                <p>Portfolio MOIC</p>
+                <p>Gross MOIC</p>
+              </div>
+
+              <div className="impact-card">
+                <h3>{formatPercent(investmentMetrics.grossIrr)}</h3>
+                <p>Gross IRR</p>
               </div>
             </div>
 
@@ -921,6 +1262,75 @@ export default function InvestmentTeamAIPage() {
                 <h3>{investmentMetrics.investmentReadinessScore}%</h3>
                 <p>Investment readiness</p>
               </div>
+            </div>
+
+            <div className="preview-card">
+              <div className="investment-calculation-heading">
+                <div>
+                  <p className="eyebrow">Verified performance layer</p>
+                  <h2>Deal-Level IRR & MOIC</h2>
+                </div>
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/migration/performance-calculations"
+                >
+                  Open Calculation Engine
+                </a>
+              </div>
+
+              {calculatedPortfolioMetrics.length === 0 && (
+                <div className="explain-box">
+                  No completed deal-level calculation is available for this fund yet.
+                </div>
+              )}
+
+              {calculatedPortfolioMetrics.length > 0 && (
+                <div className="investment-calculation-table-wrap">
+                  <table className="investment-calculation-table">
+                    <thead>
+                      <tr>
+                        <th>Portfolio</th>
+                        <th>Instrument</th>
+                        <th>Invested</th>
+                        <th>Realised</th>
+                        <th>Fair value</th>
+                        <th>MOIC</th>
+                        <th>IRR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {calculatedPortfolioMetrics.slice(0, 12).map((row) => (
+                        <tr key={`calculated-${getString(row, ["portfolio_code"], getId(row))}`}>
+                          <td>
+                            <strong>
+                              {getString(row, ["portfolio_company"], "Portfolio company")}
+                            </strong>
+                            <span>
+                              {getString(row, ["portfolio_code"], "-")}
+                            </span>
+                          </td>
+                          <td>{getString(row, ["instrument_type"], "-")}</td>
+                          <td>{formatCurrencyCr(getNumber(row, ["invested_capital"]))}</td>
+                          <td>{formatCurrencyCr(getNumber(row, ["realised_proceeds"]))}</td>
+                          <td>{formatCurrencyCr(getNumber(row, ["terminal_fair_value"]))}</td>
+                          <td>{formatMultiple(getNumber(row, ["gross_moic"]))}</td>
+                          <td>
+                            {formatPercent(
+                              getStoredRatePercent(row, ["gross_irr"])
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {investmentMetrics.calculationSourceBatch && (
+                <div className="investment-calculation-footnote">
+                  Source batch: {investmentMetrics.calculationSourceBatch}
+                </div>
+              )}
             </div>
 
             <div className="preview-card">
@@ -975,7 +1385,7 @@ export default function InvestmentTeamAIPage() {
 
                 {repaymentScheduleRows.length === 0 && (
                   <div className="explain-box">
-                    No repayment schedules found in migrated portfolio data.
+                    No batch-scoped debt repayment schedules found for this fund.
                   </div>
                 )}
 
@@ -990,7 +1400,15 @@ export default function InvestmentTeamAIPage() {
                             "Portfolio company"
                           )}
                           <br />
-                          Due: {formatDate(row["repayment_due_date"])} ·{" "}
+                          Due: {formatDate(
+                            row["due_date"] ?? row["repayment_due_date"]
+                          )} ·{" "}
+                          {getString(
+                            row,
+                            ["repayment_type"],
+                            "Repayment"
+                          )}
+                          <br />
                           {getString(
                             row,
                             ["security_or_charge"],
@@ -998,7 +1416,9 @@ export default function InvestmentTeamAIPage() {
                           )}
                         </span>
                         <strong>
-                          {getNumber(row, ["interest_rate"]).toFixed(2)}%
+                          {formatCurrencyInr(
+                            getNumber(row, ["total_due"])
+                          )}
                         </strong>
                       </div>
                     ))}
@@ -1233,6 +1653,72 @@ export default function InvestmentTeamAIPage() {
           border-color: rgba(59, 130, 246, 0.45);
         }
 
+        .investment-calculation-status {
+          border-color: rgba(59, 130, 246, 0.5);
+        }
+
+        .investment-calculation-heading {
+          display: flex;
+          justify-content: space-between;
+          gap: 20px;
+          align-items: center;
+          margin-bottom: 18px;
+        }
+
+        .investment-calculation-heading h2 {
+          margin: 2px 0 0;
+        }
+
+        .investment-calculation-table-wrap {
+          overflow-x: auto;
+          border: 1px solid rgba(148, 163, 184, 0.22);
+          border-radius: 18px;
+        }
+
+        .investment-calculation-table {
+          width: 100%;
+          min-width: 980px;
+          border-collapse: collapse;
+        }
+
+        .investment-calculation-table th,
+        .investment-calculation-table td {
+          padding: 14px 16px;
+          text-align: left;
+          border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+          vertical-align: top;
+        }
+
+        .investment-calculation-table th {
+          font-size: 0.76rem;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          color: rgba(191, 219, 254, 0.9);
+          background: rgba(37, 99, 235, 0.12);
+        }
+
+        .investment-calculation-table td {
+          font-size: 0.9rem;
+        }
+
+        .investment-calculation-table td span {
+          display: block;
+          margin-top: 4px;
+          color: rgba(191, 219, 254, 0.72);
+          font-size: 0.78rem;
+        }
+
+        .investment-calculation-table tr:last-child td {
+          border-bottom: 0;
+        }
+
+        .investment-calculation-footnote {
+          margin-top: 14px;
+          color: rgba(191, 219, 254, 0.76);
+          font-size: 0.78rem;
+          overflow-wrap: anywhere;
+        }
+
         @media (max-width: 860px) {
           .investment-fund-context {
             grid-template-columns: 1fr;
@@ -1244,6 +1730,11 @@ export default function InvestmentTeamAIPage() {
 
           .investment-fund-switcher select {
             min-height: 48px;
+          }
+
+          .investment-calculation-heading {
+            align-items: flex-start;
+            flex-direction: column;
           }
         }
       `}</style>

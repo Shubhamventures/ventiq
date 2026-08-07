@@ -3,8 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
+import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 
 type DataRow = Record<string, unknown>;
+
+type PerformanceCalculationResponse = {
+  run?: DataRow | null;
+  fundMetric?: DataRow | null;
+  portfolioMetrics?: DataRow[];
+  investorMetrics?: DataRow[];
+  reconciliations?: DataRow[];
+  portfolioValuations?: DataRow[];
+  error?: string;
+};
 
 type InvestorRelationsEvent = {
   id: string;
@@ -59,6 +70,36 @@ function formatCurrencyCr(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "₹0 Cr";
 
   return `₹${(value / 10000000).toFixed(1)} Cr`;
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return "0.0%";
+  return `${value.toFixed(1)}%`;
+}
+
+function getStoredRatePercent(row: DataRow | undefined, keys: string[]) {
+  const value = getNumber(row, keys);
+
+  if (!Number.isFinite(value)) return 0;
+
+  // Calculation Engine outputs store IRR as a decimal rate (0.1396 = 13.96%).
+  // Legacy sources may already store percentage values (13.96 = 13.96%).
+  return Math.abs(value) <= 1 ? value * 100 : value;
+}
+
+function formatMultiple(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "-";
+  return `${value.toFixed(2)}x`;
+}
+
+function formatDate(value: unknown) {
+  if (typeof value !== "string" || !value) return "-";
+
+  return new Date(value).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function formatDateTime(value: unknown) {
@@ -125,6 +166,49 @@ function filterRowsForFund(
   });
 }
 
+function rowBelongsToSourceBatch(row: DataRow, sourceBatch: string) {
+  if (!sourceBatch) return false;
+
+  return ["source_batch_id", "migration_batch_id", "batch_id"].some(
+    (key) => getString(row, [key], "") === sourceBatch
+  );
+}
+
+function isOpenComplianceStatus(row: DataRow) {
+  const status = getString(
+    row,
+    ["filing_status", "migration_status", "status"],
+    ""
+  ).toLowerCase();
+
+  if (!status) return true;
+
+  return ![
+    "filed",
+    "completed",
+    "closed",
+    "approved",
+    "resolved",
+    "not applicable",
+  ].includes(status);
+}
+
+function sumRows(rows: DataRow[], keys: string[]) {
+  return rows.reduce((sum, row) => sum + getNumber(row, keys), 0);
+}
+
+function latestTimestamp(rows: DataRow[]) {
+  return (
+    rows
+      .map((row) =>
+        getString(row, ["updated_at", "created_at", "generated_at"], "")
+      )
+      .filter(Boolean)
+      .sort()
+      .at(-1) ?? ""
+  );
+}
+
 function uniqueFundNames(rowGroups: DataRow[][]) {
   return Array.from(
     new Set(
@@ -185,6 +269,7 @@ export default function FundraisingAIPage() {
     setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund(DEFAULT_FUND_NAME);
+  const { session } = useVentiqAuth();
   const [availableFunds, setAvailableFunds] = useState<string[]>([
     DEFAULT_FUND_NAME,
   ]);
@@ -206,6 +291,18 @@ export default function FundraisingAIPage() {
     DataRow[]
   >([]);
   const [dataRoomQuestions, setDataRoomQuestions] = useState<DataRow[]>([]);
+  const [investorCashflows, setInvestorCashflows] = useState<DataRow[]>([]);
+  const [latestCalculationRun, setLatestCalculationRun] =
+    useState<DataRow | null>(null);
+  const [calculatedFundMetric, setCalculatedFundMetric] =
+    useState<DataRow | null>(null);
+  const [calculatedInvestorMetrics, setCalculatedInvestorMetrics] = useState<
+    DataRow[]
+  >([]);
+  const [calculationReconciliations, setCalculationReconciliations] = useState<
+    DataRow[]
+  >([]);
+  const [calculationLoadMessage, setCalculationLoadMessage] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -215,7 +312,7 @@ export default function FundraisingAIPage() {
 
     if (!isSupabaseConfigured || !supabase) {
       setErrorMessage(
-        "The sample Investor Relations workspace is temporarily unavailable. Please request a walkthrough."
+        "The Investor Relations workspace is unavailable because Supabase is not configured."
       );
       setFundActivationStatus("Unavailable");
       setLoading(false);
@@ -228,191 +325,353 @@ export default function FundraisingAIPage() {
     setFundActivatedAt("");
     setFundActivatedBy("");
 
-    try {
-      const [
-        fundMasterResult,
-        activationResult,
-        investorBatchesResult,
-        pdfBatchesResult,
-        complianceBatchesResult,
-        investorsResult,
-        commitmentsResult,
-        investorDocumentsResult,
-        complianceItemsResult,
-        dataRoomDocumentsResult,
-        dataRoomEngagementResult,
-        dataRoomQuestionsResult,
-      ] = await Promise.all([
-        supabase.from("fund_master").select("*"),
+    async function loadLatestPerformanceCalculation(): Promise<PerformanceCalculationResponse | null> {
+      const accessToken = session?.access_token ?? "";
 
-        supabase
+      if (!accessToken) {
+        setCalculationLoadMessage(
+          "Sign in to load the verified Calculation Engine outputs."
+        );
+        return null;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/metrics/calculate?fundName=${encodeURIComponent(activeFundName)}`,
+          {
+            method: "GET",
+            headers: { Authorization: `Bearer ${accessToken}` },
+            cache: "no-store",
+          }
+        );
+        const result =
+          (await response.json()) as PerformanceCalculationResponse;
+
+        if (!response.ok) {
+          throw new Error(
+            result.error || "Unable to load verified investor calculations."
+          );
+        }
+
+        setCalculationLoadMessage("");
+        return result;
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Unable to load verified investor calculations.";
+
+        console.warn(
+          "VENTIQ Investor Relations workspace could not load calculated metrics:",
+          message
+        );
+        setCalculationLoadMessage(message);
+        return null;
+      }
+    }
+
+    const calculationData = await loadLatestPerformanceCalculation();
+    const calculationRun = calculationData?.run ?? null;
+    const sourceBatchIds = calculationRun?.source_batch_ids;
+    const sourceBatch = Array.isArray(sourceBatchIds)
+      ? String(sourceBatchIds[0] ?? "")
+      : "";
+
+    setLatestCalculationRun(calculationRun);
+    setCalculatedFundMetric(calculationData?.fundMetric ?? null);
+    setCalculatedInvestorMetrics(calculationData?.investorMetrics ?? []);
+    setCalculationReconciliations(calculationData?.reconciliations ?? []);
+
+    const db = supabase as any;
+
+    async function selectRows(
+      tableName: string,
+      options?: {
+        orderBy?: string;
+        ascending?: boolean;
+        eq?: { column: string; value: string };
+      }
+    ) {
+      try {
+        let query = db.from(tableName).select("*");
+
+        if (options?.eq) {
+          query = query.eq(options.eq.column, options.eq.value);
+        }
+
+        if (options?.orderBy) {
+          query = query.order(options.orderBy, {
+            ascending: options.ascending ?? false,
+          });
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+          console.warn(
+            `VENTIQ Investor Relations dashboard skipped ${tableName}:`,
+            error.message
+          );
+          return [] as DataRow[];
+        }
+
+        return (data ?? []) as DataRow[];
+      } catch (error) {
+        console.warn(
+          `VENTIQ Investor Relations dashboard skipped ${tableName}:`,
+          error
+        );
+        return [] as DataRow[];
+      }
+    }
+
+    async function loadActivationRecord() {
+      try {
+        const { data, error } = await db
           .from("fund_activation_status")
           .select("status, activated_at, activated_by, readiness_score")
           .eq("fund_name", activeFundName)
-          .maybeSingle(),
+          .maybeSingle();
 
-        supabase
-          .from("investor_import_batches")
-          .select("*")
-          .order("created_at", { ascending: false }),
+        if (error) {
+          console.warn(
+            "VENTIQ Investor Relations dashboard could not read fund activation:",
+            error.message
+          );
+          return null;
+        }
 
-        supabase
-          .from("pdf_intelligence_batches")
-          .select("*")
-          .order("created_at", { ascending: false }),
+        return (data as DataRow | null) ?? null;
+      } catch (error) {
+        console.warn(
+          "VENTIQ Investor Relations dashboard could not read fund activation:",
+          error
+        );
+        return null;
+      }
+    }
 
-        supabase
-          .from("compliance_data_migration_batches")
-          .select("*")
-          .order("created_at", { ascending: false }),
-
-        supabase
-          .from("investor_master")
-          .select("*")
-          .order("created_at", { ascending: false }),
-
-        supabase
-          .from("fund_commitments")
-          .select("*")
-          .order("created_at", { ascending: false }),
-
-        supabase
-          .from("investor_documents")
-          .select("*")
-          .order("created_at", { ascending: false }),
-
-        supabase
-          .from("compliance_items")
-          .select("*")
-          .order("created_at", { ascending: false }),
-
-        supabase
-          .from("data_room_documents")
-          .select("*")
-          .order("imported_at", { ascending: false }),
-
-        supabase
-          .from("data_room_engagement_events")
-          .select("*")
-          .order("event_time", { ascending: false }),
-
-        supabase
-          .from("data_room_questions")
-          .select("*")
-          .order("asked_at", { ascending: false }),
+    try {
+      const [
+        fundMasterRows,
+        investorRows,
+        commitmentRows,
+        investorCashflowRows,
+        investorDocumentRows,
+        complianceRows,
+        migrationUploadRows,
+        dataRoomDocumentRows,
+        dataRoomEngagementRows,
+        dataRoomQuestionRows,
+        activationRecord,
+      ] = await Promise.all([
+        selectRows("fund_master"),
+        selectRows("investor_master", {
+          orderBy: "investor_code",
+          ascending: true,
+        }),
+        selectRows("fund_commitments"),
+        selectRows("investor_cashflows", {
+          orderBy: "cashflow_date",
+          ascending: false,
+        }),
+        selectRows("investor_documents", {
+          orderBy: "created_at",
+          ascending: false,
+        }),
+        selectRows("compliance_items", {
+          orderBy: "due_date",
+          ascending: true,
+        }),
+        selectRows("migration_file_uploads", {
+          orderBy: "created_at",
+          ascending: false,
+        }),
+        selectRows("data_room_documents", {
+          orderBy: "imported_at",
+          ascending: false,
+        }),
+        selectRows("data_room_engagement_events", {
+          orderBy: "event_time",
+          ascending: false,
+        }),
+        selectRows("data_room_questions", {
+          orderBy: "asked_at",
+          ascending: false,
+        }),
+        loadActivationRecord(),
       ]);
-
-      const allFundMaster = fundMasterResult.error
-        ? []
-        : ((fundMasterResult.data ?? []) as DataRow[]);
-      const allInvestorBatches = investorBatchesResult.error
-        ? []
-        : ((investorBatchesResult.data ?? []) as DataRow[]);
-      const allPdfBatches = pdfBatchesResult.error
-        ? []
-        : ((pdfBatchesResult.data ?? []) as DataRow[]);
-      const allComplianceBatches = complianceBatchesResult.error
-        ? []
-        : ((complianceBatchesResult.data ?? []) as DataRow[]);
-      const allInvestors = investorsResult.error
-        ? []
-        : ((investorsResult.data ?? []) as DataRow[]);
-      const allCommitments = commitmentsResult.error
-        ? []
-        : ((commitmentsResult.data ?? []) as DataRow[]);
-      const allInvestorDocuments = investorDocumentsResult.error
-        ? []
-        : ((investorDocumentsResult.data ?? []) as DataRow[]);
-      const allComplianceItems = complianceItemsResult.error
-        ? []
-        : ((complianceItemsResult.data ?? []) as DataRow[]);
-      const allDataRoomDocuments = dataRoomDocumentsResult.error
-        ? []
-        : ((dataRoomDocumentsResult.data ?? []) as DataRow[]);
-      const allDataRoomEngagement = dataRoomEngagementResult.error
-        ? []
-        : ((dataRoomEngagementResult.data ?? []) as DataRow[]);
-      const allDataRoomQuestions = dataRoomQuestionsResult.error
-        ? []
-        : ((dataRoomQuestionsResult.data ?? []) as DataRow[]);
 
       const detectedFunds = uniqueFundNames([
-        allFundMaster,
-        allInvestorBatches,
-        allPdfBatches,
-        allComplianceBatches,
-        allInvestors,
-        allCommitments,
-        allInvestorDocuments,
-        allComplianceItems,
-        allDataRoomDocuments,
+        fundMasterRows,
+        investorRows,
+        commitmentRows,
+        investorDocumentRows,
+        complianceRows,
+        dataRoomDocumentRows,
       ]);
+      const nextFunds = Array.from(
+        new Set([DEFAULT_FUND_NAME, activeFundName, ...detectedFunds])
+      )
+        .filter(Boolean)
+        .sort((left, right) => left.localeCompare(right));
 
-      setAvailableFunds(
-        Array.from(new Set([DEFAULT_FUND_NAME, activeFundName, ...detectedFunds]))
-          .filter(Boolean)
-          .sort((left, right) => left.localeCompare(right))
-      );
+      setAvailableFunds(nextFunds);
 
-      const activationRecord = activationResult.error
-        ? null
-        : ((activationResult.data as DataRow | null) ?? null);
-
+      const activation = activationRecord ?? null;
       setFundActivationStatus(
-        getString(activationRecord ?? undefined, ["status"], "Setup Not Started")
+        getString(activation ?? undefined, ["status"], "Setup Not Started")
       );
       setFundActivatedAt(
-        getString(activationRecord ?? undefined, ["activated_at"], "")
+        getString(activation ?? undefined, ["activated_at"], "")
       );
       setFundActivatedBy(
-        getString(activationRecord ?? undefined, ["activated_by"], "")
+        getString(activation ?? undefined, ["activated_by"], "")
       );
 
-      const fundInvestorBatches = filterRowsForFund(
-        allInvestorBatches,
-        activeFundName
-      );
-      const fundPdfBatches = filterRowsForFund(allPdfBatches, activeFundName);
-      const fundComplianceBatches = filterRowsForFund(
-        allComplianceBatches,
-        activeFundName
-      );
-      const fundInvestors = filterRowsForFund(allInvestors, activeFundName);
-      const fundCommitments = filterRowsForFund(allCommitments, activeFundName);
-      const fundInvestorDocuments = filterRowsForFund(
-        allInvestorDocuments,
-        activeFundName
-      );
-      const fundComplianceItems = filterRowsForFund(
-        allComplianceItems,
-        activeFundName
-      );
-      const fundDataRoomDocuments = filterRowsForFund(
-        allDataRoomDocuments,
-        activeFundName,
-        true
-      );
-      const fundEngagementRows = filterLinkedDataRoomRows(
-        allDataRoomEngagement,
-        activeFundName,
-        fundDataRoomDocuments
-      );
-      const fundQuestionRows = filterLinkedDataRoomRows(
-        allDataRoomQuestions,
-        activeFundName,
-        fundDataRoomDocuments
-      );
+      const calculationBatchRows = (rows: DataRow[]) =>
+        rows.filter((row) => rowBelongsToSourceBatch(row, sourceBatch));
 
-      setLatestInvestorBatch(fundInvestorBatches[0] ?? null);
-      setLatestPdfBatch(fundPdfBatches[0] ?? null);
-      setLatestComplianceBatch(fundComplianceBatches[0] ?? null);
-      setInvestors(fundInvestors);
-      setCommitments(fundCommitments);
-      setInvestorDocuments(fundInvestorDocuments);
-      setComplianceItems(fundComplianceItems);
-      setDataRoomDocuments(fundDataRoomDocuments);
-      setDataRoomEngagementEvents(fundEngagementRows);
-      setDataRoomQuestions(fundQuestionRows);
+      const scopedInvestors = filterRowsForFund(
+        calculationBatchRows(investorRows),
+        activeFundName
+      );
+      const scopedCommitments = filterRowsForFund(
+        calculationBatchRows(commitmentRows),
+        activeFundName
+      );
+      const scopedInvestorCashflows = filterRowsForFund(
+        calculationBatchRows(investorCashflowRows),
+        activeFundName
+      );
+      const scopedInvestorDocuments = filterRowsForFund(
+        calculationBatchRows(investorDocumentRows),
+        activeFundName
+      );
+      const scopedComplianceItems = filterRowsForFund(
+        calculationBatchRows(complianceRows),
+        activeFundName
+      );
+      const scopedDataRoomDocuments = filterRowsForFund(
+        calculationBatchRows(dataRoomDocumentRows),
+        activeFundName
+      );
+      const scopedEngagementRows = filterRowsForFund(
+        calculationBatchRows(dataRoomEngagementRows),
+        activeFundName
+      );
+      const scopedQuestionRows = filterRowsForFund(
+        calculationBatchRows(dataRoomQuestionRows),
+        activeFundName
+      );
+      const scopedPdfUploads = migrationUploadRows.filter((row) => {
+        const belongsToBatch =
+          getString(row, ["batch_id"], "") === sourceBatch;
+        const belongsToFund =
+          getFundName(row).toLowerCase() === activeFundName.toLowerCase();
+        const category = getString(row, ["category", "dataset_key"], "")
+          .toLowerCase();
+        const fileName = getString(row, ["original_file_name"], "")
+          .toLowerCase();
+        const isPdf =
+          category === "pdf" ||
+          category.includes("pdf") ||
+          fileName.endsWith(".pdf");
+
+        return belongsToBatch && belongsToFund && isPdf;
+      });
+
+      setInvestors(scopedInvestors);
+      setCommitments(scopedCommitments);
+      setInvestorCashflows(scopedInvestorCashflows);
+      setInvestorDocuments(scopedInvestorDocuments);
+      setComplianceItems(scopedComplianceItems);
+      setDataRoomDocuments(scopedDataRoomDocuments);
+      setDataRoomEngagementEvents(scopedEngagementRows);
+      setDataRoomQuestions(scopedQuestionRows);
+
+      const investorSummary = scopedInvestors.length
+        ? {
+            id: `${sourceBatch}-investor-summary`,
+            fund_name: activeFundName,
+            batch_name: `${activeFundName} canonical investor dataset`,
+            total_records: scopedInvestors.length,
+            total_commitment: sumRows(scopedCommitments, [
+              "commitment_amount",
+              "committed_amount",
+              "commitment",
+            ]),
+            status: "activated",
+            source_batch_id: sourceBatch,
+            created_at: latestTimestamp([
+              ...scopedInvestors,
+              ...scopedCommitments,
+            ]),
+          }
+        : null;
+
+      const pdfReady = scopedPdfUploads.filter((row) => {
+        const status = getString(
+          row,
+          ["upload_status", "processing_status", "status"],
+          ""
+        ).toLowerCase();
+        return ["ready", "processed", "completed", "uploaded"].includes(
+          status
+        );
+      }).length;
+      const pdfReview = scopedPdfUploads.filter((row) => {
+        const status = getString(
+          row,
+          ["upload_status", "processing_status", "status"],
+          ""
+        ).toLowerCase();
+        return status.includes("review") || status.includes("unmatched");
+      }).length;
+      const pdfSummary = scopedPdfUploads.length
+        ? {
+            id: `${sourceBatch}-pdf-summary`,
+            fund_name: activeFundName,
+            batch_name: `${activeFundName} canonical PDF dataset`,
+            total_files: scopedPdfUploads.length,
+            ready_files: pdfReady,
+            review_files: pdfReview,
+            unmatched_files: 0,
+            source_batch_id: sourceBatch,
+            created_at: latestTimestamp(scopedPdfUploads),
+          }
+        : null;
+
+      const evidenceAvailable = scopedComplianceItems.filter(
+        (row) =>
+          row["evidence_available"] === true ||
+          ["true", "yes", "available", "complete", "completed"].includes(
+            getString(row, ["evidence_available", "evidence_status"], "")
+              .toLowerCase()
+          )
+      ).length;
+      const complianceSummary = scopedComplianceItems.length
+        ? {
+            id: `${sourceBatch}-compliance-summary`,
+            fund_name: activeFundName,
+            batch_name: `${activeFundName} canonical compliance dataset`,
+            total_items: scopedComplianceItems.length,
+            evidence_available_count: evidenceAvailable,
+            pending_review_count: scopedComplianceItems.filter(
+              isOpenComplianceStatus
+            ).length,
+            high_risk_count: scopedComplianceItems.filter(
+              (row) =>
+                getString(row, ["risk_level"], "").toLowerCase() === "high"
+            ).length,
+            source_batch_id: sourceBatch,
+            created_at: latestTimestamp(scopedComplianceItems),
+          }
+        : null;
+
+      setLatestInvestorBatch(investorSummary);
+      setLatestPdfBatch(pdfSummary);
+      setLatestComplianceBatch(complianceSummary);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -426,7 +685,7 @@ export default function FundraisingAIPage() {
 
   useEffect(() => {
     loadInvestorRelationsWorkspace();
-  }, [activeFundName, fundContextReady]);
+  }, [activeFundName, fundContextReady, session?.access_token]);
 
   const investorRelationsMetrics = useMemo(() => {
     const importedInvestorCount = getNumber(latestInvestorBatch ?? undefined, [
@@ -524,35 +783,37 @@ export default function FundraisingAIPage() {
       "high_risk_count",
     ]);
 
-    const rowCompliancePending = complianceItems.filter((row) => {
-      const status = getString(row, ["filing_status"], "").toLowerCase();
-
-      return status === "pending" || status === "review" || status === "overdue";
-    }).length;
+    const rowCompliancePending = complianceItems.filter(
+      isOpenComplianceStatus
+    ).length;
 
     const rowComplianceHighRisk = complianceItems.filter(
       (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
     ).length;
 
+    const investorDataScore =
+      investorCount > 0 && commitments.length > 0 ? 40 : investorCount > 0 ? 20 : 0;
+    const calculationScore = calculatedInvestorMetrics.length > 0 ? 20 : 0;
+    const evidenceCoverage = complianceItems.length
+      ? complianceEvidence / complianceItems.length
+      : 0;
+    const evidenceScore = Math.round(evidenceCoverage * 20);
+    const documentScore =
+      investorCount > 0
+        ? Math.round(
+            Math.min(portalAvailableDocuments, investorCount) / investorCount * 20
+          )
+        : 0;
     const readinessScore = Math.min(
-      95,
-      Math.max(
-        0,
-        45 +
-          Math.min(20, generatedDocuments * 2) +
-          Math.min(15, portalAvailableDocuments * 2) +
-          Math.min(10, dataRoomDocuments.length * 3) +
-          Math.min(10, answeredQuestions * 3) +
-          Math.min(10, dataRoomEngagementEvents.length * 2) -
-          Math.min(15, openQuestions * 4) -
-          Math.min(10, pdfReview * 2) -
-          Math.min(10, missingInvestorDocuments)
-      )
+      100,
+      investorDataScore + calculationScore + evidenceScore + documentScore
     );
 
     return {
       investorCount,
       totalCommitment,
+      investorCashflows: investorCashflows.length,
+      verifiedInvestorCalculations: calculatedInvestorMetrics.length,
       generatedDocuments,
       storedDocuments: Math.max(storedDocuments, pdfReady),
       portalAvailableDocuments,
@@ -584,7 +845,49 @@ export default function FundraisingAIPage() {
     dataRoomEngagementEvents,
     dataRoomQuestions,
     complianceItems,
+    investorCashflows,
+    calculatedInvestorMetrics,
   ]);
+
+  const calculationSummary = useMemo(() => {
+    const passCount = calculationReconciliations.filter(
+      (row) =>
+        getString(row, ["reconciliation_status", "status"], "")
+          .toLowerCase() === "pass"
+    ).length;
+    const warningCount = calculationReconciliations.filter(
+      (row) =>
+        getString(row, ["reconciliation_status", "status"], "")
+          .toLowerCase() === "warning"
+    ).length;
+    const failCount = calculationReconciliations.filter(
+      (row) =>
+        getString(row, ["reconciliation_status", "status"], "")
+          .toLowerCase() === "fail"
+    ).length;
+    const sourceBatchIds = latestCalculationRun?.source_batch_ids;
+    const sourceBatch = Array.isArray(sourceBatchIds)
+      ? String(sourceBatchIds[0] ?? "")
+      : "";
+
+    return {
+      passCount,
+      warningCount,
+      failCount,
+      totalCount: calculationReconciliations.length,
+      sourceBatch,
+      version: getString(
+        latestCalculationRun ?? undefined,
+        ["calculation_version"],
+        "-"
+      ),
+      asOfDate: getString(
+        latestCalculationRun ?? undefined,
+        ["as_of_date"],
+        ""
+      ),
+    };
+  }, [calculationReconciliations, latestCalculationRun]);
 
   const recentInvestors = useMemo(() => {
     return investors.slice(0, 8);
@@ -939,12 +1242,137 @@ export default function FundraisingAIPage() {
           fundActivationStatus === "Active" && (
           <>
             <div className="preview-card">
+              <div className="section-heading-row">
+                <div>
+                  <p className="eyebrow">Verified Investor Performance Layer</p>
+                  <h2>Calculation Engine outputs for {activeFundName}</h2>
+                </div>
+
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/migration/performance-calculations"
+                >
+                  Open Calculation Engine
+                </a>
+              </div>
+
+              {calculationLoadMessage && (
+                <div className="explain-box">{calculationLoadMessage}</div>
+              )}
+
+              {!calculationLoadMessage && latestCalculationRun && (
+                <>
+                  <div className="explain-box">
+                    Verified Calculation Engine v{calculationSummary.version} · as
+                    of {formatDate(calculationSummary.asOfDate)} · {calculationSummary.passCount}/
+                    {calculationSummary.totalCount} reconciliation controls passed · {" "}
+                    {calculatedInvestorMetrics.length} investor calculations.
+                  </div>
+
+                  <div className="impact-grid">
+                    <div className="impact-card">
+                      <h3>
+                        {formatCurrencyCr(
+                          getNumber(calculatedFundMetric ?? undefined, [
+                            "total_commitments",
+                            "total_commitment",
+                          ])
+                        )}
+                      </h3>
+                      <p>Total commitments</p>
+                    </div>
+
+                    <div className="impact-card">
+                      <h3>
+                        {formatCurrencyCr(
+                          getNumber(calculatedFundMetric ?? undefined, [
+                            "paid_in_capital",
+                            "paid_in",
+                          ])
+                        )}
+                      </h3>
+                      <p>Paid-in capital</p>
+                    </div>
+
+                    <div className="impact-card">
+                      <h3>
+                        {formatCurrencyCr(
+                          getNumber(calculatedFundMetric ?? undefined, [
+                            "net_distributions",
+                            "total_distributions",
+                          ])
+                        )}
+                      </h3>
+                      <p>Net cash distributions</p>
+                    </div>
+
+                    <div className="impact-card">
+                      <h3>
+                        {formatCurrencyCr(
+                          getNumber(calculatedFundMetric ?? undefined, [
+                            "latest_net_nav",
+                            "net_nav",
+                          ])
+                        )}
+                      </h3>
+                      <p>Latest Net NAV</p>
+                    </div>
+                  </div>
+
+                  <div className="impact-grid">
+                    <div className="impact-card">
+                      <h3>
+                        {formatPercent(
+                          getStoredRatePercent(calculatedFundMetric ?? undefined, [
+                            "net_irr",
+                          ])
+                        )}
+                      </h3>
+                      <p>Net IRR</p>
+                    </div>
+
+                    <div className="impact-card">
+                      <h3>
+                        {formatMultiple(
+                          getNumber(calculatedFundMetric ?? undefined, ["dpi"])
+                        )}
+                      </h3>
+                      <p>DPI</p>
+                    </div>
+
+                    <div className="impact-card">
+                      <h3>
+                        {formatMultiple(
+                          getNumber(calculatedFundMetric ?? undefined, ["tvpi"])
+                        )}
+                      </h3>
+                      <p>TVPI</p>
+                    </div>
+
+                    <div className="impact-card">
+                      <h3>{calculatedInvestorMetrics.length}</h3>
+                      <p>Verified investor calculations</p>
+                    </div>
+                  </div>
+
+                  <div className="explain-box">
+                    Performance distribution basis: {getString(
+                      calculatedFundMetric ?? undefined,
+                      ["performance_distribution_basis"],
+                      "Net Cash"
+                    )} · Source batch: {calculationSummary.sourceBatch || "-"}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="preview-card">
               <h2>{activeFundName} Investor Relations Workspace</h2>
 
               <div className="explain-box">
-                VENTIQ reviewed {investorRelationsMetrics.investorCount}
+                VENTIQ reviewed {investorRelationsMetrics.investorCount}{" "}
                 investor record(s),{" "}
-                {formatCurrencyCr(investorRelationsMetrics.totalCommitment)}
+                {formatCurrencyCr(investorRelationsMetrics.totalCommitment)}{" "}
                 total commitment,{" "}
                 {investorRelationsMetrics.generatedDocuments} investor / PDF
                 document(s), {investorRelationsMetrics.openQuestions} open DDQ
@@ -1003,13 +1431,13 @@ export default function FundraisingAIPage() {
               </div>
 
               <div className="impact-card">
-                <h3>{investorRelationsMetrics.portalAvailableDocuments}</h3>
-                <p>Portal-ready documents</p>
+                <h3>{investorRelationsMetrics.verifiedInvestorCalculations}</h3>
+                <p>Verified investor calculations</p>
               </div>
 
               <div className="impact-card">
                 <h3>{investorRelationsMetrics.readinessScore}%</h3>
-                <p>IR readiness</p>
+                <p>IR data readiness</p>
               </div>
             </div>
 
@@ -1030,9 +1458,16 @@ export default function FundraisingAIPage() {
               </div>
 
               <div className="impact-card">
-                <h3>{investorRelationsMetrics.pdfReview}</h3>
-                <p>PDF review queue</p>
+                <h3>{investorRelationsMetrics.pdfTotal}</h3>
+                <p>Batch PDF evidence files</p>
               </div>
+            </div>
+
+            <div className="explain-box" style={{ marginBottom: 18 }}>
+              Investor Relations metrics on this page are restricted to the latest
+              completed canonical batch. Legacy investor imports, PDF batches, data
+              room records and prior pilot records are excluded from active-fund
+              control totals.
             </div>
 
             <div className="preview-card">
@@ -1040,7 +1475,7 @@ export default function FundraisingAIPage() {
 
               <div className="journal-preview">
                 <div className="journal-row">
-                  <span>Investor / PDF documents</span>
+                  <span>Investor / batch PDF documents</span>
                   <strong>{investorRelationsMetrics.generatedDocuments}</strong>
                 </div>
 

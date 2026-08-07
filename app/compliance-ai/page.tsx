@@ -3,8 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
+import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 
 type DataRow = Record<string, unknown>;
+
+type PerformanceCalculationResponse = {
+  run?: DataRow | null;
+  reconciliations?: DataRow[];
+  error?: string;
+};
 
 type ComplianceActivityEvent = {
   id: string;
@@ -124,12 +131,32 @@ function getActivityIcon(status: string) {
   return "⚪";
 }
 
+function isOpenComplianceStatus(row: DataRow) {
+  const status = getString(
+    row,
+    ["filing_status", "migration_status", "status"],
+    ""
+  ).toLowerCase();
+
+  if (!status) return true;
+
+  return ![
+    "filed",
+    "completed",
+    "closed",
+    "approved",
+    "resolved",
+    "not applicable",
+  ].includes(status);
+}
+
 export default function ComplianceAIPage() {
   const {
     activeFundName,
     setActiveFundName,
     isReady: isFundContextReady,
   } = useActiveFund("VENTIQ Growth Fund II");
+  const { session } = useVentiqAuth();
 
   const [fundOptions, setFundOptions] = useState<string[]>([]);
   const [activationStatus, setActivationStatus] = useState("Setup Not Started");
@@ -145,6 +172,12 @@ export default function ComplianceAIPage() {
   const [investorDocuments, setInvestorDocuments] = useState<DataRow[]>([]);
   const [regulatoryMatches, setRegulatoryMatches] = useState<DataRow[]>([]);
   const [regulatoryCirculars, setRegulatoryCirculars] = useState<DataRow[]>([]);
+  const [latestCalculationRun, setLatestCalculationRun] =
+    useState<DataRow | null>(null);
+  const [calculationReconciliations, setCalculationReconciliations] = useState<
+    DataRow[]
+  >([]);
+  const [calculationLoadMessage, setCalculationLoadMessage] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -164,13 +197,56 @@ export default function ComplianceAIPage() {
     setErrorMessage("");
 
     try {
+      const accessToken = session?.access_token ?? "";
+
+      if (!accessToken) {
+        throw new Error(
+          "Sign in to load the verified compliance source batch."
+        );
+      }
+
+      const calculationResponse = await fetch(
+        `/api/metrics/calculate?fundName=${encodeURIComponent(activeFundName)}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: "no-store",
+        }
+      );
+      const calculationResult =
+        (await calculationResponse.json()) as PerformanceCalculationResponse;
+
+      if (!calculationResponse.ok) {
+        throw new Error(
+          calculationResult.error ||
+            "Unable to load the verified compliance source batch."
+        );
+      }
+
+      const calculationRun = calculationResult.run ?? null;
+      const sourceBatchIds = calculationRun?.source_batch_ids;
+      const sourceBatch = Array.isArray(sourceBatchIds)
+        ? String(sourceBatchIds[0] ?? "")
+        : "";
+
+      if (!sourceBatch) {
+        throw new Error(
+          "No completed canonical calculation batch is available for this fund."
+        );
+      }
+
+      setLatestCalculationRun(calculationRun);
+      setCalculationReconciliations(
+        calculationResult.reconciliations ?? []
+      );
+      setCalculationLoadMessage("");
+
       const [
         fundOptionsResult,
         activationResult,
         complianceItemsResult,
-        pdfDocumentsResult,
+        migrationPdfFilesResult,
         fundRowResult,
-        investorDocumentsResult,
         regulatoryMatchesResult,
         regulatoryCircularsResult,
       ] = await Promise.all([
@@ -186,27 +262,27 @@ export default function ComplianceAIPage() {
           .from("compliance_items")
           .select("*")
           .eq("fund_name", activeFundName)
+          .eq("source_batch_id", sourceBatch)
           .order("due_date", { ascending: true }),
 
         supabase
-          .from("pdf_intelligence_documents")
-          .select("*")
+          .from("migration_file_uploads")
+          .select(
+            "id, batch_id, fund_name, category, original_file_name, storage_path, upload_status, processing_status"
+          )
+          .eq("batch_id", sourceBatch)
           .eq("fund_name", activeFundName)
+          .eq("category", "pdf")
           .order("created_at", { ascending: false }),
 
         supabase
           .from("fund_master")
           .select("*")
           .eq("fund_name", activeFundName)
+          .eq("source_batch_id", sourceBatch)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
-
-        supabase
-          .from("investor_documents")
-          .select("*")
-          .eq("fund_name", activeFundName)
-          .order("created_at", { ascending: false }),
 
         supabase
           .from("regulatory_source_matches")
@@ -222,7 +298,7 @@ export default function ComplianceAIPage() {
       const firstError =
         fundOptionsResult.error ||
         complianceItemsResult.error ||
-        pdfDocumentsResult.error ||
+        migrationPdfFilesResult.error ||
         fundRowResult.error;
 
       if (firstError) {
@@ -253,11 +329,46 @@ export default function ComplianceAIPage() {
       );
 
       const complianceRows = (complianceItemsResult.data ?? []) as DataRow[];
-      const pdfRows = (pdfDocumentsResult.data ?? []) as DataRow[];
+      const migrationPdfFiles = (migrationPdfFilesResult.data ?? []) as DataRow[];
+      const pdfStoragePaths = Array.from(
+        new Set(
+          migrationPdfFiles
+            .map((row) => getString(row, ["storage_path"], ""))
+            .filter(Boolean)
+        )
+      );
+
+      let pdfRows: DataRow[] = [];
+      let investorDocumentRows: DataRow[] = [];
+
+      if (pdfStoragePaths.length > 0) {
+        const [pdfDocumentsResult, investorDocumentsResult] = await Promise.all([
+          supabase
+            .from("pdf_intelligence_documents")
+            .select("*")
+            .eq("fund_name", activeFundName)
+            .in("storage_path", pdfStoragePaths)
+            .order("created_at", { ascending: false }),
+
+          supabase
+            .from("investor_documents")
+            .select("*")
+            .eq("fund_name", activeFundName)
+            .in("storage_path", pdfStoragePaths)
+            .order("created_at", { ascending: false }),
+        ]);
+
+        if (pdfDocumentsResult.error) {
+          throw new Error(pdfDocumentsResult.error.message);
+        }
+
+        pdfRows = (pdfDocumentsResult.data ?? []) as DataRow[];
+        investorDocumentRows = investorDocumentsResult.error
+          ? []
+          : ((investorDocumentsResult.data ?? []) as DataRow[]);
+      }
+
       const fundRow = (fundRowResult.data as DataRow | null) ?? null;
-      const investorDocumentRows = investorDocumentsResult.error
-        ? []
-        : ((investorDocumentsResult.data ?? []) as DataRow[]);
       const regulatoryMatchRows = regulatoryMatchesResult.error
         ? []
         : ((regulatoryMatchesResult.data ?? []) as DataRow[]);
@@ -269,30 +380,27 @@ export default function ComplianceAIPage() {
       setFundMasterRows(fundRow ? [fundRow] : []);
       setInvestorDocuments(investorDocumentRows);
       setRegulatoryMatches(
-        regulatoryMatchRows.filter((row) => {
-          const fundName = getString(row, ["fund_name"], "");
-          return !fundName || fundName === activeFundName;
-        })
+        regulatoryMatchRows.filter(
+          (row) => getString(row, ["fund_name"], "") === activeFundName
+        )
       );
       setRegulatoryCirculars(
-        regulatoryCircularRows.filter((row) => {
-          const fundName = getString(row, ["fund_name"], "");
-          return !fundName || fundName === activeFundName;
-        })
+        regulatoryCircularRows.filter(
+          (row) => getString(row, ["fund_name"], "") === activeFundName
+        )
       );
 
       const evidenceAvailableCount = complianceRows.filter((row) =>
         Boolean(row["evidence_available"])
       ).length;
-      const pendingReviewCount = complianceRows.filter((row) => {
-        const status = getString(row, ["filing_status"], "").toLowerCase();
-        return ["pending", "review", "overdue", "draft"].includes(status);
-      }).length;
+      const pendingReviewCount = complianceRows.filter(
+        isOpenComplianceStatus
+      ).length;
       const highRiskCount = complianceRows.filter(
         (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
       ).length;
       const readyCount = complianceRows.filter(
-        (row) => getString(row, ["filing_status"], "").toLowerCase() === "ready"
+        (row) => !isOpenComplianceStatus(row)
       ).length;
 
       setLatestComplianceBatch(
@@ -313,6 +421,15 @@ export default function ComplianceAIPage() {
           : null
       );
 
+      const processedPdfStoragePaths = new Set(
+        pdfRows
+          .map((row) => getString(row, ["storage_path"], ""))
+          .filter(Boolean)
+      );
+      const unprocessedPdfCount = migrationPdfFiles.filter((row) => {
+        const storagePath = getString(row, ["storage_path"], "");
+        return Boolean(storagePath) && !processedPdfStoragePaths.has(storagePath);
+      }).length;
       const pdfReviewCount = pdfRows.filter((row) => {
         const status = getString(row, ["status"], "").toLowerCase();
         return status.includes("review") || status.includes("unmatched");
@@ -320,15 +437,24 @@ export default function ComplianceAIPage() {
       const pdfUnmatchedCount = pdfRows.filter((row) =>
         getString(row, ["status"], "").toLowerCase().includes("unmatched")
       ).length;
+      const batchPdfTotal = migrationPdfFiles.length;
+      const totalPdfReview = pdfReviewCount + unprocessedPdfCount;
 
       setLatestPdfBatch(
-        pdfRows.length > 0
+        batchPdfTotal > 0
           ? {
-              id: `active-fund-${activeFundName}-pdf`,
-              created_at: getString(pdfRows[0], ["created_at"], ""),
-              total_files: pdfRows.length,
-              ready_files: Math.max(pdfRows.length - pdfReviewCount, 0),
-              review_files: Math.max(pdfReviewCount - pdfUnmatchedCount, 0),
+              id: `active-fund-${activeFundName}-${sourceBatch}-pdf`,
+              created_at: getString(
+                migrationPdfFiles[0],
+                ["created_at"],
+                getString(pdfRows[0], ["created_at"], "")
+              ),
+              total_files: batchPdfTotal,
+              ready_files: Math.max(batchPdfTotal - totalPdfReview, 0),
+              review_files: Math.max(
+                totalPdfReview - pdfUnmatchedCount,
+                0
+              ),
               unmatched_files: pdfUnmatchedCount,
             }
           : null
@@ -344,11 +470,12 @@ export default function ComplianceAIPage() {
           : null
       );
     } catch (error) {
-      setErrorMessage(
+      const message =
         error instanceof Error
           ? error.message
-          : "Unable to load Compliance workspace."
-      );
+          : "Unable to load Compliance workspace.";
+      setCalculationLoadMessage(message);
+      setErrorMessage(message);
     } finally {
       setLoading(false);
     }
@@ -358,7 +485,7 @@ export default function ComplianceAIPage() {
     if (isFundContextReady) {
       void loadComplianceWorkspace();
     }
-  }, [activeFundName, isFundContextReady]);
+  }, [activeFundName, isFundContextReady, session?.access_token]);
 
   const isFundActive = activationStatus === "Active";
 
@@ -388,18 +515,16 @@ export default function ComplianceAIPage() {
       Boolean(row["evidence_available"])
     ).length;
 
-    const rowPendingReview = complianceItems.filter((row) => {
-      const status = getString(row, ["filing_status"], "").toLowerCase();
-
-      return status === "pending" || status === "review" || status === "overdue";
-    }).length;
+    const rowPendingReview = complianceItems.filter(
+      isOpenComplianceStatus
+    ).length;
 
     const rowHighRisk = complianceItems.filter(
       (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
     ).length;
 
     const rowReady = complianceItems.filter(
-      (row) => getString(row, ["filing_status"], "").toLowerCase() === "ready"
+      (row) => !isOpenComplianceStatus(row)
     ).length;
 
     const totalItems = batchTotalItems || complianceItems.length;
@@ -475,19 +600,10 @@ export default function ComplianceAIPage() {
       Boolean(getString(row, ["storage_url", "storage_path"], ""))
     ).length;
 
-    const evidenceReadinessScore = Math.min(
-      95,
-      Math.max(
-        0,
-        45 +
-          Math.min(25, evidenceAvailable * 5) +
-          Math.min(10, readyItems * 3) +
-          Math.min(10, pdfReady * 2) -
-          Math.min(20, missingEvidence * 4) -
-          Math.min(15, highRiskItems * 5) -
-          Math.min(10, overdueItems * 4)
-      )
-    );
+    const evidenceReadinessScore =
+      totalItems > 0
+        ? Math.round((evidenceAvailable / totalItems) * 100)
+        : 0;
 
     return {
       totalItems,
@@ -521,6 +637,34 @@ export default function ComplianceAIPage() {
     regulatoryMatches,
     regulatoryCirculars,
   ]);
+
+  const calculationSummary = useMemo(() => {
+    const sourceBatchIds = latestCalculationRun?.source_batch_ids;
+    const sourceBatch = Array.isArray(sourceBatchIds)
+      ? String(sourceBatchIds[0] ?? "")
+      : "";
+    const passedControls = calculationReconciliations.filter(
+      (row) =>
+        getString(row, ["status", "reconciliation_status"], "").toLowerCase() ===
+        "pass"
+    ).length;
+
+    return {
+      version: getString(
+        latestCalculationRun ?? undefined,
+        ["calculation_version"],
+        "-"
+      ),
+      asOfDate: getString(
+        latestCalculationRun ?? undefined,
+        ["as_of_date"],
+        ""
+      ),
+      sourceBatch,
+      passedControls,
+      totalControls: calculationReconciliations.length,
+    };
+  }, [latestCalculationRun, calculationReconciliations]);
 
   const priorityItems = useMemo(() => {
     return complianceItems
@@ -676,7 +820,7 @@ export default function ComplianceAIPage() {
       },
       {
         title: "Open migration readiness",
-        value: `${complianceMetrics.evidenceReadinessScore}% evidence readiness`,
+        value: `${complianceMetrics.evidenceReadinessScore}% evidence coverage`,
         href: "/migration/activation",
         priority: "Live",
       },
@@ -786,13 +930,57 @@ export default function ComplianceAIPage() {
         {!loading && !errorMessage && isFundActive && (
           <>
             <div className="preview-card">
+              <div className="section-heading-row">
+                <div>
+                  <p className="eyebrow">Verified Compliance Layer</p>
+                  <h2>Canonical controls for {activeFundName}</h2>
+                </div>
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/migration/performance-calculations"
+                >
+                  Open Calculation Engine
+                </a>
+              </div>
+
+              <div className="logic-note">
+                Verified Calculation Engine v{calculationSummary.version} · as of {formatDate(
+                  calculationSummary.asOfDate
+                )} · {calculationSummary.passedControls}/{calculationSummary.totalControls} reconciliation controls passed · source batch: {calculationSummary.sourceBatch || "-"}.
+              </div>
+
+              <div className="impact-grid">
+                <div className="impact-card">
+                  <h3>{complianceMetrics.totalItems}</h3>
+                  <p>Canonical compliance records</p>
+                </div>
+                <div className="impact-card">
+                  <h3>{complianceMetrics.pendingReview}</h3>
+                  <p>Open compliance items</p>
+                </div>
+                <div className="impact-card">
+                  <h3>{complianceMetrics.evidenceAvailable}</h3>
+                  <p>Evidence available</p>
+                </div>
+                <div className="impact-card">
+                  <h3>{complianceMetrics.highRiskItems}</h3>
+                  <p>High-risk items</p>
+                </div>
+              </div>
+
+              <div className="explain-box">
+                Compliance metrics and PDF evidence counts on this page are restricted to the latest completed canonical intake batch. Global, legacy and prior-batch records are excluded from the active-fund control totals.
+              </div>
+            </div>
+
+            <div className="preview-card">
               <h2>Compliance Workspace Preview</h2>
 
               <div className="explain-box">
                 VENTIQ reviewed {complianceMetrics.totalItems} migrated
                 compliance item(s), {complianceMetrics.evidenceAvailable} item(s)
                 with evidence available, {complianceMetrics.pendingReview} item(s)
-                pending or under review, {complianceMetrics.highRiskItems}
+                pending or under review, {complianceMetrics.highRiskItems}{" "}
                 high-risk item(s), {complianceMetrics.pdfReview} PDF review
                 item(s) and {complianceMetrics.dueSoonItems} item(s) due within
                 15 days.
@@ -861,7 +1049,7 @@ export default function ComplianceAIPage() {
             <div className="impact-grid">
               <div className="impact-card">
                 <h3>{complianceMetrics.pdfTotal}</h3>
-                <p>PDF evidence files</p>
+                <p>Batch PDF evidence files</p>
               </div>
 
               <div className="impact-card">
@@ -876,7 +1064,7 @@ export default function ComplianceAIPage() {
 
               <div className="impact-card">
                 <h3>{complianceMetrics.evidenceReadinessScore}%</h3>
-                <p>Evidence readiness</p>
+                <p>Evidence coverage</p>
               </div>
             </div>
 

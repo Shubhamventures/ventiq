@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
+import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 
 type Investor = {
   id: string;
@@ -13,6 +14,8 @@ type Investor = {
   country: string | null;
   kyc_status: string | null;
   bank_status: string | null;
+  source_batch_id: string | null;
+  updated_at: string | null;
   source: "migration" | "legacy";
 };
 
@@ -75,7 +78,7 @@ type InvestorFinancialPosition = {
   net_contributed: number | null;
   current_nav: number | null;
   investor_irr: number | null;
-  investor_moic: number | null;
+  investor_rvpi: number | null;
   investor_dpi: number | null;
   investor_tvpi: number | null;
   status: string | null;
@@ -131,6 +134,7 @@ type DataRoomDocument = {
 };
 
 type DataRow = Record<string, unknown>;
+
 
 type PortalActivityEvent = {
   id: string;
@@ -194,7 +198,9 @@ function formatCr(value: number) {
 }
 
 function formatPercent(value: number | null | undefined) {
-  return `${Number(value || 0).toFixed(2)}%`;
+  const numeric = Number(value || 0);
+  const percentage = Math.abs(numeric) <= 1 ? numeric * 100 : numeric;
+  return `${percentage.toFixed(2)}%`;
 }
 
 function formatMultiple(value: number | null | undefined) {
@@ -354,6 +360,18 @@ function filterRowsForFund<T extends DataRow>(
     if (!rowFundName) return includeGlobalRows;
     return rowFundName === normalizedFundName;
   });
+}
+
+
+function isPdfUpload(row: DataRow) {
+  const text = [
+    getString(row, ["file_name", "original_file_name", "name"], ""),
+    getString(row, ["file_type", "mime_type", "category"], ""),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return text.includes(".pdf") || text.includes("application/pdf") || text.includes("pdf");
 }
 
 const investorDocumentKits = [
@@ -524,9 +542,33 @@ export default function InvestorPortalPage() {
     setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund("VENTIQ Growth Fund II");
-  const [availableFunds, setAvailableFunds] = useState<string[]>([
-    "VENTIQ Growth Fund II",
-  ]);
+  const {
+    session,
+    activeRole,
+    fundAccess,
+    loading: authLoading,
+  } = useVentiqAuth();
+
+  const availableFunds = useMemo(() => {
+    const authorisedFunds = Array.from(
+      new Set(
+        fundAccess
+          .filter(
+            (access) =>
+              access.role === "investor" &&
+              access.status === "Active" &&
+              access.can_view &&
+              access.fund_name?.trim()
+          )
+          .map((access) => access.fund_name.trim())
+      )
+    ).sort();
+
+    return authorisedFunds.length > 0
+      ? authorisedFunds
+      : [activeFundName];
+  }, [fundAccess, activeFundName]);
+
   const [fundActivationStatus, setFundActivationStatus] =
     useState("Setup Not Started");
   const [fundActivatedAt, setFundActivatedAt] = useState("");
@@ -544,6 +586,13 @@ export default function InvestorPortalPage() {
   const [latestPdfBatch, setLatestPdfBatch] = useState<DataRow | null>(null);
   const [latestComplianceBatch, setLatestComplianceBatch] =
     useState<DataRow | null>(null);
+  const [latestCalculationRun, setLatestCalculationRun] =
+    useState<DataRow | null>(null);
+  const [calculatedInvestorMetrics, setCalculatedInvestorMetrics] = useState<
+    DataRow[]
+  >([]);
+  const [sourceBatch, setSourceBatch] = useState("");
+  const [calculationLoadMessage, setCalculationLoadMessage] = useState("");
 
   const [dataRoomDocuments, setDataRoomDocuments] = useState<DataRoomDocument[]>(
     []
@@ -562,12 +611,51 @@ export default function InvestorPortalPage() {
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
+    if (!fundContextReady || authLoading || availableFunds.length === 0) {
+      return;
+    }
+
+    if (
+      activeRole === "investor" &&
+      !availableFunds.some(
+        (fundName) =>
+          fundName.trim().toLowerCase() === activeFundName.trim().toLowerCase()
+      )
+    ) {
+      setActiveFundName(availableFunds[0]);
+    }
+  }, [
+    activeFundName,
+    activeRole,
+    authLoading,
+    availableFunds,
+    fundContextReady,
+    setActiveFundName,
+  ]);
+
+  useEffect(() => {
     async function loadInvestors() {
-      if (!fundContextReady) return;
+      if (!fundContextReady || authLoading) return;
 
       if (!isSupabaseConfigured || !supabase) {
         setErrorMessage(
-          "The sample Investor Portal is temporarily unavailable. Please request a walkthrough."
+          "The Investor Portal is unavailable because Supabase is not configured."
+        );
+        setLoading(false);
+        return;
+      }
+
+      const accessToken = session?.access_token ?? "";
+
+      if (!accessToken) {
+        setErrorMessage("Please sign in to load the verified Investor Portal.");
+        setLoading(false);
+        return;
+      }
+
+      if (activeRole !== "investor") {
+        setErrorMessage(
+          "This workspace requires an authenticated Investor role."
         );
         setLoading(false);
         return;
@@ -575,117 +663,49 @@ export default function InvestorPortalPage() {
 
       setLoading(true);
       setErrorMessage("");
+      setCalculationLoadMessage("");
+      setLatestCalculationRun(null);
+      setCalculatedInvestorMetrics([]);
+      setSourceBatch("");
 
       try {
-        const [
-          investorsResult,
-          activeFundCommitmentsResult,
-          fundOptionsResult,
-          activationResult,
-          investorBatchResult,
-          pdfBatchResult,
-          complianceBatchResult,
-          dataRoomDocumentsResult,
-        ] = await Promise.all([
-          supabase
-            .from("investor_master")
-            .select(
-              "id, investor_code, investor_name, investor_type, email, kyc_status, bank_status"
-            )
-            .order("investor_code", { ascending: true }),
+        const db = supabase as any;
 
-          supabase
-            .from("fund_commitments")
-            .select("investor_id, fund_name")
-            .eq("fund_name", activeFundName),
+        const [activationResult, investorsResult, commitmentsResult] =
+          await Promise.all([
+            db
+              .from("fund_activation_status")
+              .select(
+                "status, activated_at, activated_by, readiness_score, approved_batch_map"
+              )
+              .eq("fund_name", activeFundName)
+              .maybeSingle(),
 
-          supabase
-            .from("fund_master")
-            .select("fund_name")
-            .not("fund_name", "is", null),
+            db
+              .from("investor_master")
+              .select("*")
+              .eq("fund_name", activeFundName)
+              .order("updated_at", { ascending: false }),
 
-          supabase
-            .from("fund_activation_status")
-            .select("status, activated_at, activated_by, readiness_score")
-            .eq("fund_name", activeFundName)
-            .maybeSingle(),
+            db
+              .from("fund_commitments")
+              .select("*")
+              .eq("fund_name", activeFundName),
+          ]);
 
-          supabase
-            .from("investor_import_batches")
-            .select("*")
-            .eq("fund_name", activeFundName)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-
-          supabase
-            .from("pdf_intelligence_batches")
-            .select("*")
-            .eq("fund_name", activeFundName)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-
-          supabase
-            .from("compliance_data_migration_batches")
-            .select("*")
-            .eq("fund_name", activeFundName)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-
-          supabase
-            .from("data_room_documents")
-            .select("*")
-            .order("imported_at", { ascending: false }),
-        ]);
+        if (activationResult.error) {
+          throw new Error(activationResult.error.message);
+        }
 
         if (investorsResult.error) {
-          setErrorMessage(investorsResult.error.message);
-          setLoading(false);
-          return;
+          throw new Error(investorsResult.error.message);
         }
 
-        const activeInvestorIds = new Set(
-          (activeFundCommitmentsResult.data ?? [])
-            .map((row) => String(row.investor_id ?? ""))
-            .filter(Boolean)
-        );
-
-        const investorData =
-          investorsResult.data
-            ?.map((investor) => ({
-              id: investor.id,
-              investor_code: investor.investor_code ?? null,
-              name: investor.investor_name ?? "Unknown Investor",
-              investor_type: investor.investor_type ?? null,
-              email: investor.email ?? null,
-              country: "India",
-              kyc_status: investor.kyc_status ?? null,
-              bank_status: investor.bank_status ?? null,
-              source: "migration" as const,
-            }))
-            .filter((investor) => activeInvestorIds.has(investor.id)) ?? [];
-
-        setInvestors(investorData);
-
-        if (!fundOptionsResult.error) {
-          const fundNames = Array.from(
-            new Set(
-              (fundOptionsResult.data ?? [])
-                .map((row) => String(row.fund_name ?? "").trim())
-                .filter(Boolean)
-            )
-          ).sort();
-
-          setAvailableFunds(
-            fundNames.length > 0
-              ? fundNames
-              : [activeFundName || "VENTIQ Growth Fund II"]
-          );
+        if (commitmentsResult.error) {
+          throw new Error(commitmentsResult.error.message);
         }
 
-        if (!activationResult.error && activationResult.data) {
+        if (activationResult.data) {
           setFundActivationStatus(
             String(activationResult.data.status ?? "Setup Not Started")
           );
@@ -701,61 +721,143 @@ export default function InvestorPortalPage() {
           setFundActivatedBy("");
         }
 
-        if (!investorBatchResult.error) {
-          setLatestInvestorBatch(
-            (investorBatchResult.data as DataRow | null) ?? null
-          );
-        }
+        const rawInvestorRows = (investorsResult.data ?? []) as DataRow[];
+        const seenInvestorCodes = new Set<string>();
 
-        if (!pdfBatchResult.error) {
-          setLatestPdfBatch((pdfBatchResult.data as DataRow | null) ?? null);
-        }
+        const investorData = rawInvestorRows
+          .map((investor) => ({
+            id: getString(investor, ["id"], ""),
+            investor_code:
+              getString(investor, ["investor_code"], "") || null,
+            name: getString(
+              investor,
+              ["investor_name", "name"],
+              "Unknown Investor"
+            ),
+            investor_type:
+              getString(investor, ["investor_type", "type"], "") || null,
+            email: getString(investor, ["email"], "") || null,
+            country:
+              getString(investor, ["country"], "India") || "India",
+            kyc_status:
+              getString(investor, ["kyc_status"], "") || null,
+            bank_status:
+              getString(investor, ["bank_status"], "") || null,
+            source_batch_id:
+              getString(investor, ["source_batch_id"], "") || null,
+            updated_at:
+              getString(
+                investor,
+                ["updated_at", "created_at"],
+                ""
+              ) || null,
+            source: "migration" as const,
+          }))
+          .filter((investor) => {
+            const code = normalizeText(investor.investor_code);
 
-        if (!complianceBatchResult.error) {
-          setLatestComplianceBatch(
-            (complianceBatchResult.data as DataRow | null) ?? null
-          );
-        }
+            if (!code || seenInvestorCodes.has(code)) {
+              return false;
+            }
 
-        if (!dataRoomDocumentsResult.error) {
-          setDataRoomDocuments(
-            filterRowsForFund(
-              (dataRoomDocumentsResult.data ?? []) as unknown as DataRow[],
-              activeFundName,
-              true
-            ) as unknown as DataRoomDocument[]
-          );
-        }
+            seenInvestorCodes.add(code);
+            return true;
+          });
+
+        setInvestors(investorData);
 
         const investorIdFromUrl =
           typeof window !== "undefined"
             ? new URLSearchParams(window.location.search).get("investorId")
             : "";
 
-        const investorFromUrl = investorIdFromUrl
-          ? investorData.find((investor) => investor.id === investorIdFromUrl)
-          : null;
+        const investorCodeFromUrl =
+          typeof window !== "undefined"
+            ? new URLSearchParams(window.location.search).get("investorCode")
+            : "";
 
-        const recommendedInvestor = investorFromUrl ?? investorData[0];
+        const investorFromUrl = investorData.find(
+          (investor) =>
+            (investorIdFromUrl && investor.id === investorIdFromUrl) ||
+            (investorCodeFromUrl &&
+              investor.investor_code === investorCodeFromUrl)
+        );
 
-        if (recommendedInvestor) {
-          setSelectedInvestorId(recommendedInvestor.id);
-        } else {
-          setSelectedInvestorId("");
-        }
+        const recommendedInvestor = investorFromUrl ?? investorData[0] ?? null;
+
+        setSelectedInvestorId(recommendedInvestor?.id ?? "");
+        setSourceBatch(recommendedInvestor?.source_batch_id ?? "");
+
+        const commitmentRows = (commitmentsResult.data ?? []) as DataRow[];
+
+        const currentCommitmentRows = recommendedInvestor?.source_batch_id
+          ? commitmentRows.filter(
+              (row) =>
+                getString(row, ["source_batch_id"], "") ===
+                recommendedInvestor.source_batch_id
+            )
+          : commitmentRows;
+
+        const totalCommitment = currentCommitmentRows.reduce(
+          (sum, row) =>
+            sum +
+            getNumber(row, [
+              "commitment_amount",
+              "committed_amount",
+              "commitment",
+            ]),
+          0
+        );
+
+        setLatestInvestorBatch({
+          id: recommendedInvestor?.source_batch_id ?? "",
+          total_records: investorData.length,
+          total_commitment: totalCommitment,
+          created_at: recommendedInvestor?.updated_at ?? "",
+        });
+
+        // LPs should never receive internal migration/compliance diagnostics.
+        setLatestPdfBatch({
+          id: recommendedInvestor?.source_batch_id ?? "",
+          total_files: 0,
+          ready_files: 0,
+          review_files: 0,
+          unmatched_files: 0,
+        });
+
+        setLatestComplianceBatch({
+          id: recommendedInvestor?.source_batch_id ?? "",
+          total_items: 0,
+          evidence_available_count: 0,
+          pending_review_count: 0,
+        });
+
+        setDataRoomDocuments([]);
+        setDataRoomEngagementEvents([]);
+        setDataRoomQuestions([]);
       } catch (error) {
-        setErrorMessage(
+        const message =
           error instanceof Error
             ? error.message
-            : "Unable to load investor portal."
-        );
-      }
+            : "Unable to load investor portal.";
 
-      setLoading(false);
+        setErrorMessage(message);
+        setInvestors([]);
+        setSelectedInvestorId("");
+        setSourceBatch("");
+      } finally {
+        setLoading(false);
+      }
     }
 
     loadInvestors();
-  }, [activeFundName, fundContextReady]);
+  }, [
+    activeFundName,
+    activeRole,
+    authLoading,
+    fundContextReady,
+    session?.access_token,
+  ]);
 
   useEffect(() => {
     async function loadInvestorPortalData() {
@@ -765,188 +867,366 @@ export default function InvestorPortalPage() {
         (investor) => investor.id === selectedInvestorId
       );
 
+      if (!selectedInvestor || !selectedInvestor.investor_code) return;
+
       setLoadingInvestorData(true);
       setErrorMessage("");
+      setCalculationLoadMessage("");
 
       try {
+        const db = supabase as any;
+        const investorCode = selectedInvestor.investor_code;
+        const investorSourceBatch = selectedInvestor.source_batch_id ?? "";
+
+        let commitmentQuery = db
+          .from("fund_commitments")
+          .select("*")
+          .eq("fund_name", activeFundName)
+          .eq("investor_code", investorCode);
+
+        let cashflowQuery = db
+          .from("investor_cashflows")
+          .select("*")
+          .eq("fund_name", activeFundName)
+          .eq("investor_code", investorCode)
+          .order("cashflow_date", { ascending: false });
+
+        if (investorSourceBatch) {
+          commitmentQuery = commitmentQuery.eq(
+            "source_batch_id",
+            investorSourceBatch
+          );
+
+          cashflowQuery = cashflowQuery.eq(
+            "source_batch_id",
+            investorSourceBatch
+          );
+        }
+
         const [
           commitmentResult,
           documentResult,
-          positionResult,
           cashflowResult,
-          dataRoomEngagementResult,
-          dataRoomQuestionResult,
+          performanceResult,
         ] = await Promise.all([
-          supabase
-            .from("fund_commitments")
-            .select(
-              "id, investor_id, fund_name, class_name, commitment_amount, unfunded_commitment, commitment_status"
-            )
-            .eq("investor_id", selectedInvestorId)
-            .eq("fund_name", activeFundName)
-            .order("commitment_amount", { ascending: false }),
+          commitmentQuery,
 
-          supabase
+          db
             .from("investor_documents")
             .select("*")
-            .eq("investor_id", selectedInvestorId)
             .eq("fund_name", activeFundName)
+            .eq("investor_code", investorCode)
             .order("published_at", { ascending: false }),
 
-          supabase
-            .from("investor_financial_positions")
+          cashflowQuery,
+
+          db
+            .from("investor_performance_metrics")
             .select("*")
-            .eq("investor_id", selectedInvestorId)
             .eq("fund_name", activeFundName)
-            .order("created_at", { ascending: false })
-            .limit(1),
-
-          supabase
-            .from("investor_cashflows")
-            .select("*")
-            .eq("investor_id", selectedInvestorId)
-            .eq("fund_name", activeFundName)
-            .order("cashflow_date", { ascending: false })
-            .limit(20),
-
-          supabase
-            .from("data_room_engagement_events")
-            .select("*")
-            .order("event_time", { ascending: false }),
-
-          supabase
-            .from("data_room_questions")
-            .select("*")
-            .order("asked_at", { ascending: false }),
+            .eq("investor_code", investorCode)
+            .order("as_of_date", { ascending: false })
+            .order("updated_at", { ascending: false }),
         ]);
 
         if (commitmentResult.error) {
-          setErrorMessage(commitmentResult.error.message);
-          setCommitments([]);
-          setDocuments([]);
-          setFinancialPosition(null);
-          setCashflows([]);
-          setLoadingInvestorData(false);
-          return;
-        }
-
-        const normalizedCommitments =
-          commitmentResult.data?.map((commitment) => {
-            const commitmentAmount = Number(commitment.commitment_amount || 0);
-            const unfundedAmount = Number(commitment.unfunded_commitment || 0);
-
-            return {
-              id: commitment.id,
-              investor_id: commitment.investor_id,
-              fund_name: commitment.fund_name,
-              class_name: commitment.class_name,
-              commitment_amount: commitmentAmount,
-              called_amount: Math.max(commitmentAmount - unfundedAmount, 0),
-              unfunded_amount: unfundedAmount,
-              status: commitment.commitment_status,
-            };
-          }) ?? [];
-
-        setCommitments(normalizedCommitments);
-
-        let investorDocuments =
-          ((documentResult.data as InvestorDocument[] | null) ?? []) ?? [];
-
-        if (documentResult.error) {
-          investorDocuments = [];
-        }
-
-        if (investorDocuments.length === 0 && selectedInvestor) {
-          const fallbackDocumentsResult = await supabase
-            .from("investor_documents")
-            .select("*")
-            .eq("fund_name", activeFundName)
-            .order("published_at", { ascending: false })
-            .limit(500);
-
-          if (!fallbackDocumentsResult.error) {
-            investorDocuments = (
-              (fallbackDocumentsResult.data as InvestorDocument[] | null) ?? []
-            ).filter((documentRecord) => {
-              return (
-  documentRecord.investor_id === selectedInvestorId ||
-  investorMatchesText(
-    selectedInvestor,
-    documentRecord.investor_name,
-    documentRecord.investor_email || documentRecord.email,
-    documentRecord.investor_code
-  )
-);
-            });
-          }
-        }
-
-        setDocuments(investorDocuments);
-
-        if (positionResult.error) {
-          setFinancialPosition(null);
-        } else {
-          const latestPosition =
-            ((positionResult.data as InvestorFinancialPosition[] | null) ??
-              [])[0] ?? null;
-
-          setFinancialPosition(latestPosition);
+          throw new Error(commitmentResult.error.message);
         }
 
         if (cashflowResult.error) {
-          setCashflows([]);
-        } else {
-          setCashflows((cashflowResult.data as InvestorCashflow[]) ?? []);
+          throw new Error(cashflowResult.error.message);
         }
 
-        if (!dataRoomEngagementResult.error && selectedInvestor) {
-          const matchedEngagementEvents = (
-            (dataRoomEngagementResult.data as DataRoomEvent[] | null) ?? []
-          ).filter((event) =>
-            investorMatchesText(
-              selectedInvestor,
-              event.investor_name,
-              event.investor_email
-            )
+        if (performanceResult.error) {
+          throw new Error(performanceResult.error.message);
+        }
+
+        const commitmentRows = (commitmentResult.data ?? []) as DataRow[];
+
+        const normalizedCommitments: Commitment[] = commitmentRows.map(
+          (row) => {
+            const commitmentAmount = getNumber(row, [
+              "commitment_amount",
+              "committed_amount",
+              "commitment",
+            ]);
+
+            const uncalledAmount = getNumber(row, [
+              "uncalled_commitment",
+              "unfunded_commitment",
+              "unfunded_amount",
+            ]);
+
+            const paidInAmount = getNumber(row, [
+              "paid_in_capital",
+              "called_amount",
+              "capital_called",
+            ]);
+
+            return {
+              id: getString(row, ["id", "commitment_code"], ""),
+              investor_id: getString(
+                row,
+                ["investor_id"],
+                selectedInvestorId
+              ),
+              fund_name: getString(
+                row,
+                ["fund_name"],
+                activeFundName
+              ),
+              class_name:
+                getString(row, ["class_name"], "") || null,
+              commitment_amount: commitmentAmount,
+              called_amount:
+                paidInAmount > 0
+                  ? paidInAmount
+                  : Math.max(
+                      commitmentAmount - uncalledAmount,
+                      0
+                    ),
+              unfunded_amount: uncalledAmount,
+              status:
+                getString(
+                  row,
+                  ["commitment_status", "status"],
+                  "Active"
+                ) || null,
+            };
+          }
+        );
+
+        setCommitments(normalizedCommitments);
+
+        const investorDocuments = documentResult.error
+          ? []
+          : ((documentResult.data ?? []) as unknown as InvestorDocument[]);
+
+        setDocuments(investorDocuments);
+
+        const performanceRows =
+          (performanceResult.data ?? []) as DataRow[];
+
+        const investorMetric = performanceRows[0];
+
+        setCalculatedInvestorMetrics(
+          investorMetric ? [investorMetric] : []
+        );
+
+        if (investorMetric) {
+          const paidInCapital = getNumber(
+            investorMetric,
+            ["paid_in_capital"]
           );
 
-          setDataRoomEngagementEvents(matchedEngagementEvents);
-        } else {
-          setDataRoomEngagementEvents([]);
-        }
-
-        if (!dataRoomQuestionResult.error && selectedInvestor) {
-          const matchedQuestions = (
-            (dataRoomQuestionResult.data as DataRoomQuestion[] | null) ?? []
-          ).filter((question) =>
-            investorMatchesText(
-              selectedInvestor,
-              question.investor_name,
-              question.investor_email
-            )
+          const netDistributions = getNumber(
+            investorMetric,
+            ["net_distributions", "total_distributions"]
           );
 
-          setDataRoomQuestions(matchedQuestions);
+          const allocatedNav = getNumber(
+            investorMetric,
+            ["allocated_nav"]
+          );
+
+          const asOfDate = getString(
+            investorMetric,
+            ["as_of_date"],
+            ""
+          );
+
+          const updatedAt = getString(
+            investorMetric,
+            ["updated_at", "created_at"],
+            ""
+          );
+
+          const calculationRunId = getString(
+            investorMetric,
+            ["calculation_run_id"],
+            ""
+          );
+
+          setLatestCalculationRun({
+            calculation_run_id: calculationRunId,
+            as_of_date: asOfDate,
+            completed_at: updatedAt,
+          });
+
+          setFinancialPosition({
+            id: getString(
+              investorMetric,
+              ["id"],
+              selectedInvestor.investor_code ||
+                selectedInvestorId
+            ),
+            investor_id: selectedInvestorId,
+            investor_code: selectedInvestor.investor_code,
+            investor_name: selectedInvestor.name,
+            email: selectedInvestor.email,
+            fund_name: activeFundName,
+            class_name:
+              getString(investorMetric, ["class_name"], "") || null,
+            commitment_amount: getNumber(
+              investorMetric,
+              ["commitment_amount"]
+            ),
+            capital_called_till_date: paidInCapital,
+            uncalled_capital: getNumber(
+              investorMetric,
+              ["uncalled_commitment"]
+            ),
+            distributions_till_date: netDistributions,
+            setup_fee: 0,
+            management_fee: 0,
+            net_contributed: Math.max(
+              paidInCapital - netDistributions,
+              0
+            ),
+            current_nav: allocatedNav,
+            investor_irr: getNumber(
+              investorMetric,
+              ["net_irr"]
+            ),
+            investor_rvpi: getNumber(
+              investorMetric,
+              ["rvpi"]
+            ),
+            investor_dpi: getNumber(
+              investorMetric,
+              ["dpi"]
+            ),
+            investor_tvpi: getNumber(
+              investorMetric,
+              ["tvpi"]
+            ),
+            status:
+              getString(
+                investorMetric,
+                ["calculation_status"],
+                "Calculated"
+              ) || null,
+            created_at: updatedAt || null,
+          });
         } else {
-          setDataRoomQuestions([]);
+          setLatestCalculationRun(null);
+          setFinancialPosition(null);
+          setCalculationLoadMessage(
+            "No verified investor performance metric is available yet."
+          );
         }
+
+        const investorCashflows = (
+          (cashflowResult.data ?? []) as DataRow[]
+        )
+          .slice(0, 20)
+          .map(
+            (row) =>
+              ({
+                id: getString(
+                  row,
+                  ["id", "cashflow_code"],
+                  ""
+                ),
+                investor_id:
+                  getString(
+                    row,
+                    ["investor_id"],
+                    selectedInvestorId
+                  ) || null,
+                investor_code:
+                  getString(
+                    row,
+                    ["investor_code"],
+                    ""
+                  ) || null,
+                investor_name:
+                  getString(
+                    row,
+                    ["investor_name"],
+                    selectedInvestor.name
+                  ) || null,
+                fund_name:
+                  getString(
+                    row,
+                    ["fund_name"],
+                    activeFundName
+                  ) || null,
+                cashflow_date:
+                  getString(
+                    row,
+                    ["cashflow_date"],
+                    ""
+                  ) || null,
+                cashflow_type:
+                  getString(
+                    row,
+                    ["cashflow_type"],
+                    "Cashflow"
+                  ) || null,
+                amount: getNumber(
+                  row,
+                  ["amount", "cashflow_amount"]
+                ),
+                direction:
+                  getString(row, ["direction"], "") || null,
+                description:
+                  getString(
+                    row,
+                    ["description", "remarks"],
+                    ""
+                  ) || null,
+              } as InvestorCashflow)
+          );
+
+        setCashflows(investorCashflows);
+        setSourceBatch(investorSourceBatch);
+
+        setDataRoomEngagementEvents([]);
+        setDataRoomQuestions([]);
       } catch (error) {
         setErrorMessage(
           error instanceof Error
             ? error.message
             : "Unable to load selected investor portal data."
         );
+        setCommitments([]);
+        setDocuments([]);
+        setFinancialPosition(null);
+        setCashflows([]);
+        setLatestCalculationRun(null);
+        setCalculatedInvestorMetrics([]);
+      } finally {
+        setLoadingInvestorData(false);
       }
-
-      setLoadingInvestorData(false);
     }
 
     loadInvestorPortalData();
-  }, [selectedInvestorId, activeFundName, investors]);
+  }, [
+    selectedInvestorId,
+    activeFundName,
+    investors,
+  ]);
 
   const selectedInvestor = investors.find(
     (investor) => investor.id === selectedInvestorId
   );
+
+
+  const calculationSummary = useMemo(() => {
+    return {
+      asOfDate: getString(
+        latestCalculationRun ?? undefined,
+        ["as_of_date"],
+        ""
+      ),
+      calculationRunId: getString(
+        latestCalculationRun ?? undefined,
+        ["calculation_run_id"],
+        ""
+      ),
+    };
+  }, [latestCalculationRun]);
 
   const portalMetrics = useMemo(() => {
     const totalCommitment = commitments.reduce(
@@ -1368,38 +1648,37 @@ const displayedManagementFee = financialPosition
                 gap: 10,
               }}
             >
-              <label style={{ display: "grid", gap: 6, minWidth: 270 }}>
-                <span style={{ fontSize: 12, fontWeight: 800 }}>
-                  Switch active fund
+              {availableFunds.length > 1 ? (
+                <label style={{ display: "grid", gap: 6, minWidth: 270 }}>
+                  <span style={{ fontSize: 12, fontWeight: 800 }}>
+                    My fund
+                  </span>
+                  <select
+                    aria-label="Select investor fund"
+                    disabled={!fundContextReady || loading}
+                    onChange={(event) => setActiveFundName(event.target.value)}
+                    style={{
+                      background: "#0f172a",
+                      border: "1px solid rgba(148, 163, 184, 0.35)",
+                      borderRadius: 12,
+                      color: "#f8fafc",
+                      minHeight: 42,
+                      padding: "0 12px",
+                    }}
+                    value={activeFundName}
+                  >
+                    {availableFunds.map((fundName) => (
+                      <option key={fundName} value={fundName}>
+                        {fundName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <span className="status-pill">
+                  Investor access · Authenticated
                 </span>
-                <select
-                  aria-label="Select active fund"
-                  disabled={!fundContextReady || loading}
-                  onChange={(event) => setActiveFundName(event.target.value)}
-                  style={{
-                    background: "#0f172a",
-                    border: "1px solid rgba(148, 163, 184, 0.35)",
-                    borderRadius: 12,
-                    color: "#f8fafc",
-                    minHeight: 42,
-                    padding: "0 12px",
-                  }}
-                  value={activeFundName}
-                >
-                  {availableFunds.map((fundName) => (
-                    <option key={fundName} value={fundName}>
-                      {fundName}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <a
-                className="monitor-btn monitor-btn-secondary"
-                href="/migration/activation"
-              >
-                Open Fund Activation
-              </a>
+              )}
             </div>
           </div>
         </div>
@@ -1441,19 +1720,9 @@ const displayedManagementFee = financialPosition
                 approval before publishing investor balances, cashflows, notices
                 and documents from the operational data layer.
               </div>
-              <div className="action-row">
-                <a
-                  className="monitor-btn monitor-btn-primary"
-                  href="/migration/activation"
-                >
-                  Complete Fund Activation
-                </a>
-                <a
-                  className="monitor-btn monitor-btn-secondary"
-                  href="/fundraising-ai"
-                >
-                  Open Investor Relations
-                </a>
+              <div className="explain-box">
+                Investor access will become available after the fund administrator
+                completes the controlled activation process.
               </div>
             </div>
           )}
@@ -1463,34 +1732,82 @@ const displayedManagementFee = financialPosition
           fundActivationStatus === "Active" && (
           <>
             <div className="preview-card">
+              <div className="section-heading-row">
+                <div>
+                  <p className="eyebrow">Verified Investor Layer</p>
+                  <h2>Your calculated position in {activeFundName}</h2>
+                </div>
+                <span className="status-pill">
+                  RLS isolated · Investor only
+                </span>
+              </div>
+
+              {latestCalculationRun ? (
+                <div className="explain-box">
+                  Verified investor performance as of{" "}
+                  {formatDate(calculationSummary.asOfDate)}. VENTIQ loads only
+                  financial records explicitly entitled to this authenticated
+                  investor login
+                  {sourceBatch ? ` · source batch: ${sourceBatch}` : ""}.
+                </div>
+              ) : (
+                <div className="explain-box">
+                  {calculationLoadMessage ||
+                    "No verified investor performance metric is available yet."}
+                </div>
+              )}
+            </div>
+
+            <div className="preview-card">
               <h2>Investor Access</h2>
 
               <div className="form-card">
-                <p className="eyebrow">Select investor to view portal records</p>
+                {investors.length > 1 ? (
+                  <>
+                    <p className="eyebrow">
+                      Select one of your authorised investor entities
+                    </p>
 
-                <label>Investor</label>
-                <select
-                  value={selectedInvestorId}
-                  onChange={(event) => {
-                    setSelectedInvestorId(event.target.value);
-                    setDocumentTypeFilter("All documents");
-                  }}
-                >
-                  {investors.map((investor) => (
-                    <option key={investor.id} value={investor.id}>
-                      {investor.investor_code
-                        ? `${investor.investor_code} - `
+                    <label>Investor entity</label>
+                    <select
+                      value={selectedInvestorId}
+                      onChange={(event) => {
+                        const nextInvestorId = event.target.value;
+                        const nextInvestor = investors.find(
+                          (investor) => investor.id === nextInvestorId
+                        );
+
+                        setSelectedInvestorId(nextInvestorId);
+                        setSourceBatch(nextInvestor?.source_batch_id ?? "");
+                        setDocumentTypeFilter("All documents");
+                      }}
+                    >
+                      {investors.map((investor) => (
+                        <option key={investor.id} value={investor.id}>
+                          {investor.investor_code
+                            ? `${investor.investor_code} - `
+                            : ""}
+                          {investor.name}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                ) : (
+                  <>
+                    <p className="eyebrow">Authenticated investor entity</p>
+                    <strong>
+                      {selectedInvestor?.investor_code
+                        ? `${selectedInvestor.investor_code} - `
                         : ""}
-                      {investor.name}
-                    </option>
-                  ))}
-                </select>
+                      {selectedInvestor?.name ?? "Investor"}
+                    </strong>
+                  </>
+                )}
 
                 <div className="logic-note">
-                  This portal now reads the same migrated operating data layer as
-                  the internal dashboards. Investor master, commitments,
-                  financial positions, cashflows, PDF Intelligence output and
-                  published investor documents appear here investor-wise.
+                  Investor master, commitments, performance, cashflows and
+                  published documents are filtered by database-level investor
+                  entitlement before they reach this browser.
                 </div>
               </div>
             </div>
@@ -1521,13 +1838,6 @@ const displayedManagementFee = financialPosition
 
                 <a className="monitor-btn monitor-btn-secondary" href="/data-room">
                   Open Data Room
-                </a>
-
-                <a
-                  className="monitor-btn monitor-btn-secondary"
-                  href="/fundraising-ai"
-                >
-                  Open IR Workspace
                 </a>
               </div>
             </div>
@@ -1671,7 +1981,15 @@ const displayedManagementFee = financialPosition
                 </div>
 
                 <div className="preview-card">
-                  <h2>Investor Performance Snapshot</h2>
+                  <div className="section-heading-row">
+                    <div>
+                      <p className="eyebrow">Verified Calculation Engine Output</p>
+                      <h2>Investor Performance Snapshot</h2>
+                    </div>
+                    <span className="status-pill">
+                      As of {formatDate(calculationSummary.asOfDate)}
+                    </span>
+                  </div>
 
                   {!financialPosition && (
                     <div className="explain-box">
@@ -1690,8 +2008,8 @@ const displayedManagementFee = financialPosition
                         </div>
 
                         <div className="impact-card">
-                          <h3>{formatMultiple(financialPosition.investor_moic)}</h3>
-                          <p>Investor MOIC</p>
+                          <h3>{formatMultiple(financialPosition.investor_rvpi)}</h3>
+                          <p>RVPI</p>
                         </div>
 
                         <div className="impact-card">
@@ -2093,13 +2411,6 @@ const displayedManagementFee = financialPosition
                   <div className="action-row">
                     <a className="monitor-btn monitor-btn-primary" href="/data-room">
                       Open Investor Data Room
-                    </a>
-
-                    <a
-                      className="monitor-btn monitor-btn-secondary"
-                      href="/fundraising-ai"
-                    >
-                      Open IR Workspace
                     </a>
                   </div>
                 </div>

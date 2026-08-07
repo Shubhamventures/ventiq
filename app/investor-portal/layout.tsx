@@ -1,16 +1,10 @@
-import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import ProtectedWorkspace from "../../components/auth/ProtectedWorkspace";
 
-export const metadata: Metadata = {
-  title: "Investor Portal | VENTIQ",
-  description:
-    "A self-service investor portal for capital call notices, distribution notices, statements, fund documents and investor communication.",
-};
-
-export default function InvestorPortalLayout({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  return children;
+export default function WorkspaceLayout({ children }: { children: ReactNode }) {
+  return (
+    <ProtectedWorkspace allowedRoles={["investor", "investor_relations"]}>
+      {children}
+    </ProtectedWorkspace>
+  );
 }

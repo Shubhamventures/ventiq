@@ -3,8 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
+import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 
 type DataRow = Record<string, unknown>;
+
+type PerformanceCalculationResponse = {
+  run?: DataRow | null;
+  fundMetric?: DataRow | null;
+  portfolioMetrics?: DataRow[];
+  investorMetrics?: DataRow[];
+  reconciliations?: DataRow[];
+  portfolioValuations?: DataRow[];
+  error?: string;
+};
 
 type FinanceActivityEvent = {
   id: string;
@@ -61,6 +72,33 @@ function formatCurrencyCr(value: number) {
   return `₹${(value / 10000000).toFixed(1)} Cr`;
 }
 
+function formatCurrencyInr(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "₹0";
+
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function getStoredRatePercent(row: DataRow | undefined, keys: string[]) {
+  const value = getNumber(row, keys);
+
+  if (!Number.isFinite(value)) return 0;
+  return Math.abs(value) <= 1 ? value * 100 : value;
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return "0.0%";
+  return `${value.toFixed(1)}%`;
+}
+
+function formatMultiple(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "-";
+  return `${value.toFixed(2)}x`;
+}
+
 function formatDate(value: unknown) {
   if (typeof value !== "string" || !value) return "-";
 
@@ -94,6 +132,25 @@ function isDraft(row: DataRow) {
   const status = rowStatus(row);
 
   return status === "draft" || status === "pending" || status === "";
+}
+
+function isOpenComplianceStatus(row: DataRow) {
+  const status = getString(
+    row,
+    ["filing_status", "migration_status", "status"],
+    ""
+  ).toLowerCase();
+
+  if (!status) return true;
+
+  return ![
+    "filed",
+    "completed",
+    "closed",
+    "approved",
+    "resolved",
+    "not applicable",
+  ].includes(status);
 }
 
 function getActivityIcon(status: string) {
@@ -200,6 +257,7 @@ export default function FinanceHeadAIPage() {
     setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund("VENTIQ Growth Fund II");
+  const { session } = useVentiqAuth();
   const [availableFunds, setAvailableFunds] = useState<string[]>([
     "VENTIQ Growth Fund II",
   ]);
@@ -211,6 +269,18 @@ export default function FinanceHeadAIPage() {
   const [investorDocuments, setInvestorDocuments] = useState<DataRow[]>([]);
   const [regulatoryMatches, setRegulatoryMatches] = useState<DataRow[]>([]);
   const [regulatoryCirculars, setRegulatoryCirculars] = useState<DataRow[]>([]);
+
+  const [latestCalculationRun, setLatestCalculationRun] =
+    useState<DataRow | null>(null);
+  const [calculatedFundMetric, setCalculatedFundMetric] =
+    useState<DataRow | null>(null);
+  const [calculatedInvestorMetrics, setCalculatedInvestorMetrics] = useState<
+    DataRow[]
+  >([]);
+  const [calculationReconciliations, setCalculationReconciliations] = useState<
+    DataRow[]
+  >([]);
+  const [calculationLoadMessage, setCalculationLoadMessage] = useState("");
 
   const [latestInvestorBatch, setLatestInvestorBatch] =
     useState<DataRow | null>(null);
@@ -240,6 +310,8 @@ const [migratedFundMasterRows, setMigratedFundMasterRows] = useState<
 >([]);
 const [migratedPortfolioInvestments, setMigratedPortfolioInvestments] =
   useState<DataRow[]>([]);
+const [migratedDebtRepaymentSchedules, setMigratedDebtRepaymentSchedules] =
+  useState<DataRow[]>([]);
 const [migratedComplianceItems, setMigratedComplianceItems] = useState<
   DataRow[]
 >([]);
@@ -268,7 +340,79 @@ const [
       setFundActivatedAt("");
       setFundActivatedBy("");
 
+      async function loadLatestPerformanceCalculation(): Promise<PerformanceCalculationResponse | null> {
+        const accessToken = session?.access_token ?? "";
+
+        if (!accessToken) {
+          setCalculationLoadMessage(
+            "Sign in to load the verified Calculation Engine outputs."
+          );
+          return null;
+        }
+
+        try {
+          const response = await fetch(
+            `/api/metrics/calculate?fundName=${encodeURIComponent(activeFundName)}`,
+            {
+              method: "GET",
+              headers: { Authorization: `Bearer ${accessToken}` },
+              cache: "no-store",
+            }
+          );
+          const result =
+            (await response.json()) as PerformanceCalculationResponse;
+
+          if (!response.ok) {
+            throw new Error(
+              result.error || "Unable to load verified finance calculations."
+            );
+          }
+
+          setCalculationLoadMessage("");
+          return result;
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Unable to load verified finance calculations.";
+
+          console.warn(
+            "VENTIQ Finance Head workspace could not load calculated metrics:",
+            message
+          );
+          setCalculationLoadMessage(message);
+          return null;
+        }
+      }
+
+      const performanceCalculationData =
+        await loadLatestPerformanceCalculation();
+      const calculationRun = performanceCalculationData?.run ?? null;
+      const calculationSourceBatchIds = calculationRun?.source_batch_ids;
+      const calculationSourceBatch = Array.isArray(calculationSourceBatchIds)
+        ? String(calculationSourceBatchIds[0] ?? "")
+        : "";
+
+      setLatestCalculationRun(calculationRun);
+      setCalculatedFundMetric(performanceCalculationData?.fundMetric ?? null);
+      setCalculatedInvestorMetrics(
+        performanceCalculationData?.investorMetrics ?? []
+      );
+      setCalculationReconciliations(
+        performanceCalculationData?.reconciliations ?? []
+      );
+
       const db = supabase as any;
+
+      function rowsForCalculationBatch(rows: DataRow[]) {
+        if (!calculationSourceBatch) return [] as DataRow[];
+
+        return rows.filter(
+          (row) =>
+            getString(row, ["source_batch_id"], "") ===
+            calculationSourceBatch
+        );
+      }
 
       async function selectRows(
         tableName: string,
@@ -350,6 +494,7 @@ const [
           migratedInvestorCashflowsData,
           migratedFundMasterData,
           migratedPortfolioInvestmentsData,
+          migratedDebtRepaymentSchedulesData,
           migratedComplianceItemsData,
           migratedPdfDocumentsData,
           allocationBatchRows,
@@ -388,6 +533,10 @@ const [
           }),
           selectRows("fund_master"),
           selectRows("portfolio_investments"),
+          selectRows("debt_repayment_schedules", {
+            orderBy: "due_date",
+            ascending: true,
+          }),
           selectRows("compliance_items"),
           selectRows("pdf_intelligence_documents"),
           selectRows("capital_call_allocation_batches", {
@@ -403,6 +552,7 @@ const [
           migratedFundCommitmentsData,
           migratedFinancialPositionsData,
           migratedPortfolioInvestmentsData,
+          migratedDebtRepaymentSchedulesData,
           migratedComplianceItemsData,
           migratedPdfDocumentsData,
           capitalCallsData,
@@ -422,51 +572,55 @@ const [
         }
 
         const scopedCapitalCalls = filterRowsForFund(
-          capitalCallsData,
+          rowsForCalculationBatch(capitalCallsData),
           activeFundName
         );
         const scopedDistributions = filterRowsForFund(
-          distributionsData,
+          rowsForCalculationBatch(distributionsData),
           activeFundName
         );
         const scopedDocuments = filterRowsForFund(
-          documentsData,
+          rowsForCalculationBatch(documentsData),
           activeFundName
         );
         const scopedInvestorMaster = filterRowsForFund(
-          migratedInvestorMasterData,
+          rowsForCalculationBatch(migratedInvestorMasterData),
           activeFundName
         );
         const scopedCommitments = filterRowsForFund(
-          migratedFundCommitmentsData,
+          rowsForCalculationBatch(migratedFundCommitmentsData),
           activeFundName
         );
         const scopedFinancialPositions = filterRowsForFund(
-          migratedFinancialPositionsData,
+          rowsForCalculationBatch(migratedFinancialPositionsData),
           activeFundName
         );
         const scopedCashflows = filterRowsForFund(
-          migratedInvestorCashflowsData,
+          rowsForCalculationBatch(migratedInvestorCashflowsData),
           activeFundName
         );
         const scopedFundMaster = filterRowsForFund(
-          migratedFundMasterData,
+          rowsForCalculationBatch(migratedFundMasterData),
           activeFundName
         );
         const scopedPortfolio = filterRowsForFund(
-          migratedPortfolioInvestmentsData,
+          rowsForCalculationBatch(migratedPortfolioInvestmentsData),
+          activeFundName
+        );
+        const scopedDebtRepaymentSchedules = filterRowsForFund(
+          rowsForCalculationBatch(migratedDebtRepaymentSchedulesData),
           activeFundName
         );
         const scopedCompliance = filterRowsForFund(
-          migratedComplianceItemsData,
+          rowsForCalculationBatch(migratedComplianceItemsData),
           activeFundName
         );
         const scopedPdfDocuments = filterRowsForFund(
-          migratedPdfDocumentsData,
+          rowsForCalculationBatch(migratedPdfDocumentsData),
           activeFundName
         );
         const scopedAllocationBatches = filterRowsForFund(
-          allocationBatchRows,
+          rowsForCalculationBatch(allocationBatchRows),
           activeFundName
         );
 
@@ -474,10 +628,10 @@ const [
         setDistributions(scopedDistributions);
         setInvestorDocuments(scopedDocuments);
         setRegulatoryMatches(
-          filterRowsForFund(matchesData, activeFundName, true)
+          filterRowsForFund(matchesData, activeFundName, false)
         );
         setRegulatoryCirculars(
-          filterRowsForFund(circularsData, activeFundName, true)
+          filterRowsForFund(circularsData, activeFundName, false)
         );
         setMigratedInvestorMaster(scopedInvestorMaster);
         setMigratedFundCommitments(scopedCommitments);
@@ -485,6 +639,7 @@ const [
         setMigratedInvestorCashflows(scopedCashflows);
         setMigratedFundMasterRows(scopedFundMaster);
         setMigratedPortfolioInvestments(scopedPortfolio);
+        setMigratedDebtRepaymentSchedules(scopedDebtRepaymentSchedules);
         setMigratedComplianceItems(scopedCompliance);
         setMigratedPdfIntelligenceDocuments(scopedPdfDocuments);
 
@@ -608,14 +763,9 @@ const [
             )
           );
         }).length;
-        const pendingReviewCount = scopedCompliance.filter((row) => {
-          const status = getString(
-            row,
-            ["filing_status", "migration_status"],
-            ""
-          ).toLowerCase();
-          return ["pending", "review", "overdue", "draft"].includes(status);
-        }).length;
+        const pendingReviewCount = scopedCompliance.filter(
+          isOpenComplianceStatus
+        ).length;
         const highRiskCount = scopedCompliance.filter(
           (row) =>
             getString(row, ["risk_level"], "").toLowerCase() === "high"
@@ -673,6 +823,7 @@ const [
   }, [
     activeFundName,
     fundContextReady,
+    session?.access_token,
     setActiveFundName,
   ]);
 
@@ -894,12 +1045,9 @@ const [
     ["high_risk_count"]
   );
 
-  const migratedCompliancePendingRows = migratedComplianceItems.filter((row) => {
-    const status = getString(row, ["filing_status", "migration_status"], "")
-      .toLowerCase();
-
-    return status === "pending" || status === "review" || status === "overdue";
-  }).length;
+  const migratedCompliancePendingRows = migratedComplianceItems.filter(
+    isOpenComplianceStatus
+  ).length;
 
   const migratedComplianceHighRiskRows = migratedComplianceItems.filter(
     (row) => getString(row, ["risk_level"], "").toLowerCase() === "high"
@@ -920,9 +1068,11 @@ const [
     );
   }).length;
 
-  const portfolioRepaymentItems = migratedPortfolioInvestments.filter((row) =>
-    Boolean(getString(row, ["repayment_due_date"], ""))
-  ).length;
+  const portfolioRepaymentItems =
+    migratedDebtRepaymentSchedules.length ||
+    migratedPortfolioInvestments.filter((row) =>
+      Boolean(getString(row, ["repayment_due_date"], ""))
+    ).length;
 
   const portfolioAtRiskItems = migratedPortfolioInvestments.filter((row) => {
     const riskStatus = getString(row, ["risk_status"], "").toLowerCase();
@@ -1086,13 +1236,50 @@ const [
     totalDraftCapitalCallAmount,
     totalApprovedDistributionAmount,
 
-    investorCount: migratedInvestorCount || migrationInvestorCount,
-    totalCommitment: committedCapital,
-    calledCapital,
-    distributedCapital,
-    currentNav: migratedCurrentNav,
-    uncalledCapital,
-    committedCapital,
+    investorCount:
+      getNumber(calculatedFundMetric ?? undefined, ["investor_count"]) ||
+      migratedInvestorCount ||
+      migrationInvestorCount,
+    totalCommitment:
+      getNumber(calculatedFundMetric ?? undefined, ["total_commitments"]) ||
+      committedCapital,
+    calledCapital:
+      getNumber(calculatedFundMetric ?? undefined, ["paid_in_capital"]) ||
+      calledCapital,
+    distributedCapital:
+      getNumber(calculatedFundMetric ?? undefined, ["net_distributions"]) ||
+      distributedCapital,
+    currentNav:
+      getNumber(calculatedFundMetric ?? undefined, ["latest_net_nav"]) ||
+      migratedCurrentNav,
+    uncalledCapital:
+      getNumber(calculatedFundMetric ?? undefined, ["uncalled_commitment"]) ||
+      uncalledCapital,
+    committedCapital:
+      getNumber(calculatedFundMetric ?? undefined, ["total_commitments"]) ||
+      committedCapital,
+    grossDistributions: getNumber(calculatedFundMetric ?? undefined, [
+      "gross_distributions",
+    ]),
+    withholdingTax: getNumber(calculatedFundMetric ?? undefined, [
+      "withholding_tax",
+    ]),
+    netDistributions: getNumber(calculatedFundMetric ?? undefined, [
+      "net_distributions",
+    ]),
+    grossIrr: getStoredRatePercent(calculatedFundMetric ?? undefined, [
+      "gross_irr",
+    ]),
+    netIrr: getStoredRatePercent(calculatedFundMetric ?? undefined, [
+      "net_irr",
+    ]),
+    grossMoic: getNumber(calculatedFundMetric ?? undefined, ["gross_moic"]),
+    dpi: getNumber(calculatedFundMetric ?? undefined, ["dpi"]),
+    rvpi: getNumber(calculatedFundMetric ?? undefined, ["rvpi"]),
+    tvpi: getNumber(calculatedFundMetric ?? undefined, ["tvpi"]),
+    portfolioFairValue: getNumber(calculatedFundMetric ?? undefined, [
+      "portfolio_terminal_fair_value",
+    ]),
     fundCount: migrationFundCount || migratedFundMasterRows.length,
     sponsorCommitment: migrationSponsorCommitment,
     averageManagementFee,
@@ -1147,9 +1334,51 @@ const [
   migratedInvestorCashflows,
   migratedFundMasterRows,
   migratedPortfolioInvestments,
+  migratedDebtRepaymentSchedules,
   migratedComplianceItems,
   migratedPdfIntelligenceDocuments,
+  calculatedFundMetric,
 ]);
+
+  const calculationSummary = useMemo(() => {
+    const passCount = calculationReconciliations.filter(
+      (row) =>
+        getString(row, ["reconciliation_status", "status"], "")
+          .toLowerCase() === "pass"
+    ).length;
+    const warningCount = calculationReconciliations.filter(
+      (row) =>
+        getString(row, ["reconciliation_status", "status"], "")
+          .toLowerCase() === "warning"
+    ).length;
+    const failCount = calculationReconciliations.filter(
+      (row) =>
+        getString(row, ["reconciliation_status", "status"], "")
+          .toLowerCase() === "fail"
+    ).length;
+    const sourceBatchIds = latestCalculationRun?.source_batch_ids;
+    const sourceBatch = Array.isArray(sourceBatchIds)
+      ? String(sourceBatchIds[0] ?? "")
+      : "";
+
+    return {
+      passCount,
+      warningCount,
+      failCount,
+      totalCount: calculationReconciliations.length,
+      sourceBatch,
+      version: getString(
+        latestCalculationRun ?? undefined,
+        ["calculation_version"],
+        "-"
+      ),
+      asOfDate: getString(
+        latestCalculationRun ?? undefined,
+        ["as_of_date"],
+        ""
+      ),
+    };
+  }, [calculationReconciliations, latestCalculationRun]);
 
   const financeActivityEvents = useMemo(() => {
     const events: FinanceActivityEvent[] = [];
@@ -1383,35 +1612,39 @@ const [
       });
     }
 
-    migratedPortfolioInvestments
-      .filter((row) => Boolean(getString(row, ["repayment_due_date"], "")))
-      .slice(0, 5)
-      .forEach((row) => {
-        events.push({
-          id: `portfolio-repayment-${getId(row)}`,
-          time: getString(row, ["created_at", "repayment_due_date"], ""),
-          module: "Portfolio Repayment",
-          title: "Repayment schedule available",
-          description: `${getString(
-            row,
-            ["portfolio_company"],
-            "Portfolio company"
-          )} has repayment due on ${formatDate(row["repayment_due_date"])}.`,
-          status: "repayment tracking",
-        });
+    const repaymentActivityRows = migratedDebtRepaymentSchedules.length
+      ? migratedDebtRepaymentSchedules
+      : migratedPortfolioInvestments.filter((row) =>
+          Boolean(getString(row, ["repayment_due_date"], ""))
+        );
+
+    repaymentActivityRows.slice(0, 5).forEach((row) => {
+      const dueDate = getString(
+        row,
+        ["due_date", "repayment_due_date"],
+        ""
+      );
+
+      events.push({
+        id: `portfolio-repayment-${getId(row)}`,
+        time: getString(row, ["created_at", "due_date", "repayment_due_date"], ""),
+        module: "Portfolio Repayment",
+        title: "Repayment schedule available",
+        description: `${getString(
+          row,
+          ["portfolio_company"],
+          "Portfolio company"
+        )} has ${getString(row, ["repayment_type"], "repayment")} due on ${formatDate(
+          dueDate
+        )} for ${formatCurrencyInr(getNumber(row, ["total_due"]))}.`,
+        status: "repayment tracking",
       });
+    });
 
     migratedComplianceItems
       .filter((row) => {
-        const status = getString(row, ["filing_status"], "").toLowerCase();
         const risk = getString(row, ["risk_level"], "").toLowerCase();
-
-        return (
-          status === "pending" ||
-          status === "review" ||
-          status === "overdue" ||
-          risk === "high"
-        );
+        return isOpenComplianceStatus(row) || risk === "high";
       })
       .slice(0, 5)
       .forEach((row) => {
@@ -1450,6 +1683,7 @@ const [
     latestFundBatch,
     latestCapitalCallAllocationBatch,
     migratedPortfolioInvestments,
+    migratedDebtRepaymentSchedules,
     migratedComplianceItems,
   ]);
 
@@ -1673,6 +1907,102 @@ const [
     <div className="preview-card">
       <div className="section-heading-row">
         <div>
+          <p className="eyebrow">Verified Finance Layer</p>
+          <h2>Calculation Engine outputs for {activeFundName}</h2>
+        </div>
+
+        <a
+          className="monitor-btn monitor-btn-secondary"
+          href="/migration/performance-calculations"
+        >
+          Open Calculation Engine
+        </a>
+      </div>
+
+      {calculatedFundMetric ? (
+        <>
+          <div className="explain-box">
+            Verified Calculation Engine v{calculationSummary.version} · as of {formatDate(
+              calculationSummary.asOfDate
+            )} · {calculationSummary.passCount}/{calculationSummary.totalCount} reconciliation controls passed · {financeMetrics.investorCount} investor calculations.
+          </div>
+
+          <div className="impact-grid">
+            <div className="impact-card">
+              <h3>{formatCurrencyCr(financeMetrics.totalCommitment)}</h3>
+              <p>Total commitments</p>
+            </div>
+            <div className="impact-card">
+              <h3>{formatCurrencyCr(financeMetrics.calledCapital)}</h3>
+              <p>Paid-in capital</p>
+            </div>
+            <div className="impact-card">
+              <h3>{formatCurrencyCr(financeMetrics.uncalledCapital)}</h3>
+              <p>Uncalled commitment</p>
+            </div>
+            <div className="impact-card">
+              <h3>{formatCurrencyCr(financeMetrics.currentNav)}</h3>
+              <p>Latest Net NAV</p>
+            </div>
+          </div>
+
+          <div className="impact-grid">
+            <div className="impact-card">
+              <h3>{formatCurrencyCr(financeMetrics.grossDistributions)}</h3>
+              <p>Gross distributions</p>
+            </div>
+            <div className="impact-card">
+              <h3>{formatCurrencyCr(financeMetrics.withholdingTax)}</h3>
+              <p>Withholding tax</p>
+            </div>
+            <div className="impact-card">
+              <h3>{formatCurrencyCr(financeMetrics.netDistributions)}</h3>
+              <p>Net cash distributions</p>
+            </div>
+            <div className="impact-card">
+              <h3>{formatCurrencyCr(financeMetrics.portfolioFairValue)}</h3>
+              <p>Portfolio fair value</p>
+            </div>
+          </div>
+
+          <div className="impact-grid">
+            <div className="impact-card">
+              <h3>{formatPercent(financeMetrics.netIrr)}</h3>
+              <p>Net IRR</p>
+            </div>
+            <div className="impact-card">
+              <h3>{formatMultiple(financeMetrics.dpi)}</h3>
+              <p>DPI</p>
+            </div>
+            <div className="impact-card">
+              <h3>{formatMultiple(financeMetrics.rvpi)}</h3>
+              <p>RVPI</p>
+            </div>
+            <div className="impact-card">
+              <h3>{formatMultiple(financeMetrics.tvpi)}</h3>
+              <p>TVPI</p>
+            </div>
+          </div>
+
+          <div className="explain-box">
+            Performance distribution basis: {getString(
+              calculatedFundMetric ?? undefined,
+              ["performance_distribution_basis"],
+              "Net Cash"
+            )} · Source batch: {calculationSummary.sourceBatch || "-"}
+          </div>
+        </>
+      ) : (
+        <div className="explain-box">
+          {calculationLoadMessage ||
+            "No completed verified Calculation Engine run is available for this fund."}
+        </div>
+      )}
+    </div>
+
+    <div className="preview-card">
+      <div className="section-heading-row">
+        <div>
           <p className="eyebrow">Migration Data Connected</p>
           <h2>{activeFundName} finance data is powering this dashboard</h2>
         </div>
@@ -1690,8 +2020,8 @@ const [
         </div>
 
         <div className="impact-card">
-          <h3>{migratedFinancialPositions.length}</h3>
-          <p>Financial position records</p>
+          <h3>{calculatedInvestorMetrics.length}</h3>
+          <p>Verified investor calculations</p>
         </div>
 
         <div className="impact-card">
@@ -1723,11 +2053,9 @@ const [
       </div>
 
       <div className="explain-box">
-        This Finance Head dashboard now reads only activated records for
-        {activeFundName} from investor_master, fund_commitments,
-        investor_financial_positions, investor_cashflows, investor_documents,
-        pdf_intelligence_documents, fund_master, portfolio_investments and
-        compliance_items.
+        This Finance Head dashboard uses verified Calculation Engine outputs
+        and batch-scoped canonical records for {activeFundName}. Legacy and prior
+        pilot batches are excluded from the finance metrics shown above.
       </div>
     </div>
 

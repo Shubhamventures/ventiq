@@ -1,16 +1,10 @@
-import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import ProtectedWorkspace from "../../components/auth/ProtectedWorkspace";
 
-export const metadata: Metadata = {
-  title: "Investor Relations & Fundraising AI | VENTIQ",
-  description:
-    "Support investor relations, LP updates, DDQ responses, fundraising materials, investor follow-ups and fund communication workflows.",
-};
-
-export default function FundraisingAiLayout({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  return children;
+export default function WorkspaceLayout({ children }: { children: ReactNode }) {
+  return (
+    <ProtectedWorkspace allowedRoles={["investor_relations"]}>
+      {children}
+    </ProtectedWorkspace>
+  );
 }

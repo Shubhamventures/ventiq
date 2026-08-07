@@ -1,16 +1,10 @@
-import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import ProtectedWorkspace from "../../components/auth/ProtectedWorkspace";
 
-export const metadata: Metadata = {
-  title: "Compliance AI Workspace | VENTIQ",
-  description:
-    "Track AIF and private capital compliance tasks, regulatory filings, evidence gaps, circulars, approvals and daily compliance priorities.",
-};
-
-export default function ComplianceAiLayout({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  return children;
+export default function WorkspaceLayout({ children }: { children: ReactNode }) {
+  return (
+    <ProtectedWorkspace allowedRoles={["compliance_team", "maker", "checker"]}>
+      {children}
+    </ProtectedWorkspace>
+  );
 }

@@ -1,16 +1,10 @@
-import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import ProtectedWorkspace from "../../components/auth/ProtectedWorkspace";
 
-export const metadata: Metadata = {
-  title: "Managing Partner AI Dashboard | VENTIQ",
-  description:
-    "A Managing Partner workspace for fund performance, portfolio intelligence, liquidity, compliance alerts and daily AI opinions across private capital funds.",
-};
-
-export default function ManagingPartnerLayout({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  return children;
+export default function WorkspaceLayout({ children }: { children: ReactNode }) {
+  return (
+    <ProtectedWorkspace allowedRoles={["managing_partner"]}>
+      {children}
+    </ProtectedWorkspace>
+  );
 }

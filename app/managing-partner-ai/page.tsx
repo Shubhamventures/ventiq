@@ -3,8 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
+import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 
 type DataRow = Record<string, unknown>;
+type PerformanceCalculationResponse = {
+  run?: DataRow | null;
+  fundMetric?: DataRow | null;
+  portfolioMetrics?: DataRow[];
+  investorMetrics?: DataRow[];
+  reconciliations?: DataRow[];
+  error?: string;
+};
 type DeckChartItem = {
   label: string;
   value: number;
@@ -107,6 +116,16 @@ function formatPercent(value: number) {
   if (!Number.isFinite(value)) return "0.0%";
 
   return `${value.toFixed(1)}%`;
+}
+
+function getStoredRatePercent(row: DataRow | undefined, keys: string[]) {
+  const value = getNumber(row, keys);
+
+  if (!Number.isFinite(value)) return 0;
+
+  // Calculation Engine outputs store IRR as a decimal rate (0.228 = 22.8%).
+  // Legacy dashboard tables may already store percentages (22.8 = 22.8%).
+  return Math.abs(value) <= 1 ? value * 100 : value;
 }
 
 function formatMultiple(value: number) {
@@ -295,6 +314,7 @@ function averageRows(rows: DataRow[], keys: string[]) {
 }
 
 export default function ManagingPartnerAIPage() {
+  const { session } = useVentiqAuth();
   const {
     activeFundName,
     setActiveFundName,
@@ -325,6 +345,20 @@ export default function ManagingPartnerAIPage() {
   const [fundPerformanceMetrics, setFundPerformanceMetrics] = useState<
     DataRow[]
   >([]);
+  const [latestCalculationRun, setLatestCalculationRun] =
+    useState<DataRow | null>(null);
+  const [latestCalculatedFundMetric, setLatestCalculatedFundMetric] =
+    useState<DataRow | null>(null);
+  const [calculatedPortfolioMetrics, setCalculatedPortfolioMetrics] = useState<
+    DataRow[]
+  >([]);
+  const [calculatedInvestorMetrics, setCalculatedInvestorMetrics] = useState<
+    DataRow[]
+  >([]);
+  const [calculationReconciliations, setCalculationReconciliations] = useState<
+    DataRow[]
+  >([]);
+  const [calculationLoadMessage, setCalculationLoadMessage] = useState("");
   const [dataRoomDocuments, setDataRoomDocuments] = useState<DataRow[]>([]);
   const [dataRoomEngagementEvents, setDataRoomEngagementEvents] = useState<
     DataRow[]
@@ -391,7 +425,12 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
   useEffect(() => {
     if (!fundContextReady || !activeFundName) return;
     void loadManagingPartnerDashboard();
-  }, [activeFundName, fundContextReady, setActiveFundName]);
+  }, [
+    activeFundName,
+    fundContextReady,
+    session?.access_token,
+    setActiveFundName,
+  ]);
 
   async function loadManagingPartnerDashboard() {
     if (!isSupabaseConfigured || !supabase) {
@@ -409,6 +448,49 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     setFundActivatedBy("");
 
     const db = supabase as any;
+
+    async function loadLatestPerformanceCalculation(): Promise<PerformanceCalculationResponse | null> {
+      const accessToken = session?.access_token ?? "";
+
+      if (!accessToken) {
+        return null;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/metrics/calculate?fundName=${encodeURIComponent(activeFundName)}`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            cache: "no-store",
+          }
+        );
+        const result = (await response.json()) as PerformanceCalculationResponse;
+
+        if (!response.ok) {
+          throw new Error(
+            result.error || "Unable to load verified performance calculations."
+          );
+        }
+
+        setCalculationLoadMessage("");
+        return result;
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Unable to load verified performance calculations.";
+
+        console.warn(
+          "VENTIQ Managing Partner dashboard could not load calculated metrics:",
+          message
+        );
+        setCalculationLoadMessage(message);
+        return null;
+      }
+    }
 
     async function selectRows(
       tableName: string,
@@ -507,6 +589,7 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
         migratedComplianceItemsData,
         migratedPdfDocumentsData,
         activationRecord,
+        performanceCalculationData,
       ] = await Promise.all([
         selectRows("funds"),
         selectRows("commitments"),
@@ -564,6 +647,7 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
         selectRows("compliance_items"),
         selectRows("pdf_intelligence_documents"),
         loadActivationRecord(),
+        loadLatestPerformanceCalculation(),
       ]);
 
       const fundOptions = uniqueFundNames([
@@ -769,6 +853,19 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       setPortfolioCompanyMetrics(scopedPortfolioMetrics);
       setPortfolioNewsAlerts(scopedPortfolioNews);
       setFundPerformanceMetrics(scopedPerformanceMetrics);
+      setLatestCalculationRun(performanceCalculationData?.run ?? null);
+      setLatestCalculatedFundMetric(
+        performanceCalculationData?.fundMetric ?? null
+      );
+      setCalculatedPortfolioMetrics(
+        performanceCalculationData?.portfolioMetrics ?? []
+      );
+      setCalculatedInvestorMetrics(
+        performanceCalculationData?.investorMetrics ?? []
+      );
+      setCalculationReconciliations(
+        performanceCalculationData?.reconciliations ?? []
+      );
       setDataRoomDocuments(scopedDataRoomDocuments);
       setDataRoomEngagementEvents(scopedDataRoomEngagement);
       setDataRoomQuestions(scopedDataRoomQuestions);
@@ -1093,7 +1190,33 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       0
     );
 
+    const calculatedTotalCommitments = getNumber(
+      latestCalculatedFundMetric ?? undefined,
+      ["total_commitments"]
+    );
+    const calculatedPaidInCapital = getNumber(
+      latestCalculatedFundMetric ?? undefined,
+      ["paid_in_capital"]
+    );
+    const calculatedNetDistributions = getNumber(
+      latestCalculatedFundMetric ?? undefined,
+      ["net_distributions", "total_distributions"]
+    );
+    const calculatedGrossDistributions = getNumber(
+      latestCalculatedFundMetric ?? undefined,
+      ["gross_distributions"]
+    );
+    const calculatedWithholdingTax = getNumber(
+      latestCalculatedFundMetric ?? undefined,
+      ["withholding_tax"]
+    );
+    const calculatedUncalledCommitment = getNumber(
+      latestCalculatedFundMetric ?? undefined,
+      ["uncalled_commitment"]
+    );
+
     const totalCommitted =
+      calculatedTotalCommitments ||
       migrationInvestorCommitment ||
       migrationFundCommitted ||
       legacyTotalCommitted;
@@ -1101,7 +1224,7 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     const approvedCapitalCalls = capitalCalls.filter(isApproved);
     const draftCapitalCalls = capitalCalls.filter(isDraft);
 
-    const totalCalled = approvedCapitalCalls.reduce(
+    const legacyTotalCalled = approvedCapitalCalls.reduce(
       (sum, row) =>
         sum +
         getNumber(row, [
@@ -1112,11 +1235,12 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
         ]),
       0
     );
+    const totalCalled = calculatedPaidInCapital || legacyTotalCalled;
 
     const approvedDistributions = distributions.filter(isApproved);
     const draftDistributions = distributions.filter(isDraft);
 
-    const totalDistributed = approvedDistributions.reduce(
+    const legacyTotalDistributed = approvedDistributions.reduce(
       (sum, row) =>
         sum +
         getNumber(row, [
@@ -1126,8 +1250,11 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
         ]),
       0
     );
+    const totalDistributed =
+      calculatedNetDistributions || legacyTotalDistributed;
 
-    const uncalledCapital = Math.max(totalCommitted - totalCalled, 0);
+    const uncalledCapital =
+      calculatedUncalledCommitment || Math.max(totalCommitted - totalCalled, 0);
 
     const deploymentRate =
       totalCommitted > 0 ? (totalCalled / totalCommitted) * 100 : 0;
@@ -1162,24 +1289,45 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       0
     );
 
+    const calculatedInvestmentCost = getNumber(
+      latestCalculatedFundMetric ?? undefined,
+      ["portfolio_investment_cost"]
+    );
     const totalInvestmentCost =
-      migrationPortfolioCost || migratedInvestmentCost || legacyInvestmentCost;
+      calculatedInvestmentCost ||
+      migrationPortfolioCost ||
+      migratedInvestmentCost ||
+      legacyInvestmentCost;
 
     const legacyCurrentFairValue = fundInvestments.reduce(
       (sum, row) => sum + getNumber(row, ["current_fair_value"]),
       0
     );
 
+    const calculatedCurrentFairValue = getNumber(
+      latestCalculatedFundMetric ?? undefined,
+      ["portfolio_terminal_fair_value"]
+    );
     const currentFairValue =
-      migrationPortfolioValue || migratedCurrentValue || legacyCurrentFairValue;
+      calculatedCurrentFairValue ||
+      migrationPortfolioValue ||
+      migratedCurrentValue ||
+      legacyCurrentFairValue;
 
     const legacyRealizedValue = fundInvestments.reduce(
       (sum, row) => sum + getNumber(row, ["realized_value"]),
       0
     );
 
+    const calculatedRealizedValue = getNumber(
+      latestCalculatedFundMetric ?? undefined,
+      ["portfolio_realised_proceeds"]
+    );
     const realizedValue =
-      migrationRealizedValue || migratedRealizedValue || legacyRealizedValue;
+      calculatedRealizedValue ||
+      migrationRealizedValue ||
+      migratedRealizedValue ||
+      legacyRealizedValue;
 
     const legacyUnrealizedValue = fundInvestments.reduce(
       (sum, row) => sum + getNumber(row, ["unrealized_value"]),
@@ -1191,18 +1339,39 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
         ? currentFairValue - totalInvestmentCost
         : legacyUnrealizedValue;
 
-    const latestFundMetric = fundPerformanceMetrics[0];
+    const latestFundMetric =
+      latestCalculatedFundMetric ?? fundPerformanceMetrics[0];
+    const usingCalculatedMetric = Boolean(latestCalculatedFundMetric);
 
-    const grossIrr = getNumber(latestFundMetric, ["gross_irr"]);
-    const netIrr = getNumber(latestFundMetric, ["net_irr"]);
+    const grossIrr = usingCalculatedMetric
+      ? getStoredRatePercent(latestFundMetric, ["gross_irr"])
+      : getNumber(latestFundMetric, ["gross_irr"]);
+    const netIrr = usingCalculatedMetric
+      ? getStoredRatePercent(latestFundMetric, ["net_irr"])
+      : getNumber(latestFundMetric, ["net_irr"]);
     const dpi = getNumber(latestFundMetric, ["dpi"]);
+    const rvpi = getNumber(latestFundMetric, ["rvpi"]);
     const tvpi = getNumber(latestFundMetric, ["tvpi"]);
     const moic =
-      migrationPortfolioMoic || getNumber(latestFundMetric, ["moic"]);
+      getNumber(latestFundMetric, ["gross_moic", "moic"]) ||
+      migrationPortfolioMoic;
     const currentNav =
-      getNumber(latestFundMetric, ["current_nav"]) ||
+      getNumber(latestFundMetric, ["latest_net_nav", "current_nav"]) ||
       currentFairValue ||
       migrationFundCommitted;
+
+    const calculationPassCount = calculationReconciliations.filter(
+      (row) =>
+        getString(
+          row,
+          ["reconciliation_status", "status"],
+          ""
+        ).toLowerCase() === "pass"
+    ).length;
+    const sourceBatchIds = latestCalculationRun?.source_batch_ids;
+    const calculationSourceBatch = Array.isArray(sourceBatchIds)
+      ? String(sourceBatchIds[0] ?? "")
+      : "";
 
     const legacyUpcomingRepayments = debtRepayments.filter(
       (row) => getString(row, ["payment_status"], "") === "upcoming"
@@ -1237,6 +1406,9 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       totalCommitted,
       totalCalled,
       totalDistributed,
+      grossDistributions: calculatedGrossDistributions,
+      withholdingTax: calculatedWithholdingTax,
+      netDistributions: calculatedNetDistributions || totalDistributed,
       uncalledCapital,
       deploymentRate,
       activeFunds: migrationFundCount || funds.length,
@@ -1261,9 +1433,30 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       grossIrr,
       netIrr,
       dpi,
+      rvpi,
       tvpi,
       moic,
       currentNav,
+      calculationVersion: getString(
+        latestCalculationRun ?? undefined,
+        ["calculation_version"],
+        ""
+      ),
+      calculationAsOfDate: getString(
+        latestCalculationRun ?? undefined,
+        ["as_of_date"],
+        ""
+      ),
+      calculationSourceBatch,
+      calculationPassCount,
+      calculationControlCount: calculationReconciliations.length,
+      calculationPortfolioCount: calculatedPortfolioMetrics.length,
+      calculationInvestorCount: calculatedInvestorMetrics.length,
+      performanceDistributionBasis: getString(
+        latestCalculatedFundMetric ?? undefined,
+        ["performance_distribution_basis"],
+        ""
+      ),
       portfolioCompanies:
         migratedPortfolioCompanyNames.size ||
         migrationPortfolioCount ||
@@ -1301,6 +1494,11 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     latestComplianceBatch,
     migratedPortfolioInvestments,
     migratedComplianceItems,
+    latestCalculatedFundMetric,
+    latestCalculationRun,
+    calculationReconciliations,
+    calculatedPortfolioMetrics,
+    calculatedInvestorMetrics,
   ]);
   const connectedActivityEvents = useMemo(() => {
     const events: ConnectedActivityEvent[] = [];
@@ -2588,6 +2786,21 @@ async function handleGeneratePowerPoint() {
               </div>
             </div>
 
+            {dashboardMetrics.calculationVersion ? (
+              <div className="explain-box">
+                Verified Calculation Engine v{dashboardMetrics.calculationVersion} ·
+                as of {formatDate(dashboardMetrics.calculationAsOfDate)} · {" "}
+                {dashboardMetrics.calculationPassCount}/
+                {dashboardMetrics.calculationControlCount} reconciliation controls passed · {" "}
+                {dashboardMetrics.calculationPortfolioCount} portfolio records · {" "}
+                {dashboardMetrics.calculationInvestorCount} investor records.
+              </div>
+            ) : calculationLoadMessage ? (
+              <div className="explain-box">
+                Verified performance metrics could not be restored: {calculationLoadMessage}
+              </div>
+            ) : null}
+
             <div className="impact-grid">
               <div className="impact-card">
                 <h3>{formatPercent(dashboardMetrics.grossIrr)}</h3>
@@ -2600,8 +2813,18 @@ async function handleGeneratePowerPoint() {
               </div>
 
               <div className="impact-card">
+                <h3>{formatMultiple(dashboardMetrics.moic)}</h3>
+                <p>Gross MOIC</p>
+              </div>
+
+              <div className="impact-card">
                 <h3>{formatMultiple(dashboardMetrics.dpi)}</h3>
                 <p>DPI</p>
+              </div>
+
+              <div className="impact-card">
+                <h3>{formatMultiple(dashboardMetrics.rvpi)}</h3>
+                <p>RVPI</p>
               </div>
 
               <div className="impact-card">
@@ -2612,25 +2835,68 @@ async function handleGeneratePowerPoint() {
 
             <div className="impact-grid">
               <div className="impact-card">
+                <h3>{formatCurrencyCr(dashboardMetrics.totalCommitted)}</h3>
+                <p>Total commitments</p>
+              </div>
+
+              <div className="impact-card">
+                <h3>{formatCurrencyCr(dashboardMetrics.totalCalled)}</h3>
+                <p>Paid-in capital</p>
+              </div>
+
+              <div className="impact-card">
+                <h3>{formatCurrencyCr(dashboardMetrics.netDistributions)}</h3>
+                <p>Net distributions</p>
+              </div>
+
+              <div className="impact-card">
                 <h3>{formatCurrencyCr(dashboardMetrics.currentNav)}</h3>
-                <p>Current NAV</p>
+                <p>Latest Net NAV</p>
               </div>
 
               <div className="impact-card">
                 <h3>{formatCurrencyCr(dashboardMetrics.totalInvestmentCost)}</h3>
-                <p>Total investment cost</p>
+                <p>Portfolio investment cost</p>
               </div>
 
               <div className="impact-card">
-                <h3>{formatCurrencyCr(dashboardMetrics.realizedValue)}</h3>
-                <p>Realized value</p>
-              </div>
-
-              <div className="impact-card">
-                <h3>{formatCurrencyCr(dashboardMetrics.unrealizedValue)}</h3>
-                <p>Unrealized value</p>
+                <h3>{formatCurrencyCr(dashboardMetrics.currentFairValue)}</h3>
+                <p>Portfolio fair value</p>
               </div>
             </div>
+
+            {dashboardMetrics.calculationVersion && (
+              <div className="preview-card">
+                <div className="source-monitor-header">
+                  <div>
+                    <h2>Distribution Methodology</h2>
+                    <p>
+                      Performance basis: {dashboardMetrics.performanceDistributionBasis || "Net Cash"}
+                    </p>
+                  </div>
+                  <span className="status-pill">Reconciled</span>
+                </div>
+
+                <div className="impact-grid">
+                  <div className="impact-card">
+                    <h3>{formatCurrencyCr(dashboardMetrics.grossDistributions)}</h3>
+                    <p>Gross distributions</p>
+                  </div>
+                  <div className="impact-card">
+                    <h3>{formatCurrencyCr(dashboardMetrics.withholdingTax)}</h3>
+                    <p>Withholding tax</p>
+                  </div>
+                  <div className="impact-card">
+                    <h3>{formatCurrencyCr(dashboardMetrics.netDistributions)}</h3>
+                    <p>Net cash distributions</p>
+                  </div>
+                  <div className="impact-card">
+                    <h3>{dashboardMetrics.calculationSourceBatch.slice(0, 8) || "-"}</h3>
+                    <p>Source batch</p>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="preview-card">
               <div className="source-monitor-header">
                 <div>
