@@ -1041,34 +1041,56 @@ export default function FundOnboardingPage() {
       setIsSavingStakeholder(false);
     }
   }
+  async function getInviteAccessToken() {
+    if (!isSupabaseConfigured || !supabase) {
+      throw new Error("Supabase authentication is not configured.");
+    }
+
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+
+    if (error || !session?.access_token) {
+      throw new Error(
+        "Please sign in as an authorised Fund Admin before sending invites."
+      );
+    }
+
+    return session.access_token;
+  }
+
+  async function requestSecureInvite(
+    stakeholderId: string,
+    accessToken: string
+  ) {
+    const response = await fetch("/api/stakeholders/invite", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ stakeholderId }),
+    });
+
+    const result = (await response.json()) as {
+      ok?: boolean;
+      message?: string;
+    };
+
+    if (!response.ok || !result.ok) {
+      throw new Error(result.message || "Unable to send secure invite.");
+    }
+
+    return result;
+  }
+
   async function sendSecureInvite(stakeholder: StakeholderRow) {
     setInviteMessage("");
 
     try {
-      const response = await fetch("/api/stakeholders/invite", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          stakeholderId: stakeholder.id,
-          email: stakeholder.email,
-          fullName: stakeholder.fullName,
-          roleKey: stakeholder.roleKey,
-          roleLabel: stakeholder.roleLabel,
-          dashboardPath: stakeholder.dashboardPath,
-          fundId: stakeholder.fundId,
-        }),
-      });
-
-      const result = (await response.json()) as {
-        ok?: boolean;
-        message?: string;
-      };
-
-      if (!response.ok || !result.ok) {
-        throw new Error(result.message || "Unable to send secure invite.");
-      }
+      const accessToken = await getInviteAccessToken();
+      await requestSecureInvite(stakeholder.id, accessToken);
 
       const today = new Date().toISOString().slice(0, 10);
 
@@ -1188,27 +1210,32 @@ export default function FundOnboardingPage() {
     setIsSendingInvites(true);
 
     try {
+      const accessToken = await getInviteAccessToken();
       const now = new Date().toISOString();
+      const successfulIds: string[] = [];
+      const failures: string[] = [];
+
+      for (const stakeholder of pendingStakeholders) {
+        try {
+          await requestSecureInvite(stakeholder.id, accessToken);
+          successfulIds.push(stakeholder.id);
+        } catch (error) {
+          failures.push(
+            `${stakeholder.email}: ${
+              error instanceof Error ? error.message : "Invite failed."
+            }`
+          );
+        }
+      }
+
+      if (successfulIds.length === 0) {
+        throw new Error(
+          failures[0] || "No stakeholder invites could be sent."
+        );
+      }
 
       if (isSupabaseConfigured && supabase) {
         const db = supabase as any;
-        const ids = pendingStakeholders
-          .map((stakeholder) => stakeholder.id)
-          .filter((id) => !id.startsWith("stake-"));
-
-        if (ids.length > 0) {
-          const { error: updateError } = await db
-            .from("ventiq_stakeholders")
-            .update({
-              invite_status: "Invite Sent",
-              invited_at: now,
-            })
-            .in("id", ids);
-
-          if (updateError) {
-            throw new Error(updateError.message);
-          }
-        }
 
         const { data, error } = await db
           .from("ventiq_invite_batches")
@@ -1216,42 +1243,30 @@ export default function FundOnboardingPage() {
             fund_id: selectedFund.id,
             batch_name: `${selectedFund.fundName} invite batch`,
             total_invites: pendingStakeholders.length,
-            sent_count: pendingStakeholders.length,
-            pending_count: pendingStakeholders.length,
+            sent_count: successfulIds.length,
+            pending_count: failures.length,
             activated_count: 0,
-            batch_status: "Sent",
+            batch_status:
+              failures.length === 0 ? "Sent" : "Partially Sent",
           })
           .select("*")
           .single();
 
         if (error) {
-          throw new Error(error.message);
+          setInviteMessage(
+            `${successfulIds.length} invite(s) were sent, but the batch tracking row could not be saved: ${error.message}`
+          );
+        } else {
+          setInviteBatches((currentBatches) => [
+            mapInviteBatch(data as DataRow),
+            ...currentBatches,
+          ]);
         }
-
-        setInviteBatches((currentBatches) => [
-          mapInviteBatch(data as DataRow),
-          ...currentBatches,
-        ]);
-      } else {
-        const localBatch: InviteBatchRow = {
-          id: crypto.randomUUID(),
-          fundId: selectedFund.id,
-          batchName: `${selectedFund.fundName} invite batch`,
-          totalInvites: pendingStakeholders.length,
-          sentCount: pendingStakeholders.length,
-          pendingCount: pendingStakeholders.length,
-          activatedCount: 0,
-          batchStatus: "Sent",
-          createdAt: now.slice(0, 10),
-        };
-
-        setInviteBatches((currentBatches) => [localBatch, ...currentBatches]);
       }
 
       setStakeholders((currentStakeholders) =>
         currentStakeholders.map((stakeholder) =>
-          stakeholder.fundId === selectedFund.id &&
-          stakeholder.inviteStatus === "Not Invited"
+          successfulIds.includes(stakeholder.id)
             ? {
                 ...stakeholder,
                 inviteStatus: "Invite Sent",
@@ -1261,16 +1276,15 @@ export default function FundOnboardingPage() {
         )
       );
 
-      setInviteMessage(
-        `${pendingStakeholders.length} secure invite link(s) prepared. Users will set their own password.`
-      );
-
-      await createAuditLog({
-        fundId: selectedFund.id,
-        eventType: "Invite Batch Sent",
-        eventTitle: "Secure invite batch sent",
-        eventDescription: `${pendingStakeholders.length} stakeholder invite link(s) were prepared for ${selectedFund.fundName}.`,
-      });
+      if (failures.length === 0) {
+        setInviteMessage(
+          `${successfulIds.length} secure invite(s) sent successfully.`
+        );
+      } else {
+        setInviteMessage(
+          `${successfulIds.length} invite(s) sent; ${failures.length} failed. First failure: ${failures[0]}`
+        );
+      }
     } catch (error) {
       setInviteMessage(
         error instanceof Error ? error.message : "Unable to send invite batch."
