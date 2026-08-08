@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 
 type DataRow = Record<string, unknown>;
 
@@ -490,6 +491,8 @@ function mapAuditLog(row: DataRow): AuditLogRow {
 }
 
 export default function FundOnboardingPage() {
+  const { refreshAccess } = useVentiqAuth();
+
   const [funds, setFunds] = useState<FundRow[]>(sampleFunds);
   const [schemes, setSchemes] = useState<SchemeRow[]>(sampleSchemes);
   const [stakeholders, setStakeholders] =
@@ -755,6 +758,25 @@ export default function FundOnboardingPage() {
     }
   }
 
+  async function getFundAdminAccessToken() {
+    if (!isSupabaseConfigured || !supabase) {
+      throw new Error("Supabase authentication is not configured.");
+    }
+
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+
+    if (error || !session?.access_token) {
+      throw new Error(
+        "Please sign in as an authorised Fund Admin before creating a fund."
+      );
+    }
+
+    return session.access_token;
+  }
+
   async function submitFund(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFundMessage("");
@@ -809,31 +831,47 @@ export default function FundOnboardingPage() {
         return;
       }
 
-      const db = supabase as any;
+      const accessToken = await getFundAdminAccessToken();
 
-      const { data, error } = await db
-        .from("ventiq_funds")
-        .insert(payload)
-        .select("*")
-        .single();
+      const response = await fetch("/api/fund-onboarding/create-fund", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          fundName: payload.fund_name,
+          fundType: payload.fund_type,
+          jurisdiction: payload.jurisdiction,
+          sebiRegistrationNumber: payload.sebi_registration_number,
+          giftCityRegistrationNumber: payload.gift_city_registration_number,
+          sponsorName: payload.sponsor_name,
+          investmentManagerName: payload.investment_manager_name,
+          trusteeName: payload.trustee_name,
+          dataMode: payload.data_mode,
+        }),
+      });
 
-      if (error) {
-        throw new Error(error.message);
+      const result = (await response.json()) as {
+        ok?: boolean;
+        message?: string;
+        fund?: DataRow;
+      };
+
+      if (!response.ok || !result.ok || !result.fund) {
+        throw new Error(result.message || "Unable to create fund.");
       }
 
-      const savedFund = mapFund(data as DataRow);
+      const savedFund = mapFund(result.fund);
 
       setFunds((currentFunds) => [savedFund, ...currentFunds]);
       setSelectedFundId(savedFund.id);
       setFundForm(emptyFundForm);
-      setFundMessage("Fund created successfully.");
+      setFundMessage(
+        "Fund created successfully. Your Fund Admin access is active for this fund."
+      );
 
-      await createAuditLog({
-        fundId: savedFund.id,
-        eventType: "Fund Created",
-        eventTitle: "New fund created",
-        eventDescription: `${savedFund.fundName} was created in onboarding workspace.`,
-      });
+      await refreshAccess();
     } catch (error) {
       setFundMessage(
         error instanceof Error ? error.message : "Unable to create fund."
