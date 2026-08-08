@@ -983,102 +983,165 @@ ${buildNoticeForRepayment(repayment)}`;
   }
 
   async function saveNoticeHistory({
-    noticeType,
-    batchMonth,
-    repayments,
-  }: {
-    noticeType: "single" | "bulk";
-    batchMonth?: string;
-    repayments: DataRow[];
-  }) {
-    if (!supabase || repayments.length === 0) return;
+  noticeType,
+  batchMonth,
+  repayments,
+}: {
+  noticeType: "single" | "bulk";
+  batchMonth?: string;
+  repayments: DataRow[];
+}) {
+  if (!supabase || repayments.length === 0) return;
 
-    const batchResult = await supabase
-      .from("repayment_notice_batches")
-      .insert({
-        batch_month: batchMonth ?? null,
-        notice_type: noticeType,
-        status: "generated",
-        total_notices: repayments.length,
-      })
-      .select("id")
-      .single();
+  const resolvedFundNames = repayments
+    .map((repayment) =>
+      getString(repayment, ["fund_name"], "").trim()
+    )
+    .filter((fundName) => fundName.length > 0);
 
-    if (batchResult.error) {
-      throw new Error(batchResult.error.message);
-    }
-
-    const batchId = getString(batchResult.data as DataRow, ["id"], "");
-
-    const noticeRows = repayments.map((repayment) => {
-  const investment = getInvestmentForRepayment(repayment);
-  const company = getCompanyForRepayment(repayment);
-
-  const companyName = getString(
-    company,
-    ["company_name", "name", "title"],
-    "Portfolio Company"
+  const uniqueFundNames = Array.from(
+    new Map(
+      resolvedFundNames.map((fundName) => [
+        fundName.toLowerCase(),
+        fundName,
+      ])
+    ).values()
   );
 
-  const dueDateValue = getString(repayment, ["due_date"], "");
-  const recipientEmail = getRepaymentContactEmail(company);
-  const emailReadyDetails = getEmailReadyDetails(recipientEmail);
-
-  return {
-        batch_id: batchId,
-        repayment_schedule_id: getId(repayment),
-        portfolio_company_id: getString(
-          company,
-          ["id"],
-          getString(repayment, ["portfolio_company_id", "company_id"], "")
-        ),
-        fund_investment_id: getString(
-          investment,
-          ["id"],
-          getString(repayment, ["fund_investment_id", "investment_id"], "")
-        ),
-        company_name: companyName,
-        due_date: dueDateValue || null,
-        notice_subject: `Repayment Notice - Amount Due on ${formatDate(
-          repayment["due_date"]
-        )}`,
-        notice_body: buildNoticeForRepayment(repayment),
-        notice_status: "generated",
-delivery_status: "not_sent",
-recipient_email: recipientEmail || null,
-recipient_source: recipientEmail ? "portfolio_company" : "missing",
-email_ready: emailReadyDetails.emailReady,
-email_ready_note: emailReadyDetails.emailReadyNote,
-      };
-    });
-
-    const noticesResult = await supabase
-      .from("repayment_notices")
-      .insert(noticeRows);
-
-    if (noticesResult.error) {
-      throw new Error(noticesResult.error.message);
-    }
-
-    const repaymentIds = repayments
-      .map((repayment) => getId(repayment))
-      .filter((id) => id.length > 0);
-
-    if (repaymentIds.length > 0) {
-      const scheduleUpdateResult = await supabase
-        .from("debt_repayment_schedules")
-        .update({
-          notice_status: "generated",
-        })
-        .in("id", repaymentIds);
-
-      if (scheduleUpdateResult.error) {
-        throw new Error(scheduleUpdateResult.error.message);
-      }
-    }
-
-    await loadRepaymentData();
+  if (uniqueFundNames.length === 0) {
+    throw new Error(
+      "Repayment notice cannot be generated because the repayment schedule is not linked to a fund."
+    );
   }
+
+  if (uniqueFundNames.length > 1) {
+    throw new Error(
+      "Bulk repayment notices must contain repayment schedules from one fund only."
+    );
+  }
+
+  const fundName = uniqueFundNames[0] ?? "";
+
+  if (!fundName) {
+    throw new Error(
+      "Unable to resolve the fund for this repayment notice."
+    );
+  }
+
+  const batchResult = await supabase
+    .from("repayment_notice_batches")
+    .insert({
+      fund_name: fundName,
+      batch_month: batchMonth ?? null,
+      notice_type: noticeType,
+      status: "generated",
+      total_notices: repayments.length,
+    })
+    .select("id")
+    .single();
+
+  if (batchResult.error) {
+    throw new Error(batchResult.error.message);
+  }
+
+  const batchId = getString(
+    batchResult.data as DataRow,
+    ["id"],
+    ""
+  );
+
+  const noticeRows = repayments.map((repayment) => {
+    const investment = getInvestmentForRepayment(repayment);
+    const company = getCompanyForRepayment(repayment);
+
+    const companyName = getString(
+      company,
+      ["company_name", "name", "title"],
+      "Portfolio Company"
+    );
+
+    const dueDateValue = getString(
+      repayment,
+      ["due_date"],
+      ""
+    );
+
+    const recipientEmail = getRepaymentContactEmail(company);
+    const emailReadyDetails = getEmailReadyDetails(recipientEmail);
+
+    return {
+      batch_id: batchId,
+      repayment_schedule_id: getId(repayment),
+
+      portfolio_company_id: getString(
+        company,
+        ["id"],
+        getString(
+          repayment,
+          ["portfolio_company_id", "company_id"],
+          ""
+        )
+      ),
+
+      fund_investment_id: getString(
+        investment,
+        ["id"],
+        getString(
+          repayment,
+          ["fund_investment_id", "investment_id"],
+          ""
+        )
+      ),
+
+      company_name: companyName,
+      due_date: dueDateValue || null,
+
+      notice_subject: `Repayment Notice - Amount Due on ${formatDate(
+        repayment["due_date"]
+      )}`,
+
+      notice_body: buildNoticeForRepayment(repayment),
+
+      notice_status: "generated",
+      delivery_status: "not_sent",
+
+      recipient_email: recipientEmail || null,
+      recipient_source: recipientEmail
+        ? "portfolio_company"
+        : "missing",
+
+      email_ready: emailReadyDetails.emailReady,
+      email_ready_note: emailReadyDetails.emailReadyNote,
+    };
+  });
+
+  const noticesResult = await supabase
+    .from("repayment_notices")
+    .insert(noticeRows);
+
+  if (noticesResult.error) {
+    throw new Error(noticesResult.error.message);
+  }
+
+  const repaymentIds = repayments
+    .map((repayment) => getId(repayment))
+    .filter((id) => id.length > 0);
+
+  if (repaymentIds.length > 0) {
+    const scheduleUpdateResult = await supabase
+      .from("debt_repayment_schedules")
+      .update({
+        notice_status: "generated",
+      })
+      .in("id", repaymentIds);
+
+    if (scheduleUpdateResult.error) {
+      throw new Error(scheduleUpdateResult.error.message);
+    }
+  }
+
+  await loadRepaymentData();
+}
 async function handleMarkNoticeSent(notice: DataRow) {
   if (!supabase) {
     setQueueActionMessage(

@@ -102,15 +102,35 @@ const strongSignalWords = [
   "beneficial ownership",
 ];
 
+const REGULATORY_SCAN_ROLES = new Set([
+  "fund_admin",
+  "compliance_team",
+]);
+
 function createSupabaseServerClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error("Supabase environment variables are missing.");
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error("Supabase server environment variables are missing.");
   }
 
-  return createClient(supabaseUrl, supabaseAnonKey);
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
+
+function getBearerToken(request: Request) {
+  const authorization = request.headers.get("authorization") ?? "";
+
+  if (!authorization.toLowerCase().startsWith("bearer ")) {
+    return "";
+  }
+
+  return authorization.slice(7).trim();
 }
 
 function asStringArray(value: unknown) {
@@ -349,8 +369,106 @@ export async function POST(request: Request) {
   let monitorId = "";
 
   try {
+    const supabase = createSupabaseServerClient();
+
+    // --------------------------------------------------------
+    // 1. Require a real signed-in Supabase user
+    // --------------------------------------------------------
+
+    const accessToken = getBearerToken(request);
+
+    if (!accessToken) {
+      return NextResponse.json(
+        {
+          error: "Authentication is required to run a regulatory source scan.",
+        },
+        { status: 401 }
+      );
+    }
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser(accessToken);
+
+    if (userError || !user) {
+      return NextResponse.json(
+        {
+          error: "Your session is invalid or has expired.",
+        },
+        { status: 401 }
+      );
+    }
+
+    // --------------------------------------------------------
+    // 2. Require an Active VENTIQ profile
+    // --------------------------------------------------------
+
+    const { data: profile, error: profileError } = await supabase
+      .from("ventiq_user_profiles")
+      .select("user_id, email, full_name, default_role, status")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      throw new Error(
+        `Unable to verify VENTIQ profile: ${profileError.message}`
+      );
+    }
+
+    if (!profile || profile.status !== "Active") {
+      return NextResponse.json(
+        {
+          error: "Your VENTIQ profile is not active.",
+        },
+        { status: 403 }
+      );
+    }
+
+    // --------------------------------------------------------
+    // 3. Resolve authorised VENTIQ role
+    // --------------------------------------------------------
+
+    let activeRole = String(profile.default_role ?? "").trim();
+
+    if (!REGULATORY_SCAN_ROLES.has(activeRole)) {
+      const { data: memberships, error: membershipError } = await supabase
+        .from("ventiq_organisation_members")
+        .select("role")
+        .eq("user_id", user.id)
+        .eq("status", "Active");
+
+      if (membershipError) {
+        throw new Error(
+          `Unable to verify organisation membership: ${membershipError.message}`
+        );
+      }
+
+      const authorisedMembership = (memberships ?? []).find((membership) =>
+        REGULATORY_SCAN_ROLES.has(String(membership.role ?? "").trim())
+      );
+
+      if (authorisedMembership) {
+        activeRole = String(authorisedMembership.role ?? "").trim();
+      }
+    }
+
+    if (!REGULATORY_SCAN_ROLES.has(activeRole)) {
+      return NextResponse.json(
+        {
+          error:
+            "You do not have permission to run regulatory source scans.",
+        },
+        { status: 403 }
+      );
+    }
+
+    // --------------------------------------------------------
+    // 4. Only now accept the requested monitor
+    // --------------------------------------------------------
+
     const body = await request.json();
-    monitorId = String(body.monitorId ?? "");
+    monitorId = String(body.monitorId ?? "").trim();
 
     if (!monitorId) {
       return NextResponse.json(
@@ -358,8 +476,6 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-
-    const supabase = createSupabaseServerClient();
 
     const { data: monitorData, error: monitorError } = await supabase
       .from("regulatory_source_monitors")

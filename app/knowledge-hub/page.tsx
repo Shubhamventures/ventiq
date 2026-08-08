@@ -258,6 +258,28 @@ const [savingApprovalReview, setSavingApprovalReview] = useState(false);
 
   const authorities = ["All", "SEBI", "IFSCA", "Income Tax", "RBI", "MCA"];
 
+  async function getAuthenticatedApiHeaders() {
+    if (!supabase) {
+      throw new Error("Supabase is not configured.");
+    }
+
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+
+    if (error || !session?.access_token) {
+      throw new Error(
+        "Please sign in again before running a regulatory source scan."
+      );
+    }
+
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    };
+  }
+
   useEffect(() => {
   loadRegulatoryCirculars();
   loadRegulatorySourceMonitors();
@@ -800,9 +822,7 @@ async function handleSaveApprovedSourceMatch() {
     try {
       const response = await fetch("/api/knowledge-hub/scan-source", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: await getAuthenticatedApiHeaders(),
         body: JSON.stringify({
           monitorId: monitor.id,
         }),
@@ -838,9 +858,7 @@ async function handleSaveApprovedSourceMatch() {
   try {
     const response = await fetch("/api/knowledge-hub/scan-source", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: await getAuthenticatedApiHeaders(),
       body: JSON.stringify({
         monitorId: monitor.id,
       }),

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../../lib/supabaseClient";
 
 type DataRow = Record<string, unknown>;
@@ -66,13 +66,22 @@ type ApprovalForm = {
   actionType: string;
   actionTitle: string;
   actionDescription: string;
-  requestedByName: string;
-  requestedByEmail: string;
-  makerRole: string;
-  checkerRole: string;
-  approverRole: string;
   priority: string;
   businessImpact: string;
+};
+
+type WorkflowActor = {
+  userId: string;
+  email: string;
+  fullName: string;
+  role: string;
+  organisationId: string;
+};
+
+type WorkflowCapabilities = {
+  canCreate: boolean;
+  canCheckerReview: boolean;
+  canFinalApprove: boolean;
 };
 
 const emptyApprovalForm: ApprovalForm = {
@@ -81,107 +90,58 @@ const emptyApprovalForm: ApprovalForm = {
   actionType: "Receipt Update",
   actionTitle: "",
   actionDescription: "",
-  requestedByName: "Finance Maker",
-  requestedByEmail: "maker@useventiq.com",
-  makerRole: "Finance Maker",
-  checkerRole: "Finance Checker",
-  approverRole: "Finance Head",
   priority: "Medium",
   businessImpact: "",
 };
 
 const sampleApprovals: ApprovalRequest[] = [
   {
-    id: "approval-001",
+    id: "approval-demo-001",
     sourceModule: "Debt LMS",
-    linkedRecordId: "loan-alpha-001",
+    linkedRecordId: "demo-record-001",
     linkedRecordType: "Repayment Schedule",
     actionType: "Receipt Update",
-    actionTitle: "Approve Alpha Fintech repayment receipt",
+    actionTitle: "Approve repayment receipt update",
     actionDescription:
-      "Receipt of principal and interest needs checker approval before schedule status is closed.",
-    requestedByName: "Finance Maker",
-    requestedByEmail: "maker@useventiq.com",
-    makerRole: "Finance Maker",
-    checkerRole: "Finance Checker",
-    approverRole: "Finance Head",
+      "A maker submits a controlled action, a checker reviews it, and a final approver completes the workflow.",
+    requestedByName: "Demo Maker",
+    requestedByEmail: "demo@useventiq.com",
+    makerRole: "maker",
+    checkerRole: "checker",
+    approverRole: "finance_head / compliance_team / managing_partner",
     priority: "High",
     approvalStatus: "Pending Review",
     currentStep: "Checker Review",
-    businessImpact: "Updates Debt LMS outstanding amount and collection status.",
-    requestedAt: "2026-08-02",
+    businessImpact: "Demonstrates the controlled approval path without writing to the database.",
+    requestedAt: new Date().toISOString().slice(0, 10),
     approvedAt: "",
     rejectedAt: "",
-  },
-  {
-    id: "approval-002",
-    sourceModule: "Bank MIS",
-    linkedRecordId: "bank-match-001",
-    linkedRecordType: "Bank Transaction",
-    actionType: "AI Mapping Approval",
-    actionTitle: "Approve bank receipt mapping to Debt LMS",
-    actionDescription:
-      "Bank MIS identified receipt as debt repayment. Approval will sync receipt to Debt LMS.",
-    requestedByName: "Bank MIS AI",
-    requestedByEmail: "ai@useventiq.com",
-    makerRole: "AI System",
-    checkerRole: "Finance Checker",
-    approverRole: "Finance Head",
-    priority: "Medium",
-    approvalStatus: "Approved",
-    currentStep: "Completed",
-    businessImpact: "Creates approved receipt bridge for Debt LMS sync.",
-    requestedAt: "2026-08-02",
-    approvedAt: "2026-08-02",
-    rejectedAt: "",
-  },
-  {
-    id: "approval-003",
-    sourceModule: "Fund Onboarding",
-    linkedRecordId: "stakeholder-001",
-    linkedRecordType: "Stakeholder Access",
-    actionType: "Access Revocation",
-    actionTitle: "Revoke external reviewer access",
-    actionDescription:
-      "External reviewer access needs approval before revocation is recorded.",
-    requestedByName: "Fund Admin",
-    requestedByEmail: "admin@useventiq.com",
-    makerRole: "Fund Admin",
-    checkerRole: "Compliance Officer",
-    approverRole: "Managing Partner",
-    priority: "Low",
-    approvalStatus: "Rejected",
-    currentStep: "Rejected",
-    businessImpact: "Controls external stakeholder access to documents.",
-    requestedAt: "2026-08-02",
-    approvedAt: "",
-    rejectedAt: "2026-08-02",
   },
 ];
 
 const sampleSteps: ApprovalStep[] = [
   {
-    id: "step-001",
-    approvalRequestId: "approval-001",
+    id: "step-demo-001",
+    approvalRequestId: "approval-demo-001",
     stepOrder: 1,
     stepName: "Maker Submitted",
-    assignedRole: "Finance Maker",
-    assignedToName: "Finance Maker",
-    assignedToEmail: "maker@useventiq.com",
+    assignedRole: "maker",
+    assignedToName: "Demo Maker",
+    assignedToEmail: "demo@useventiq.com",
     stepStatus: "Completed",
-    actionedByName: "Finance Maker",
-    actionedByEmail: "maker@useventiq.com",
-    actionedAt: "2026-08-02",
-    comments: "Receipt update submitted for review.",
+    actionedByName: "Demo Maker",
+    actionedByEmail: "demo@useventiq.com",
+    actionedAt: new Date().toISOString().slice(0, 10),
+    comments: "Demonstration record only.",
   },
   {
-    id: "step-002",
-    approvalRequestId: "approval-001",
+    id: "step-demo-002",
+    approvalRequestId: "approval-demo-001",
     stepOrder: 2,
     stepName: "Checker Review",
-    assignedRole: "Finance Checker",
-    assignedToName: "Finance Checker",
-    assignedToEmail: "checker@useventiq.com",
+    assignedRole: "checker",
+    assignedToName: "",
+    assignedToEmail: "",
     stepStatus: "Pending",
     actionedByName: "",
     actionedByEmail: "",
@@ -189,13 +149,13 @@ const sampleSteps: ApprovalStep[] = [
     comments: "",
   },
   {
-    id: "step-003",
-    approvalRequestId: "approval-001",
+    id: "step-demo-003",
+    approvalRequestId: "approval-demo-001",
     stepOrder: 3,
     stepName: "Final Approval",
-    assignedRole: "Finance Head",
-    assignedToName: "Finance Head",
-    assignedToEmail: "finance.head@useventiq.com",
+    assignedRole: "finance_head / compliance_team / managing_partner",
+    assignedToName: "",
+    assignedToEmail: "",
     stepStatus: "Pending",
     actionedByName: "",
     actionedByEmail: "",
@@ -206,38 +166,20 @@ const sampleSteps: ApprovalStep[] = [
 
 const sampleAuditLogs: AuditLog[] = [
   {
-    id: "audit-001",
+    id: "audit-demo-001",
     sourceModule: "Debt LMS",
-    linkedRecordId: "loan-alpha-001",
+    linkedRecordId: "demo-record-001",
     linkedRecordType: "Repayment Schedule",
     eventType: "Approval Requested",
-    eventTitle: "Receipt update sent for approval",
-    eventDescription:
-      "Maker submitted Alpha Fintech repayment receipt for checker review.",
-    actorName: "Finance Maker",
-    actorEmail: "maker@useventiq.com",
-    actorRole: "Finance Maker",
+    eventTitle: "Demo approval request",
+    eventDescription: "Demonstration event only. No database record was created.",
+    actorName: "Demo Maker",
+    actorEmail: "demo@useventiq.com",
+    actorRole: "maker",
     eventStatus: "Recorded",
     riskLevel: "Medium",
     evidenceUrl: "",
-    createdAt: "2026-08-02",
-  },
-  {
-    id: "audit-002",
-    sourceModule: "Bank MIS",
-    linkedRecordId: "bank-match-001",
-    linkedRecordType: "Bank Transaction",
-    eventType: "Approved",
-    eventTitle: "Bank mapping approved",
-    eventDescription:
-      "Bank receipt mapping was approved and made ready for Debt LMS sync.",
-    actorName: "Finance Head",
-    actorEmail: "finance.head@useventiq.com",
-    actorRole: "Approver",
-    eventStatus: "Recorded",
-    riskLevel: "Low",
-    evidenceUrl: "",
-    createdAt: "2026-08-02",
+    createdAt: new Date().toISOString().slice(0, 10),
   },
 ];
 
@@ -259,54 +201,34 @@ const criticalActions = [
 function getString(row: DataRow, keys: string[], fallback = "") {
   for (const key of keys) {
     const value = row[key];
-
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
+    if (typeof value === "string" && value.trim()) return value;
   }
-
   return fallback;
 }
 
 function getNumber(row: DataRow, keys: string[], fallback = 0) {
   for (const key of keys) {
     const value = row[key];
-
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return value;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() &&
-      !Number.isNaN(Number(value))
-    ) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim() && !Number.isNaN(Number(value))) {
       return Number(value);
     }
   }
-
   return fallback;
 }
 
 function getDateString(row: DataRow, keys: string[], fallback = "") {
   for (const key of keys) {
     const value = row[key];
-
-    if (typeof value === "string" && value.trim()) {
-      return value.slice(0, 10);
-    }
+    if (typeof value === "string" && value.trim()) return value.slice(0, 10);
   }
-
   return fallback;
 }
 
 function formatDate(value: string) {
   if (!value) return "Not available";
-
   const date = new Date(value);
-
   if (Number.isNaN(date.getTime())) return value;
-
   return date.toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",
@@ -334,7 +256,7 @@ function mapApproval(row: DataRow): ApprovalRequest {
     approverRole: getString(row, ["approver_role"], ""),
     priority: getString(row, ["priority"], "Medium"),
     approvalStatus: getString(row, ["approval_status"], "Pending Review"),
-    currentStep: getString(row, ["current_step"], "Maker Submitted"),
+    currentStep: getString(row, ["current_step"], "Checker Review"),
     businessImpact: getString(row, ["business_impact"], ""),
     requestedAt: getDateString(row, ["requested_at", "created_at"], ""),
     approvedAt: getDateString(row, ["approved_at"], ""),
@@ -378,126 +300,126 @@ function mapAudit(row: DataRow): AuditLog {
   };
 }
 
+async function getAccessToken() {
+  if (!supabase) throw new Error("Supabase client is not available.");
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw new Error(error.message);
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Please sign in before opening the approval workflow.");
+  return token;
+}
+
 export default function AuditWorkflowPage() {
-  const [approvals, setApprovals] =
-    useState<ApprovalRequest[]>(sampleApprovals);
-  const [approvalSteps, setApprovalSteps] =
-    useState<ApprovalStep[]>(sampleSteps);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(sampleAuditLogs);
-
-  const [approvalForm, setApprovalForm] =
-    useState<ApprovalForm>(emptyApprovalForm);
-  const [selectedApprovalId, setSelectedApprovalId] = useState(
-    sampleApprovals[0].id
-  );
-
+  const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  const [approvalSteps, setApprovalSteps] = useState<ApprovalStep[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [actor, setActor] = useState<WorkflowActor | null>(null);
+  const [capabilities, setCapabilities] = useState<WorkflowCapabilities>({
+    canCreate: false,
+    canCheckerReview: false,
+    canFinalApprove: false,
+  });
+  const [approvalForm, setApprovalForm] = useState<ApprovalForm>(emptyApprovalForm);
+  const [selectedApprovalId, setSelectedApprovalId] = useState("");
   const [loading, setLoading] = useState(true);
-  const [dataMessage, setDataMessage] = useState(
-    "Loading approval workflow..."
-  );
+  const [dataMessage, setDataMessage] = useState("Loading secured approval workflow...");
   const [formMessage, setFormMessage] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    async function loadWorkflowData() {
-      if (!isSupabaseConfigured || !supabase) {
-        setDataMessage("Using sample workflow data. Supabase is not configured.");
-        setLoading(false);
-        return;
+  const applyWorkflowPayload = useCallback((payload: any) => {
+    const nextApprovals = Array.isArray(payload?.approvals)
+      ? (payload.approvals as DataRow[]).map(mapApproval)
+      : [];
+    const nextSteps = Array.isArray(payload?.steps)
+      ? (payload.steps as DataRow[]).map(mapStep)
+      : [];
+    const nextAuditLogs = Array.isArray(payload?.auditLogs)
+      ? (payload.auditLogs as DataRow[]).map(mapAudit)
+      : [];
+
+    setApprovals(nextApprovals);
+    setApprovalSteps(nextSteps);
+    setAuditLogs(nextAuditLogs);
+    setActor(payload?.actor || null);
+    setCapabilities(
+      payload?.capabilities || {
+        canCreate: false,
+        canCheckerReview: false,
+        canFinalApprove: false,
       }
-
-      try {
-        setLoading(true);
-        const db = supabase as any;
-
-        const [approvalsResult, stepsResult, auditResult] = await Promise.all([
-          db
-            .from("ventiq_approval_requests")
-            .select("*")
-            .order("created_at", { ascending: false }),
-          db
-            .from("ventiq_approval_steps")
-            .select("*")
-            .order("step_order", { ascending: true }),
-          db
-            .from("ventiq_enterprise_audit_logs")
-            .select("*")
-            .order("created_at", { ascending: false }),
-        ]);
-
-        if (approvalsResult.error) throw new Error(approvalsResult.error.message);
-        if (stepsResult.error) throw new Error(stepsResult.error.message);
-        if (auditResult.error) throw new Error(auditResult.error.message);
-
-        const nextApprovals =
-          approvalsResult.data && approvalsResult.data.length > 0
-            ? (approvalsResult.data as DataRow[]).map(mapApproval)
-            : sampleApprovals;
-
-        const nextSteps =
-          stepsResult.data && stepsResult.data.length > 0
-            ? (stepsResult.data as DataRow[]).map(mapStep)
-            : sampleSteps;
-
-        const nextAuditLogs =
-          auditResult.data && auditResult.data.length > 0
-            ? (auditResult.data as DataRow[]).map(mapAudit)
-            : sampleAuditLogs;
-
-        setApprovals(nextApprovals);
-        setApprovalSteps(nextSteps);
-        setAuditLogs(nextAuditLogs);
-        setSelectedApprovalId(nextApprovals[0]?.id || sampleApprovals[0].id);
-
-        setDataMessage(
-          approvalsResult.data && approvalsResult.data.length > 0
-            ? "Connected to Supabase approval workflow records."
-            : "Approval workflow tables are ready. Showing sample data until requests are created."
-        );
-      } catch (error) {
-        setDataMessage(
-          error instanceof Error
-            ? `Workflow database issue: ${error.message}`
-            : "Unable to load workflow data. Showing sample data."
-        );
-        setApprovals(sampleApprovals);
-        setApprovalSteps(sampleSteps);
-        setAuditLogs(sampleAuditLogs);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadWorkflowData();
+    );
+    setSelectedApprovalId((current) => {
+      if (current && nextApprovals.some((item) => item.id === current)) return current;
+      return nextApprovals[0]?.id || "";
+    });
   }, []);
 
-  const selectedApproval =
-    approvals.find((item) => item.id === selectedApprovalId) ??
-    approvals[0] ??
-    sampleApprovals[0];
+  const loadWorkflowData = useCallback(async () => {
+    if (!isSupabaseConfigured || !supabase) {
+      setApprovals(sampleApprovals);
+      setApprovalSteps(sampleSteps);
+      setAuditLogs(sampleAuditLogs);
+      setActor(null);
+      setCapabilities({ canCreate: false, canCheckerReview: false, canFinalApprove: false });
+      setSelectedApprovalId(sampleApprovals[0].id);
+      setDataMessage("Demo-only mode. Configure Supabase and sign in to use secured workflow actions.");
+      setLoading(false);
+      return;
+    }
 
-  const selectedSteps = approvalSteps
-    .filter((step) => step.approvalRequestId === selectedApproval.id)
-    .sort((a, b) => a.stepOrder - b.stepOrder);
+    try {
+      setLoading(true);
+      const token = await getAccessToken();
+      const response = await fetch("/api/admin/approval-workflow", {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Unable to load approval workflow.");
+      }
+      applyWorkflowPayload(payload);
+      setDataMessage(
+        payload?.actor
+          ? `Secure server workflow · ${payload.actor.fullName} · ${payload.actor.role}`
+          : "Secure server workflow connected."
+      );
+    } catch (error) {
+      setApprovals([]);
+      setApprovalSteps([]);
+      setAuditLogs([]);
+      setActor(null);
+      setCapabilities({ canCreate: false, canCheckerReview: false, canFinalApprove: false });
+      setDataMessage(error instanceof Error ? error.message : "Unable to load approval workflow.");
+    } finally {
+      setLoading(false);
+    }
+  }, [applyWorkflowPayload]);
+
+  useEffect(() => {
+    loadWorkflowData();
+  }, [loadWorkflowData]);
+
+  const selectedApproval =
+    approvals.find((item) => item.id === selectedApprovalId) ?? approvals[0] ?? null;
+
+  const selectedSteps = selectedApproval
+    ? approvalSteps
+        .filter((step) => step.approvalRequestId === selectedApproval.id)
+        .sort((a, b) => a.stepOrder - b.stepOrder)
+    : [];
 
   const summary = useMemo(() => {
     const pending = approvals.filter((item) =>
       item.approvalStatus.toLowerCase().includes("pending")
     ).length;
-
-    const approved = approvals.filter(
-      (item) => item.approvalStatus === "Approved"
-    ).length;
-
-    const rejected = approvals.filter(
-      (item) => item.approvalStatus === "Rejected"
-    ).length;
-
+    const approved = approvals.filter((item) => item.approvalStatus === "Approved").length;
+    const rejected = approvals.filter((item) => item.approvalStatus === "Rejected").length;
     const highRisk = approvals.filter(
       (item) => item.priority === "High" || item.priority === "Critical"
     ).length;
-
     return {
       total: approvals.length,
       pending,
@@ -509,254 +431,57 @@ export default function AuditWorkflowPage() {
   }, [approvals, auditLogs]);
 
   function updateApprovalForm(field: keyof ApprovalForm, value: string) {
-    setApprovalForm((currentForm) => ({
-      ...currentForm,
-      [field]: value,
-    }));
+    setApprovalForm((currentForm) => ({ ...currentForm, [field]: value }));
   }
 
-  async function createAuditLog(payload: {
-    sourceModule: string;
-    linkedRecordId?: string;
-    linkedRecordType?: string;
-    eventType: string;
-    eventTitle: string;
-    eventDescription: string;
-    actorName: string;
-    actorEmail: string;
-    actorRole: string;
-    riskLevel: string;
-  }) {
-    const localAudit: AuditLog = {
-      id: crypto.randomUUID(),
-      sourceModule: payload.sourceModule,
-      linkedRecordId: payload.linkedRecordId || "",
-      linkedRecordType: payload.linkedRecordType || "",
-      eventType: payload.eventType,
-      eventTitle: payload.eventTitle,
-      eventDescription: payload.eventDescription,
-      actorName: payload.actorName,
-      actorEmail: payload.actorEmail,
-      actorRole: payload.actorRole,
-      eventStatus: "Recorded",
-      riskLevel: payload.riskLevel,
-      evidenceUrl: "",
-      createdAt: new Date().toISOString().slice(0, 10),
-    };
+  function canActOnApproval(approval: ApprovalRequest) {
+    if (!actor) return false;
+    if (approval.requestedByEmail.toLowerCase() === actor.email.toLowerCase()) return false;
+    if (approval.currentStep === "Checker Review") return capabilities.canCheckerReview;
+    if (approval.currentStep === "Final Approval") return capabilities.canFinalApprove;
+    return false;
+  }
 
-    if (!isSupabaseConfigured || !supabase) {
-      setAuditLogs((currentLogs) => [localAudit, ...currentLogs]);
-      return;
-    }
-
-    try {
-      const db = supabase as any;
-
-      const { data, error } = await db
-        .from("ventiq_enterprise_audit_logs")
-        .insert({
-          source_module: payload.sourceModule,
-          linked_record_id: payload.linkedRecordId || null,
-          linked_record_type: payload.linkedRecordType || null,
-          event_type: payload.eventType,
-          event_title: payload.eventTitle,
-          event_description: payload.eventDescription,
-          actor_name: payload.actorName,
-          actor_email: payload.actorEmail,
-          actor_role: payload.actorRole,
-          event_status: "Recorded",
-          risk_level: payload.riskLevel,
-        })
-        .select("*")
-        .single();
-
-      if (error) {
-        setAuditLogs((currentLogs) => [localAudit, ...currentLogs]);
-        return;
-      }
-
-      setAuditLogs((currentLogs) => [mapAudit(data as DataRow), ...currentLogs]);
-    } catch {
-      setAuditLogs((currentLogs) => [localAudit, ...currentLogs]);
-    }
+  function actionStageLabel(approval: ApprovalRequest) {
+    if (approval.currentStep === "Checker Review") return "Checker decision";
+    if (approval.currentStep === "Final Approval") return "Final decision";
+    return "Completed";
   }
 
   async function submitApprovalRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormMessage("");
-
+    if (!capabilities.canCreate) {
+      setFormMessage("Your role cannot create approval requests.");
+      return;
+    }
     if (!approvalForm.actionTitle.trim()) {
       setFormMessage("Action title is required.");
       return;
     }
-
     if (!approvalForm.actionDescription.trim()) {
       setFormMessage("Action description is required.");
       return;
     }
 
-    setSaving(true);
-
-    const payload = {
-      source_module: approvalForm.sourceModule,
-      linked_record_id: crypto.randomUUID(),
-      linked_record_type: approvalForm.linkedRecordType,
-      action_type: approvalForm.actionType,
-      action_title: approvalForm.actionTitle.trim(),
-      action_description: approvalForm.actionDescription.trim(),
-      requested_by_name: approvalForm.requestedByName,
-      requested_by_email: approvalForm.requestedByEmail,
-      maker_role: approvalForm.makerRole,
-      checker_role: approvalForm.checkerRole,
-      approver_role: approvalForm.approverRole,
-      priority: approvalForm.priority,
-      approval_status: "Pending Review",
-      current_step: "Checker Review",
-      business_impact: approvalForm.businessImpact,
-    };
-
     try {
-      let savedApproval: ApprovalRequest;
-
-      if (!isSupabaseConfigured || !supabase) {
-        savedApproval = {
-          id: crypto.randomUUID(),
-          sourceModule: payload.source_module,
-          linkedRecordId: payload.linked_record_id,
-          linkedRecordType: payload.linked_record_type,
-          actionType: payload.action_type,
-          actionTitle: payload.action_title,
-          actionDescription: payload.action_description,
-          requestedByName: payload.requested_by_name,
-          requestedByEmail: payload.requested_by_email,
-          makerRole: payload.maker_role,
-          checkerRole: payload.checker_role,
-          approverRole: payload.approver_role,
-          priority: payload.priority,
-          approvalStatus: payload.approval_status,
-          currentStep: payload.current_step,
-          businessImpact: payload.business_impact,
-          requestedAt: new Date().toISOString().slice(0, 10),
-          approvedAt: "",
-          rejectedAt: "",
-        };
-      } else {
-        const db = supabase as any;
-
-        const { data, error } = await db
-          .from("ventiq_approval_requests")
-          .insert(payload)
-          .select("*")
-          .single();
-
-        if (error) throw new Error(error.message);
-
-        savedApproval = mapApproval(data as DataRow);
-
-        await db.from("ventiq_approval_steps").insert([
-          {
-            approval_request_id: savedApproval.id,
-            step_order: 1,
-            step_name: "Maker Submitted",
-            assigned_role: savedApproval.makerRole,
-            assigned_to_name: savedApproval.requestedByName,
-            assigned_to_email: savedApproval.requestedByEmail,
-            step_status: "Completed",
-            actioned_by_name: savedApproval.requestedByName,
-            actioned_by_email: savedApproval.requestedByEmail,
-            actioned_at: new Date().toISOString(),
-            comments: "Request submitted by maker.",
-          },
-          {
-            approval_request_id: savedApproval.id,
-            step_order: 2,
-            step_name: "Checker Review",
-            assigned_role: savedApproval.checkerRole,
-            assigned_to_name: "Finance Checker",
-            assigned_to_email: "checker@useventiq.com",
-            step_status: "Pending",
-          },
-          {
-            approval_request_id: savedApproval.id,
-            step_order: 3,
-            step_name: "Final Approval",
-            assigned_role: savedApproval.approverRole,
-            assigned_to_name: "Approver",
-            assigned_to_email: "approver@useventiq.com",
-            step_status: "Pending",
-          },
-        ]);
-      }
-
-      const localSteps: ApprovalStep[] = [
-        {
-          id: crypto.randomUUID(),
-          approvalRequestId: savedApproval.id,
-          stepOrder: 1,
-          stepName: "Maker Submitted",
-          assignedRole: savedApproval.makerRole,
-          assignedToName: savedApproval.requestedByName,
-          assignedToEmail: savedApproval.requestedByEmail,
-          stepStatus: "Completed",
-          actionedByName: savedApproval.requestedByName,
-          actionedByEmail: savedApproval.requestedByEmail,
-          actionedAt: new Date().toISOString().slice(0, 10),
-          comments: "Request submitted by maker.",
+      setSaving(true);
+      const token = await getAccessToken();
+      const response = await fetch("/api/admin/approval-workflow", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
         },
-        {
-          id: crypto.randomUUID(),
-          approvalRequestId: savedApproval.id,
-          stepOrder: 2,
-          stepName: "Checker Review",
-          assignedRole: savedApproval.checkerRole,
-          assignedToName: "Finance Checker",
-          assignedToEmail: "checker@useventiq.com",
-          stepStatus: "Pending",
-          actionedByName: "",
-          actionedByEmail: "",
-          actionedAt: "",
-          comments: "",
-        },
-        {
-          id: crypto.randomUUID(),
-          approvalRequestId: savedApproval.id,
-          stepOrder: 3,
-          stepName: "Final Approval",
-          assignedRole: savedApproval.approverRole,
-          assignedToName: "Approver",
-          assignedToEmail: "approver@useventiq.com",
-          stepStatus: "Pending",
-          actionedByName: "",
-          actionedByEmail: "",
-          actionedAt: "",
-          comments: "",
-        },
-      ];
-
-      setApprovals((currentApprovals) => [savedApproval, ...currentApprovals]);
-      setApprovalSteps((currentSteps) => [...localSteps, ...currentSteps]);
-      setSelectedApprovalId(savedApproval.id);
-      setApprovalForm(emptyApprovalForm);
-      setFormMessage("Approval request created successfully.");
-
-      await createAuditLog({
-        sourceModule: savedApproval.sourceModule,
-        linkedRecordId: savedApproval.linkedRecordId,
-        linkedRecordType: savedApproval.linkedRecordType,
-        eventType: "Approval Requested",
-        eventTitle: savedApproval.actionTitle,
-        eventDescription: savedApproval.actionDescription,
-        actorName: savedApproval.requestedByName,
-        actorEmail: savedApproval.requestedByEmail,
-        actorRole: savedApproval.makerRole,
-        riskLevel: savedApproval.priority,
+        body: JSON.stringify({ action: "create_request", ...approvalForm }),
       });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Unable to create approval request.");
+      setApprovalForm(emptyApprovalForm);
+      setFormMessage("Approval request created and sent to checker review.");
+      await loadWorkflowData();
     } catch (error) {
-      setFormMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to create approval request."
-      );
+      setFormMessage(error instanceof Error ? error.message : "Unable to create approval request.");
     } finally {
       setSaving(false);
     }
@@ -764,98 +489,37 @@ export default function AuditWorkflowPage() {
 
   async function updateApprovalStatus(
     approval: ApprovalRequest,
-    nextStatus: "Approved" | "Rejected"
+    decision: "Approved" | "Rejected"
   ) {
     setActionMessage("");
-
-    const now = new Date().toISOString();
+    if (!canActOnApproval(approval)) {
+      setActionMessage("Your role cannot action this approval at its current stage.");
+      return;
+    }
 
     try {
-      if (isSupabaseConfigured && supabase && !approval.id.startsWith("approval-")) {
-        const db = supabase as any;
-
-        const { error } = await db
-          .from("ventiq_approval_requests")
-          .update({
-            approval_status: nextStatus,
-            current_step: nextStatus === "Approved" ? "Completed" : "Rejected",
-            approved_at: nextStatus === "Approved" ? now : null,
-            rejected_at: nextStatus === "Rejected" ? now : null,
-          })
-          .eq("id", approval.id);
-
-        if (error) throw new Error(error.message);
-
-        await db
-          .from("ventiq_approval_steps")
-          .update({
-            step_status: nextStatus === "Approved" ? "Completed" : "Rejected",
-            actioned_by_name: "Finance Head",
-            actioned_by_email: "finance.head@useventiq.com",
-            actioned_at: now,
-            comments:
-              nextStatus === "Approved"
-                ? "Approved through VENTIQ approval workflow."
-                : "Rejected through VENTIQ approval workflow.",
-          })
-          .eq("approval_request_id", approval.id)
-          .eq("step_status", "Pending");
-      }
-
-      setApprovals((currentApprovals) =>
-        currentApprovals.map((item) =>
-          item.id === approval.id
-            ? {
-                ...item,
-                approvalStatus: nextStatus,
-                currentStep: nextStatus === "Approved" ? "Completed" : "Rejected",
-                approvedAt:
-                  nextStatus === "Approved" ? now.slice(0, 10) : item.approvedAt,
-                rejectedAt:
-                  nextStatus === "Rejected" ? now.slice(0, 10) : item.rejectedAt,
-              }
-            : item
-        )
-      );
-
-      setApprovalSteps((currentSteps) =>
-        currentSteps.map((step) =>
-          step.approvalRequestId === approval.id && step.stepStatus === "Pending"
-            ? {
-                ...step,
-                stepStatus: nextStatus === "Approved" ? "Completed" : "Rejected",
-                actionedByName: "Finance Head",
-                actionedByEmail: "finance.head@useventiq.com",
-                actionedAt: now.slice(0, 10),
-                comments:
-                  nextStatus === "Approved"
-                    ? "Approved through VENTIQ approval workflow."
-                    : "Rejected through VENTIQ approval workflow.",
-              }
-            : step
-        )
-      );
-
-      await createAuditLog({
-        sourceModule: approval.sourceModule,
-        linkedRecordId: approval.linkedRecordId,
-        linkedRecordType: approval.linkedRecordType,
-        eventType: nextStatus,
-        eventTitle: `${approval.actionTitle} ${nextStatus.toLowerCase()}`,
-        eventDescription: `${approval.actionTitle} was ${nextStatus.toLowerCase()} by Finance Head.`,
-        actorName: "Finance Head",
-        actorEmail: "finance.head@useventiq.com",
-        actorRole: "Approver",
-        riskLevel: approval.priority,
+      setSaving(true);
+      const token = await getAccessToken();
+      const response = await fetch("/api/admin/approval-workflow", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "decide_request",
+          approvalId: approval.id,
+          decision,
+        }),
       });
-
-      setActionMessage(`${approval.actionTitle} marked as ${nextStatus}.`);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Unable to update approval request.");
+      setActionMessage(payload?.message || `${approval.actionTitle} updated.`);
+      await loadWorkflowData();
     } catch (error) {
-      setActionMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to update approval request."
-      );
+      setActionMessage(error instanceof Error ? error.message : "Unable to update approval request.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -1390,7 +1054,7 @@ export default function AuditWorkflowPage() {
             justify-content: flex-start;
           }
         }
-      `}</style>
+`}</style>
 
       <section className="workflow-shell">
         <div className="hero">
@@ -1399,281 +1063,126 @@ export default function AuditWorkflowPage() {
               <p className="eyebrow">VENTIQ Control Layer</p>
               <h1>Audit Trail & Approval Workflow</h1>
               <p className="hero-copy">
-                Central maker-checker and audit evidence layer for critical fund
-                operations. Every important action can be submitted, reviewed,
-                approved, rejected and logged before it impacts downstream
-                modules.
+                Server-authorised maker-checker control for critical fund operations.
+                Browser users never write directly to the approval or audit tables.
               </p>
             </div>
-
             <div className="actions">
-              <Link className="primary-button" href="/fund-onboarding">
-                Fund Onboarding
-              </Link>
-              <Link className="secondary-button" href="/admin/data-protection">
-                Data Protection
-              </Link>
+              <Link className="primary-button" href="/workspace">My Workspace</Link>
+              <Link className="secondary-button" href="/migration/activation">Fund Activation</Link>
+              <Link className="secondary-button" href="/admin/data-protection">Data Protection</Link>
             </div>
           </div>
 
           <div className="summary-grid">
-            <div className="stat-card">
-              <span>Total requests</span>
-              <strong>{summary.total}</strong>
-            </div>
-
-            <div className="stat-card">
-              <span>Pending</span>
-              <strong>{summary.pending}</strong>
-            </div>
-
-            <div className="stat-card">
-              <span>Approved</span>
-              <strong>{summary.approved}</strong>
-            </div>
-
-            <div className="stat-card">
-              <span>Rejected</span>
-              <strong>{summary.rejected}</strong>
-            </div>
-
-            <div className="stat-card">
-              <span>High risk</span>
-              <strong>{summary.highRisk}</strong>
-            </div>
-
-            <div className="stat-card">
-              <span>Audit events</span>
-              <strong>{summary.auditEvents}</strong>
-            </div>
+            <div className="stat-card"><span>Total requests</span><strong>{summary.total}</strong></div>
+            <div className="stat-card"><span>Pending</span><strong>{summary.pending}</strong></div>
+            <div className="stat-card"><span>Approved</span><strong>{summary.approved}</strong></div>
+            <div className="stat-card"><span>Rejected</span><strong>{summary.rejected}</strong></div>
+            <div className="stat-card"><span>High risk</span><strong>{summary.highRisk}</strong></div>
+            <div className="stat-card"><span>Audit events</span><strong>{summary.auditEvents}</strong></div>
           </div>
         </div>
 
         <div className="ribbon">
-          {loading ? "Loading approval workflow..." : dataMessage} ·
-          Maker-checker controls → approval queue → immutable-style audit log →
-          evidence trail
+          {loading ? "Loading secured workflow..." : dataMessage} · API-authorised access → maker submission → checker review → final approval → audit evidence
         </div>
 
         <div className="main-grid">
-          <form className="form-card" onSubmit={submitApprovalRequest}>
-            <h2>Create Approval Request</h2>
-            <p>
-              Simulate how Debt LMS, Bank MIS, onboarding and data protection
-              actions enter a controlled approval workflow.
-            </p>
-
-            <div className="form-grid">
-              <div className="field">
-                <label>Source Module</label>
-                <select
-                  value={approvalForm.sourceModule}
-                  onChange={(event) =>
-                    updateApprovalForm("sourceModule", event.target.value)
-                  }
-                >
-                  <option>Debt LMS</option>
-                  <option>Bank MIS</option>
-                  <option>Fund Onboarding</option>
-                  <option>Data Protection</option>
-                  <option>Investor Portal</option>
-                  <option>Document Studio</option>
-                  <option>Compliance AI</option>
-                </select>
+          {capabilities.canCreate ? (
+            <form className="form-card" onSubmit={submitApprovalRequest}>
+              <h2>Create Approval Request</h2>
+              <p>
+                The signed-in user becomes the recorded maker. Name, email and role are resolved on the server and cannot be spoofed by the form.
+              </p>
+              <div className="form-grid">
+                <div className="field">
+                  <label>Source Module</label>
+                  <select value={approvalForm.sourceModule} onChange={(e) => updateApprovalForm("sourceModule", e.target.value)}>
+                    <option>Debt LMS</option><option>Bank MIS</option><option>Fund Onboarding</option><option>Data Protection</option><option>Investor Portal</option><option>Document Studio</option><option>Compliance AI</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Linked Record Type</label>
+                  <select value={approvalForm.linkedRecordType} onChange={(e) => updateApprovalForm("linkedRecordType", e.target.value)}>
+                    <option>Repayment Schedule</option><option>Bank Transaction</option><option>Stakeholder Access</option><option>Investor Notice</option><option>Capital Call</option><option>Distribution</option><option>Data Request</option><option>Covenant Breach</option><option>Security Tracker</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Action Type</label>
+                  <select value={approvalForm.actionType} onChange={(e) => updateApprovalForm("actionType", e.target.value)}>
+                    <option>Receipt Update</option><option>AI Mapping Approval</option><option>Penalty Waiver</option><option>Default Marking</option><option>Notice Dispatch</option><option>Investor Invite</option><option>Access Revocation</option><option>Capital Call Approval</option><option>Distribution Approval</option><option>Data Deletion Approval</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Action Title</label>
+                  <input value={approvalForm.actionTitle} onChange={(e) => updateApprovalForm("actionTitle", e.target.value)} placeholder="Example: Approve repayment receipt update" />
+                </div>
+                <div className="field">
+                  <label>Action Description</label>
+                  <textarea value={approvalForm.actionDescription} onChange={(e) => updateApprovalForm("actionDescription", e.target.value)} placeholder="Explain what is being approved and why." />
+                </div>
+                <div className="field">
+                  <label>Business Impact</label>
+                  <textarea value={approvalForm.businessImpact} onChange={(e) => updateApprovalForm("businessImpact", e.target.value)} placeholder="Explain the downstream operational impact." />
+                </div>
+                <div className="field">
+                  <label>Priority</label>
+                  <select value={approvalForm.priority} onChange={(e) => updateApprovalForm("priority", e.target.value)}>
+                    <option>Low</option><option>Medium</option><option>High</option><option>Critical</option>
+                  </select>
+                </div>
+                <button className="primary-button" disabled={saving} type="submit">{saving ? "Creating..." : "Create Approval Request"}</button>
+                {formMessage && <div className="message">{formMessage}</div>}
               </div>
-
-              <div className="field">
-                <label>Linked Record Type</label>
-                <select
-                  value={approvalForm.linkedRecordType}
-                  onChange={(event) =>
-                    updateApprovalForm("linkedRecordType", event.target.value)
-                  }
-                >
-                  <option>Repayment Schedule</option>
-                  <option>Bank Transaction</option>
-                  <option>Stakeholder Access</option>
-                  <option>Investor Notice</option>
-                  <option>Capital Call</option>
-                  <option>Distribution</option>
-                  <option>Data Request</option>
-                  <option>Covenant Breach</option>
-                  <option>Security Tracker</option>
-                </select>
-              </div>
-
-              <div className="field">
-                <label>Action Type</label>
-                <select
-                  value={approvalForm.actionType}
-                  onChange={(event) =>
-                    updateApprovalForm("actionType", event.target.value)
-                  }
-                >
-                  <option>Receipt Update</option>
-                  <option>AI Mapping Approval</option>
-                  <option>Penalty Waiver</option>
-                  <option>Default Marking</option>
-                  <option>Notice Dispatch</option>
-                  <option>Investor Invite</option>
-                  <option>Access Revocation</option>
-                  <option>Capital Call Approval</option>
-                  <option>Distribution Approval</option>
-                  <option>Data Deletion Approval</option>
-                </select>
-              </div>
-
-              <div className="field">
-                <label>Action Title</label>
-                <input
-                  value={approvalForm.actionTitle}
-                  onChange={(event) =>
-                    updateApprovalForm("actionTitle", event.target.value)
-                  }
-                  placeholder="Example: Approve Alpha Fintech receipt update"
-                />
-              </div>
-
-              <div className="field">
-                <label>Action Description</label>
-                <textarea
-                  value={approvalForm.actionDescription}
-                  onChange={(event) =>
-                    updateApprovalForm("actionDescription", event.target.value)
-                  }
-                  placeholder="Explain what is being approved and why."
-                />
-              </div>
-
-              <div className="field">
-                <label>Business Impact</label>
-                <textarea
-                  value={approvalForm.businessImpact}
-                  onChange={(event) =>
-                    updateApprovalForm("businessImpact", event.target.value)
-                  }
-                  placeholder="Example: This updates outstanding amount and notice status in Debt LMS."
-                />
-              </div>
-
-              <div className="field">
-                <label>Priority</label>
-                <select
-                  value={approvalForm.priority}
-                  onChange={(event) =>
-                    updateApprovalForm("priority", event.target.value)
-                  }
-                >
-                  <option>Low</option>
-                  <option>Medium</option>
-                  <option>High</option>
-                  <option>Critical</option>
-                </select>
-              </div>
-
-              <button className="primary-button" disabled={saving} type="submit">
-                {saving ? "Creating..." : "Create Approval Request"}
-              </button>
-
-              {formMessage && <div className="message">{formMessage}</div>}
+            </form>
+          ) : (
+            <div className="form-card">
+              <h2>Read-only access</h2>
+              <p>
+                {actor
+                  ? `${actor.fullName} is signed in as ${actor.role}. This role can review workflow evidence but cannot create maker requests.`
+                  : "Sign in with an authorised internal VENTIQ role to use this workflow."}
+              </p>
             </div>
-          </form>
+          )}
 
           <div className="panel">
             <div className="panel-header">
               <div>
                 <h2>Approval Queue</h2>
-                <p>
-                  Finance Head, Compliance Officer or Managing Partner can
-                  review and approve controlled actions.
-                </p>
+                <p>Actions are enabled only when the signed-in user is authorised for the current workflow stage.</p>
               </div>
-
               {actionMessage && <span className="message">{actionMessage}</span>}
             </div>
 
             <div className="table-wrap">
               <table>
-                <thead>
-                  <tr>
-                    <th>Action</th>
-                    <th>Module</th>
-                    <th>Priority</th>
-                    <th>Status</th>
-                    <th>Current Step</th>
-                    <th>Requested By</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-
+                <thead><tr><th>Action</th><th>Module</th><th>Priority</th><th>Status</th><th>Current Step</th><th>Requested By</th><th>Actions</th></tr></thead>
                 <tbody>
-                  {approvals.map((approval) => (
-                    <tr key={approval.id}>
-                      <td>
-                        <strong>{approval.actionTitle}</strong>
-                        <br />
-                        <span>{approval.actionType}</span>
-                      </td>
-                      <td>{approval.sourceModule}</td>
-                      <td>
-                        <span
-                          className={`status-pill status-${statusClass(
-                            approval.priority
-                          )}`}
-                        >
-                          {approval.priority}
-                        </span>
-                      </td>
-                      <td>
-                        <span
-                          className={`status-pill status-${statusClass(
-                            approval.approvalStatus
-                          )}`}
-                        >
-                          {approval.approvalStatus}
-                        </span>
-                      </td>
-                      <td>{approval.currentStep}</td>
-                      <td>
-                        {approval.requestedByName}
-                        <br />
-                        <span>{approval.requestedByEmail}</span>
-                      </td>
-                      <td>
-                        <div className="actions">
-                          <button
-                            className="small-button"
-                            onClick={() => setSelectedApprovalId(approval.id)}
-                            type="button"
-                          >
-                            View
-                          </button>
-
-                          <button
-                            className="small-button"
-                            disabled={approval.approvalStatus === "Approved"}
-                            onClick={() =>
-                              updateApprovalStatus(approval, "Approved")
-                            }
-                            type="button"
-                          >
-                            Approve
-                          </button>
-
-                          <button
-                            className="small-button danger"
-                            disabled={approval.approvalStatus === "Rejected"}
-                            onClick={() =>
-                              updateApprovalStatus(approval, "Rejected")
-                            }
-                            type="button"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {approvals.map((approval) => {
+                    const canAct = canActOnApproval(approval);
+                    return (
+                      <tr key={approval.id}>
+                        <td><strong>{approval.actionTitle}</strong><br /><span>{approval.actionType}</span></td>
+                        <td>{approval.sourceModule}</td>
+                        <td><span className={`status-pill status-${statusClass(approval.priority)}`}>{approval.priority}</span></td>
+                        <td><span className={`status-pill status-${statusClass(approval.approvalStatus)}`}>{approval.approvalStatus}</span></td>
+                        <td>{approval.currentStep}<br /><span>{actionStageLabel(approval)}</span></td>
+                        <td>{approval.requestedByName}<br /><span>{approval.requestedByEmail}</span></td>
+                        <td>
+                          <div className="actions">
+                            <button className="small-button" onClick={() => setSelectedApprovalId(approval.id)} type="button">View</button>
+                            <button className="small-button" disabled={saving || !canAct} onClick={() => updateApprovalStatus(approval, "Approved")} type="button">Approve</button>
+                            <button className="small-button danger" disabled={saving || !canAct} onClick={() => updateApprovalStatus(approval, "Rejected")} type="button">Reject</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!loading && approvals.length === 0 && (
+                    <tr><td colSpan={7}>No approval requests are visible for your organisation.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1682,104 +1191,47 @@ export default function AuditWorkflowPage() {
 
         <div className="panel">
           <div className="panel-header">
-            <div>
-              <h2>Selected Approval Evidence</h2>
-              <p>
-                Shows the exact maker-checker path for the selected approval
-                request.
-              </p>
-            </div>
-
-            <span
-              className={`status-pill status-${statusClass(
-                selectedApproval.approvalStatus
-              )}`}
-            >
-              {selectedApproval.approvalStatus}
-            </span>
+            <div><h2>Selected Approval Evidence</h2><p>Shows the exact maker-checker path and the authenticated user who actioned each step.</p></div>
+            {selectedApproval && <span className={`status-pill status-${statusClass(selectedApproval.approvalStatus)}`}>{selectedApproval.approvalStatus}</span>}
           </div>
 
-          <div className="control-box">
-            <strong>{selectedApproval.actionTitle}</strong>
-            {selectedApproval.actionDescription}
-            <br />
-            <br />
-            Business impact: {selectedApproval.businessImpact || "Not provided"}
-          </div>
-
-          <div className="step-grid" style={{ marginTop: 16 }}>
-            {selectedSteps.map((step) => (
-              <div className="step-card" key={step.id}>
-                <span>Step {step.stepOrder}</span>
-                <h3>{step.stepName}</h3>
-                <p>
-                  Assigned role: {step.assignedRole}
-                  <br />
-                  Assigned to: {step.assignedToName || "Pending assignment"}
-                  <br />
-                  Status: {step.stepStatus}
-                  <br />
-                  Actioned by: {step.actionedByName || "Not actioned"}
-                </p>
+          {selectedApproval ? (
+            <>
+              <div className="control-box">
+                <strong>{selectedApproval.actionTitle}</strong>
+                {selectedApproval.actionDescription}<br /><br />Business impact: {selectedApproval.businessImpact || "Not provided"}
               </div>
-            ))}
-
-            {selectedSteps.length === 0 && (
-              <div className="step-card">
-                <span>No steps</span>
-                <h3>Approval steps pending</h3>
-                <p>Steps will appear after request creation.</p>
+              <div className="step-grid" style={{ marginTop: 16 }}>
+                {selectedSteps.map((step) => (
+                  <div className="step-card" key={step.id}>
+                    <span>Step {step.stepOrder}</span><h3>{step.stepName}</h3>
+                    <p>Assigned role: {step.assignedRole}<br />Assigned to: {step.assignedToName || "Role-based assignment"}<br />Status: {step.stepStatus}<br />Actioned by: {step.actionedByName || "Not actioned"}</p>
+                  </div>
+                ))}
               </div>
-            )}
-          </div>
+            </>
+          ) : (
+            <div className="control-box"><strong>No approval selected</strong>Create or select an approval request to see workflow evidence.</div>
+          )}
         </div>
 
         <div className="panel">
-          <div className="panel-header">
-            <div>
-              <h2>Critical Action Coverage</h2>
-              <p>
-                These are the actions we should eventually wire from actual
-                product modules into this approval engine.
-              </p>
-            </div>
-          </div>
-
+          <div className="panel-header"><div><h2>Critical Action Coverage</h2><p>Operational actions that can be routed into this enterprise control layer.</p></div></div>
           <div className="action-grid">
-            {criticalActions.map((action) => (
-              <div className="action-card" key={action}>
-                <span>Controlled</span>
-                <h3>{action}</h3>
-                <p>Should create approval request and audit log before final impact.</p>
-              </div>
-            ))}
+            {criticalActions.map((action) => <div className="action-card" key={action}><span>Controlled action</span><h3>{action}</h3><p>Maker submission → checker review → final approval → evidence.</p></div>)}
           </div>
         </div>
 
         <div className="panel">
-          <div className="panel-header">
-            <div>
-              <h2>Enterprise Audit Log</h2>
-              <p>
-                Complete evidence trail across Debt LMS, Bank MIS, onboarding,
-                access and data protection workflows.
-              </p>
-            </div>
-          </div>
-
+          <div className="panel-header"><div><h2>Enterprise Audit Log</h2><p>Actor identity comes from the authenticated VENTIQ profile, not editable browser fields.</p></div></div>
           <div className="audit-list">
-            {auditLogs.slice(0, 12).map((auditLog) => (
+            {auditLogs.map((auditLog) => (
               <div className="audit-item" key={auditLog.id}>
                 <strong>{auditLog.eventTitle}</strong>
-                <p>
-                  {auditLog.eventDescription}
-                  <br />
-                  {auditLog.sourceModule} · {auditLog.actorName} ·{" "}
-                  {auditLog.actorRole} · {formatDate(auditLog.createdAt)} · Risk:{" "}
-                  {auditLog.riskLevel}
-                </p>
+                <p>{auditLog.eventDescription}<br />{auditLog.sourceModule} · {auditLog.actorName} · {auditLog.actorRole} · {formatDate(auditLog.createdAt)} · Risk: {auditLog.riskLevel}</p>
               </div>
             ))}
+            {!loading && auditLogs.length === 0 && <div className="audit-item"><strong>No audit events yet</strong><p>Events will appear after secured workflow actions are performed.</p></div>}
           </div>
         </div>
       </section>
