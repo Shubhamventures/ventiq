@@ -146,6 +146,22 @@ function getSavedCommitment(
   return value ?? null;
 }
 
+async function getAccessToken() {
+  if (!supabase) throw new Error("Supabase client is not available.");
+
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw new Error(error.message);
+
+  const token = data.session?.access_token;
+  if (!token) {
+    throw new Error(
+      "Please sign in before submitting a capital call for approval."
+    );
+  }
+
+  return token;
+}
+
 export default function CapitalCallPage() {
   const [funds, setFunds] = useState<Fund[]>([]);
   const [commitments, setCommitments] = useState<Commitment[]>([]);
@@ -454,16 +470,23 @@ async function handleDeleteSavedDraft(draft: SavedCapitalCall) {
   setDraftActionMessage("Saved draft deleted successfully.");
   setDeletingDraftId("");
 }
-async function handleApproveSavedDraft(draft: SavedCapitalCall) {
+async function handleSubmitSavedDraftForApproval(draft: SavedCapitalCall) {
   if (!supabase) {
     setDraftActionMessage(
-  "The sample capital call workflow is temporarily unavailable. Please request a walkthrough."
-);
+      "The secured approval workflow is temporarily unavailable. Please request a walkthrough."
+    );
+    return;
+  }
+
+  if (draft.status === "approved") {
+    setDraftActionMessage("This capital call is already approved.");
     return;
   }
 
   const confirmed = window.confirm(
-    `Approve this capital call draft?\n\n${draft.call_name ?? "VENTIQ Capital Call Draft"}`
+    `Submit this capital call for maker-checker approval?\n\n${
+      draft.call_name ?? "VENTIQ Capital Call Draft"
+    }`
   );
 
   if (!confirmed) return;
@@ -472,51 +495,58 @@ async function handleApproveSavedDraft(draft: SavedCapitalCall) {
   setDraftActionMessage("");
   setDraftAllocationMessage("");
 
-  const { error: callUpdateError } = await supabase
-    .from("capital_calls")
-    .update({ status: "approved" })
-    .eq("id", draft.id);
+  try {
+    const token = await getAccessToken();
+    const fundName = getSavedDraftFundName(draft.funds);
 
-  if (callUpdateError) {
-    setDraftActionMessage(
-      `Could not approve capital call: ${callUpdateError.message}`
-    );
-    setApprovingDraftId("");
-    return;
-  }
-
-  const { error: allocationUpdateError } = await supabase
-    .from("capital_call_investors")
-    .update({ status: "approved" })
-    .eq("capital_call_id", draft.id)
-    .eq("status", "ready");
-
-  if (allocationUpdateError) {
-    setDraftActionMessage(
-      `Capital call approved, but investor allocation status update failed: ${allocationUpdateError.message}`
-    );
-    setApprovingDraftId("");
-    return;
-  }
-
-  if (selectedSavedDraft?.id === draft.id) {
-    setSelectedSavedDraft({
-      ...selectedSavedDraft,
-      status: "approved",
+    const response = await fetch("/api/admin/approval-workflow", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action: "create_request",
+        sourceModule: "Capital Call",
+        linkedRecordId: draft.id,
+        linkedRecordType: "Capital Call",
+        actionType: "Capital Call Approval",
+        actionTitle: `Approve ${
+          draft.call_name ?? "VENTIQ Capital Call Draft"
+        }`,
+        actionDescription: `${formatCr(
+          toCr(draft.call_amount)
+        )} capital call for ${fundName}, dated ${formatDate(
+          draft.call_date
+        )} and due ${formatDate(
+          draft.due_date
+        )}, is ready for checker review and final approval.`,
+        businessImpact:
+          "Final approval will approve the saved capital call and eligible LP allocations, enabling investor notice generation and downstream communication.",
+        priority: "High",
+      }),
     });
 
-    await handleOpenSavedDraft({
-      ...draft,
-      status: "approved",
-    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(
+        payload?.error || "Unable to submit capital call for approval."
+      );
+    }
+
+    setDraftActionMessage(
+      "Capital call submitted to the secured maker-checker workflow. Open Audit Trail & Approval Workflow to continue checker and final approval."
+    );
+  } catch (error) {
+    setDraftActionMessage(
+      error instanceof Error
+        ? error.message
+        : "Unable to submit capital call for approval."
+    );
+  } finally {
+    setApprovingDraftId("");
   }
-
-setIsApproved(true);
-
-await loadSavedDrafts();
-
-setDraftActionMessage("Capital call draft approved successfully.");
-setApprovingDraftId("");
 }
 function handleProceedWithCapitalCall() {
   if (!selectedFundId) {
@@ -804,7 +834,7 @@ return (
     {selectedSavedDraft?.id === draft.id && (
       <button
         type="button"
-        onClick={() => handleApproveSavedDraft(draft)}
+        onClick={() => handleSubmitSavedDraftForApproval(draft)}
         disabled={draft.status === "approved" || approvingDraftId === draft.id}
         style={{
           border: "1px solid rgba(74, 222, 128, 0.45)",
@@ -825,10 +855,10 @@ return (
         }}
       >
         {approvingDraftId === draft.id
-          ? "Approving..."
+          ? "Submitting..."
           : draft.status === "approved"
           ? "Approved"
-          : "Approve"}
+          : "Submit for Approval"}
       </button>
     )}
 
@@ -1471,7 +1501,48 @@ editable before approval.
 >
   Generate Capital Call Notices
 </a>
-                <button>Request Approval</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!selectedSavedDraft) {
+                      setDraftActionMessage(
+                        "Open a saved capital call draft before submitting it for approval."
+                      );
+                      return;
+                    }
+
+                    handleSubmitSavedDraftForApproval(selectedSavedDraft);
+                  }}
+                  disabled={
+                    !selectedSavedDraft ||
+                    selectedSavedDraft.status === "approved" ||
+                    approvingDraftId === selectedSavedDraft.id
+                  }
+                >
+                  {approvingDraftId === selectedSavedDraft?.id
+                    ? "Submitting..."
+                    : selectedSavedDraft?.status === "approved"
+                    ? "Approved"
+                    : "Submit for Approval"}
+                </button>
+                <a
+                  href="/admin/audit-workflow"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    border: "1px solid rgba(96, 165, 250, 0.45)",
+                    background: "rgba(37, 99, 235, 0.16)",
+                    color: "#dbeafe",
+                    borderRadius: "12px",
+                    padding: "12px 18px",
+                    fontSize: "15px",
+                    fontWeight: 700,
+                    textDecoration: "none",
+                  }}
+                >
+                  Open Approval Workflow
+                </a>
                 <button>Preview LP Notice</button>
               </div>
             </div>

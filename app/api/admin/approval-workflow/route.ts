@@ -45,6 +45,7 @@ const FINAL_APPROVER_ROLES = new Set([
 const SOURCE_MODULES = new Set([
   "Debt LMS",
   "Bank MIS",
+  "Capital Call",
   "Fund Onboarding",
   "Data Protection",
   "Investor Portal",
@@ -219,6 +220,177 @@ function authErrorResponse(error: unknown) {
   return null;
 }
 
+type CapitalCallApprovalSnapshot = {
+  capitalCallId: string;
+  previousCallStatus: string;
+  allocationIds: string[];
+};
+
+function relationName(value: unknown) {
+  if (Array.isArray(value)) {
+    const first = value[0] as Record<string, unknown> | undefined;
+    return normalizeText(first?.name, 240);
+  }
+
+  if (value && typeof value === "object") {
+    return normalizeText((value as Record<string, unknown>).name, 240);
+  }
+
+  return "";
+}
+
+function isCapitalCallApprovalRecord(approval: Record<string, unknown>) {
+  return (
+    normalizeText(approval.linked_record_type, 100) === "Capital Call" &&
+    normalizeText(approval.action_type, 100) === "Capital Call Approval"
+  );
+}
+
+async function getCapitalCallWithAccess(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  capitalCallId: string,
+  requiredAccess: "view" | "approve"
+) {
+  const { data: capitalCall, error: capitalCallError } = await supabase
+    .from("capital_calls")
+    .select("id, fund_id, call_name, status, funds(name)")
+    .eq("id", capitalCallId)
+    .maybeSingle();
+
+  if (capitalCallError) {
+    throw new Error(`Unable to load capital call: ${capitalCallError.message}`);
+  }
+
+  if (!capitalCall) {
+    throw new Error("Capital call not found.");
+  }
+
+  const fundName = relationName(
+    (capitalCall as Record<string, unknown>).funds
+  );
+
+  if (!fundName) {
+    throw new Error("Capital call fund could not be resolved.");
+  }
+
+  let accessQuery = supabase
+    .from("ventiq_user_fund_access")
+    .select("id, can_view, can_approve, status")
+    .eq("organisation_id", user.organisationId)
+    .eq("user_id", user.userId)
+    .eq("fund_name", fundName)
+    .eq("status", "Active");
+
+  accessQuery =
+    requiredAccess === "approve"
+      ? accessQuery.eq("can_approve", true)
+      : accessQuery.eq("can_view", true);
+
+  const { data: access, error: accessError } =
+    await accessQuery.maybeSingle();
+
+  if (accessError) {
+    throw new Error(`Unable to verify fund access: ${accessError.message}`);
+  }
+
+  if (!access) {
+    throw new Error(
+      requiredAccess === "approve"
+        ? "You do not have approval access for this capital call fund."
+        : "You do not have access to this capital call fund."
+    );
+  }
+
+  return {
+    capitalCall: capitalCall as Record<string, unknown>,
+    fundName,
+  };
+}
+
+async function applyCapitalCallApproval(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  capitalCallId: string
+): Promise<CapitalCallApprovalSnapshot> {
+  const { capitalCall } = await getCapitalCallWithAccess(
+    supabase,
+    user,
+    capitalCallId,
+    "approve"
+  );
+
+  const previousCallStatus = normalizeText(capitalCall.status, 80) || "draft";
+
+  const { data: readyRows, error: readyRowsError } = await supabase
+    .from("capital_call_investors")
+    .select("id")
+    .eq("capital_call_id", capitalCallId)
+    .eq("status", "ready");
+
+  if (readyRowsError) {
+    throw new Error(
+      `Unable to load capital call allocations: ${readyRowsError.message}`
+    );
+  }
+
+  const allocationIds = (readyRows || [])
+    .map((row: any) => normalizeText(row.id, 100))
+    .filter(Boolean);
+
+  const { error: callUpdateError } = await supabase
+    .from("capital_calls")
+    .update({ status: "approved" })
+    .eq("id", capitalCallId);
+
+  if (callUpdateError) {
+    throw new Error(
+      `Unable to approve capital call: ${callUpdateError.message}`
+    );
+  }
+
+  if (allocationIds.length > 0) {
+    const { error: allocationUpdateError } = await supabase
+      .from("capital_call_investors")
+      .update({ status: "approved" })
+      .in("id", allocationIds);
+
+    if (allocationUpdateError) {
+      await supabase
+        .from("capital_calls")
+        .update({ status: previousCallStatus })
+        .eq("id", capitalCallId);
+
+      throw new Error(
+        `Capital call approval could not update investor allocations: ${allocationUpdateError.message}`
+      );
+    }
+  }
+
+  return {
+    capitalCallId,
+    previousCallStatus,
+    allocationIds,
+  };
+}
+
+async function rollbackCapitalCallApproval(
+  supabase: SupabaseAdmin,
+  snapshot: CapitalCallApprovalSnapshot
+) {
+  await supabase
+    .from("capital_calls")
+    .update({ status: snapshot.previousCallStatus })
+    .eq("id", snapshot.capitalCallId);
+
+  if (snapshot.allocationIds.length > 0) {
+    await supabase
+      .from("capital_call_investors")
+      .update({ status: "ready" })
+      .in("id", snapshot.allocationIds);
+  }
+}
+
 async function insertAuditLog(
   supabase: SupabaseAdmin,
   user: AuthorisedUser,
@@ -365,7 +537,69 @@ async function createRequest(
     );
   }
 
-  const linkedRecordId = randomUUID();
+  const requestedLinkedRecordId = normalizeText(body.linkedRecordId, 100);
+  const linkedRecordId =
+    actionType === "Capital Call Approval"
+      ? requestedLinkedRecordId
+      : randomUUID();
+
+  if (actionType === "Capital Call Approval") {
+    if (sourceModule !== "Capital Call" || linkedRecordType !== "Capital Call") {
+      return NextResponse.json(
+        {
+          error:
+            "Capital call approvals must use the Capital Call source and linked record type.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!linkedRecordId) {
+      return NextResponse.json(
+        { error: "Capital call approval requires the saved capital call ID." },
+        { status: 400 }
+      );
+    }
+
+    const { capitalCall } = await getCapitalCallWithAccess(
+      supabase,
+      user,
+      linkedRecordId,
+      "view"
+    );
+
+    if (normalizeText(capitalCall.status, 80).toLowerCase() === "approved") {
+      return NextResponse.json(
+        { error: "This capital call is already approved." },
+        { status: 409 }
+      );
+    }
+
+    const { data: existingRequest, error: existingRequestError } = await supabase
+      .from("ventiq_approval_requests")
+      .select("id, approval_status")
+      .eq("organisation_id", user.organisationId)
+      .eq("linked_record_id", linkedRecordId)
+      .eq("linked_record_type", "Capital Call")
+      .eq("action_type", "Capital Call Approval")
+      .in("approval_status", ["Pending Review", "Pending Approval"])
+      .limit(1)
+      .maybeSingle();
+
+    if (existingRequestError) {
+      throw new Error(
+        `Unable to check existing capital call approval: ${existingRequestError.message}`
+      );
+    }
+
+    if (existingRequest) {
+      return NextResponse.json(
+        { error: "This capital call already has an approval request in progress." },
+        { status: 409 }
+      );
+    }
+  }
+
   const now = new Date().toISOString();
 
   const { data: approval, error: approvalError } = await supabase
@@ -511,6 +745,23 @@ async function decideRequest(
       );
     }
 
+    if (isCapitalCallApprovalRecord(approval as Record<string, unknown>)) {
+      const capitalCallId = normalizeText(approval.linked_record_id, 100);
+      if (!capitalCallId) {
+        return NextResponse.json(
+          { error: "Capital call approval is missing its linked capital call ID." },
+          { status: 409 }
+        );
+      }
+
+      await getCapitalCallWithAccess(
+        supabase,
+        user,
+        capitalCallId,
+        "view"
+      );
+    }
+
     const { error: checkerStepError } = await supabase
       .from("ventiq_approval_steps")
       .update({
@@ -611,6 +862,29 @@ async function decideRequest(
       );
     }
 
+    const isCapitalCallApproval = isCapitalCallApprovalRecord(
+      approval as Record<string, unknown>
+    );
+    const capitalCallId = isCapitalCallApproval
+      ? normalizeText(approval.linked_record_id, 100)
+      : "";
+
+    if (isCapitalCallApproval) {
+      if (!capitalCallId) {
+        return NextResponse.json(
+          { error: "Capital call approval is missing its linked capital call ID." },
+          { status: 409 }
+        );
+      }
+
+      await getCapitalCallWithAccess(
+        supabase,
+        user,
+        capitalCallId,
+        "approve"
+      );
+    }
+
     const { error: finalStepError } = await supabase
       .from("ventiq_approval_steps")
       .update({
@@ -662,18 +936,64 @@ async function decideRequest(
       throw new Error(`Unable to update approval request: ${requestError.message}`);
     }
 
-    await insertAuditLog(supabase, user, {
-      sourceModule: normalizeText(approval.source_module, 100) || "VENTIQ",
-      linkedRecordId: normalizeText(approval.linked_record_id, 100) || null,
-      linkedRecordType: normalizeText(approval.linked_record_type, 100) || null,
-      eventType: decision,
-      eventTitle: `${normalizeText(approval.action_title, 240)} ${decision.toLowerCase()}`,
-      eventDescription: `${normalizeText(approval.action_title, 240)} was ${decision.toLowerCase()} by ${user.fullName} (${roleLabel(user.role)}).`,
-      riskLevel: normalizeText(approval.priority, 40) || "Medium",
-    });
+    let capitalCallSnapshot: CapitalCallApprovalSnapshot | null = null;
+
+    try {
+      if (isCapitalCallApproval && isApproved) {
+        capitalCallSnapshot = await applyCapitalCallApproval(
+          supabase,
+          user,
+          capitalCallId
+        );
+      }
+
+      await insertAuditLog(supabase, user, {
+        sourceModule: normalizeText(approval.source_module, 100) || "VENTIQ",
+        linkedRecordId: normalizeText(approval.linked_record_id, 100) || null,
+        linkedRecordType: normalizeText(approval.linked_record_type, 100) || null,
+        eventType: decision,
+        eventTitle: `${normalizeText(approval.action_title, 240)} ${decision.toLowerCase()}`,
+        eventDescription: `${normalizeText(approval.action_title, 240)} was ${decision.toLowerCase()} by ${user.fullName} (${roleLabel(user.role)}).`,
+        riskLevel: normalizeText(approval.priority, 40) || "Medium",
+      });
+    } catch (error) {
+      if (capitalCallSnapshot) {
+        await rollbackCapitalCallApproval(supabase, capitalCallSnapshot);
+      }
+
+      await supabase
+        .from("ventiq_approval_requests")
+        .update({
+          approval_status: "Pending Approval",
+          current_step: "Final Approval",
+          approved_at: null,
+          rejected_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", approval.id)
+        .eq("organisation_id", user.organisationId);
+
+      await supabase
+        .from("ventiq_approval_steps")
+        .update({
+          step_status: "Pending",
+          assigned_to_name: null,
+          assigned_to_email: null,
+          actioned_by_name: null,
+          actioned_by_email: null,
+          actioned_at: null,
+          comments: null,
+        })
+        .eq("approval_request_id", approval.id)
+        .eq("step_order", 3);
+
+      throw error;
+    }
 
     return NextResponse.json({
-      message: `Final approval ${decision.toLowerCase()} by ${user.fullName}.`,
+      message: isCapitalCallApproval && isApproved
+        ? `Final approval completed by ${user.fullName}. Capital call and eligible LP allocations are now approved.`
+        : `Final approval ${decision.toLowerCase()} by ${user.fullName}.`,
     });
   }
 
