@@ -2,31 +2,36 @@
 
 const baseUrl = "https://useventiq.com";
 
-const routes = [
-  "",
-  "/managing-partner-ai",
-  "/finance-head-ai",
-  "/migration",
-  "/compliance-ai",
-  "/investment-team-ai",
-  "/fundraising-ai",
-  "/investor-portal",
-  "/capital-call",
-  "/distribution-waterfall",
-  "/repayment-notice",
-  "/portfolio-intelligence",
-  "/knowledge-hub",
-  "/bank-reconciliation",
-  "/document-engine",
-  "/activity-engine",
-  "/data-room",
+const publicRoutes = [
+  { route: "", priority: 1, changeFrequency: "weekly" as const },
+  {
+    route: "/product-overview",
+    priority: 0.8,
+    changeFrequency: "monthly" as const,
+  },
+  {
+    route: "/security",
+    priority: 0.8,
+    changeFrequency: "monthly" as const,
+  },
+  { route: "/faq", priority: 0.7, changeFrequency: "monthly" as const },
+  {
+    route: "/privacy",
+    priority: 0.5,
+    changeFrequency: "yearly" as const,
+  },
+  {
+    route: "/terms",
+    priority: 0.5,
+    changeFrequency: "yearly" as const,
+  },
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  return routes.map((route) => ({
+  return publicRoutes.map(({ route, priority, changeFrequency }) => ({
     url: `${baseUrl}${route}`,
     lastModified: new Date(),
-    changeFrequency: route === "" ? "weekly" : "monthly",
-    priority: route === "" ? 1 : 0.7,
+    changeFrequency,
+    priority,
   }));
 }

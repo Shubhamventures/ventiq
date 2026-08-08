@@ -18,27 +18,27 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://useventiq.com"),
 
   title: {
-    default: "VENTIQ | AI Operating System for Private Capital",
+    default: "VENTIQ | AI Stakeholder Dashboards for Private Capital",
     template: "%s | VENTIQ",
   },
 
   description:
-    "VENTIQ is a real-time operating system for private capital firms, connecting fund operations, compliance, portfolio intelligence, investor reporting and stakeholder dashboards into one secure fund data core.",
+    "VENTIQ gives private capital firms one connected fund data foundation powering role-specific dashboards, governed workflows, documents and investor access for Managing Partners, Finance, Investment, Compliance, Investor Relations and Investors.",
 
   keywords: [
     "VENTIQ",
     "useventiq",
     "use ventiq",
-    "private capital operating system",
-    "AI operating system for private capital",
+    "AI stakeholder dashboards",
+    "private capital software",
     "AIF software",
     "Indian AIF software",
     "fund operations software",
     "fund management software",
     "capital call software",
     "distribution waterfall software",
-    "repayment notice software",
     "investor reporting platform",
+    "investor portal",
     "portfolio intelligence software",
     "GIFT City fund operations",
     "private credit fund software",
@@ -56,9 +56,9 @@ export const metadata: Metadata = {
   },
 
   openGraph: {
-    title: "VENTIQ | AI Operating System for Private Capital",
+    title: "VENTIQ | AI Stakeholder Dashboards for Private Capital",
     description:
-      "One secure fund data core powering role-based workspaces for Managing Partners, Finance Heads, Compliance Officers, Investment Teams, Investor Relations teams and Investors.",
+      "One fund. Six stakeholders. One source of truth. VENTIQ connects fund data, documents, workflows and controlled stakeholder access in one private-capital platform.",
     url: "https://useventiq.com",
     siteName: "VENTIQ",
     type: "website",
@@ -67,9 +67,9 @@ export const metadata: Metadata = {
 
   twitter: {
     card: "summary_large_image",
-    title: "VENTIQ | AI Operating System for Private Capital",
+    title: "VENTIQ | AI Stakeholder Dashboards for Private Capital",
     description:
-      "VENTIQ connects fund operations, compliance, portfolio intelligence, investor reporting and stakeholder dashboards into one secure fund data core.",
+      "One fund. Six stakeholders. One source of truth. Role-specific intelligence and workflows powered by connected private-capital data.",
   },
 
   robots: {
