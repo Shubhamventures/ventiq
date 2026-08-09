@@ -1,47 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import {
+  authenticateDocumentStudioUser,
+  documentStudioAuthErrorResponse,
+  requireDocumentStudioFundAccess,
+} from "../../../../lib/server/documentStudioAuth";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-function getSupabaseAdmin() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    return null;
-  }
-
-  return createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      persistSession: false,
-    },
-  });
+function normalizeText(value: unknown, maxLength = 500) {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, maxLength);
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = getSupabaseAdmin();
+    const baseActor = await authenticateDocumentStudioUser(request);
+    const fundName = normalizeText(
+      request.nextUrl.searchParams.get("fund_name"),
+      240
+    );
+    const actor = await requireDocumentStudioFundAccess(
+      baseActor,
+      fundName,
+      "view"
+    );
 
-    if (!supabase) {
-      return NextResponse.json(
-        { error: "Supabase admin client is not configured." },
-        { status: 500 }
-      );
-    }
-
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("document_studio_templates")
       .select("*")
+      .eq("organisation_id", actor.organisationId)
+      .eq("fund_name", actor.fundName)
       .order("updated_at", { ascending: false });
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({
-      templates: data ?? [],
-    });
+    return NextResponse.json({ templates: data ?? [] });
   } catch (error) {
+    const authResponse = documentStudioAuthErrorResponse(error);
+    if (authResponse) return authResponse;
+
     return NextResponse.json(
       {
         error:
@@ -56,19 +57,16 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = getSupabaseAdmin();
-
-    if (!supabase) {
-      return NextResponse.json(
-        { error: "Supabase admin client is not configured." },
-        { status: 500 }
-      );
-    }
-
     const body = await request.json();
+    const baseActor = await authenticateDocumentStudioUser(request);
+    const actor = await requireDocumentStudioFundAccess(
+      baseActor,
+      body.fund_name,
+      "edit"
+    );
 
-    const templateName = String(body.template_name || "").trim();
-    const documentType = String(body.document_type || "").trim();
+    const templateName = normalizeText(body.template_name, 240);
+    const documentType = normalizeText(body.document_type, 160);
 
     if (!templateName) {
       return NextResponse.json(
@@ -91,15 +89,24 @@ export async function POST(request: NextRequest) {
     };
 
     if (body.id) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from("document_studio_templates")
         .update(payload)
         .eq("id", body.id)
+        .eq("organisation_id", actor.organisationId)
+        .eq("fund_name", actor.fundName)
         .select("*")
-        .single();
+        .maybeSingle();
 
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      if (!data) {
+        return NextResponse.json(
+          { error: "Template not found for the selected fund." },
+          { status: 404 }
+        );
       }
 
       return NextResponse.json({
@@ -108,9 +115,14 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("document_studio_templates")
-      .insert(payload)
+      .insert({
+        ...payload,
+        organisation_id: actor.organisationId,
+        fund_name: actor.fundName,
+        created_by: actor.userId,
+      })
       .select("*")
       .single();
 
@@ -123,6 +135,9 @@ export async function POST(request: NextRequest) {
       template: data,
     });
   } catch (error) {
+    const authResponse = documentStudioAuthErrorResponse(error);
+    if (authResponse) return authResponse;
+
     return NextResponse.json(
       {
         error:

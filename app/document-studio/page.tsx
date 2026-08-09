@@ -2,6 +2,9 @@
 
 import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import ProtectedWorkspace from "../../components/auth/ProtectedWorkspace";
+import { useVentiqAuth } from "../../lib/auth/AuthProvider";
+import { useActiveFund } from "../../lib/useActiveFund";
 
 type WorkspaceTab = "start" | "library" | "builder" | "preview" | "batch" | "publish";
 type RibbonTab = "home" | "insert" | "layout" | "view" | "table" | "chart";
@@ -146,6 +149,8 @@ type BatchDocumentRow = {
   document_name?: string | null;
   file_name?: string | null;
   file_url?: string | null;
+  storage_bucket?: string | null;
+  storage_path?: string | null;
   generation_status?: string | null;
   portal_publish_status?: string | null;
 };
@@ -162,9 +167,22 @@ type BatchGenerationResponse = {
     generated_count: number | null;
     published_count: number | null;
     status: string | null;
+    created_at?: string | null;
   };
   queuedDocuments?: number;
   documents?: BatchDocumentRow[];
+  recentBatches?: Array<{
+    id: string;
+    batch_name: string | null;
+    document_type: string | null;
+    total_investors: number | null;
+    ready_count: number | null;
+    review_count: number | null;
+    generated_count: number | null;
+    published_count: number | null;
+    status: string | null;
+    created_at?: string | null;
+  }>;
 };
 
 type PublishResponse = {
@@ -173,6 +191,13 @@ type PublishResponse = {
   publishedDocuments?: number;
 };
 
+type DocumentStudioFundOption = {
+  fund_name: string;
+  role: string;
+  can_view: boolean;
+  can_edit: boolean;
+  can_approve: boolean;
+};
 
 type PdfGenerationResponse = {
   message?: string;
@@ -237,7 +262,7 @@ const investors: InvestorProfile[] = [
     name: "Aarav Menon",
     code: "AUR-10001",
     type: "Individual",
-    fundName: "VENTIQ Capital Fund I",
+    fundName: "Sample Fund",
     commitment: "₹2,50,00,000",
     capitalCalled: "₹1,50,00,000",
     uncalledCapital: "₹1,00,00,000",
@@ -252,7 +277,7 @@ const investors: InvestorProfile[] = [
     name: "Diya Kumar",
     code: "AUR-10002",
     type: "Individual",
-    fundName: "VENTIQ Capital Fund I",
+    fundName: "Sample Fund",
     commitment: "₹1,75,00,000",
     capitalCalled: "₹1,05,00,000",
     uncalledCapital: "₹70,00,000",
@@ -267,7 +292,7 @@ const investors: InvestorProfile[] = [
     name: "Rohan Soni",
     code: "AUR-10003",
     type: "HNI",
-    fundName: "VENTIQ Capital Fund I",
+    fundName: "Sample Fund",
     commitment: "₹5,00,00,000",
     capitalCalled: "₹3,25,00,000",
     uncalledCapital: "₹1,75,00,000",
@@ -465,7 +490,7 @@ const cellFields: MergeField[] = [
   { code: "investor_name", label: "Investor name", category: "Investor Info", type: "TEXT", sample: "Aarav Menon" },
   { code: "investor_code", label: "Investor / folio code", category: "Investor Info", type: "TEXT", sample: "AUR-10001" },
   { code: "investor_type", label: "Investor type", category: "Investor Info", type: "TEXT", sample: "Individual" },
-  { code: "fund_name", label: "Fund name", category: "Fund", type: "TEXT", sample: "VENTIQ Capital Fund I" },
+  { code: "fund_name", label: "Fund name", category: "Fund", type: "TEXT", sample: "Selected governed fund" },
   { code: "fund_address", label: "Fund registered address", category: "Fund", type: "TEXT", sample: "GIFT City, Gandhinagar" },
   { code: "statement_period", label: "Statement period", category: "Fund", type: "TEXT", sample: "Q1 FY 2025-26" },
   { code: "report_date", label: "Reporting / as-of date", category: "Fund", type: "DATE", sample: "30-Jun-2025" },
@@ -889,12 +914,16 @@ const documentPresets: DocumentPreset[] = [
   },
 ];
 
-function getInvestorValue(investor: InvestorProfile, code: string) {
+function getInvestorValue(
+  investor: InvestorProfile,
+  code: string,
+  governedFundName?: string
+) {
   const values: Record<string, string> = {
     investor_name: investor.name,
     investor_code: investor.code,
     investor_type: investor.type,
-    fund_name: investor.fundName,
+    fund_name: governedFundName?.trim() || investor.fundName,
     fund_address: "GIFT City, Gandhinagar",
     statement_period: "Q1 FY 2025-26",
     report_date: "30-Jun-2025",
@@ -1057,8 +1086,22 @@ function normalizeSavedTemplateBlocks(value: unknown): TemplateBlock[] {
   return cleanBlocks.length > 0 ? cleanBlocks : starterBlocks.map(ensureTableConfigForTemplateBlock);
 }
 
-export default function DocumentStudioPage() {
+function DocumentStudioWorkspace() {
+  const { session } = useVentiqAuth();
+  const {
+    activeFundName,
+    setActiveFundName,
+    isReady: activeFundReady,
+  } = useActiveFund("");
+  const accessToken = session?.access_token || "";
+
+  const [authorisedFunds, setAuthorisedFunds] = useState<
+    DocumentStudioFundOption[]
+  >([]);
+  const [fundAccessReady, setFundAccessReady] = useState(false);
+  const [fundAccessMessage, setFundAccessMessage] = useState("");
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("start");
+  const [workspaceStorageReady, setWorkspaceStorageReady] = useState(false);
   const [ribbonTab, setRibbonTab] = useState<RibbonTab>("insert");
   const [mergeMode, setMergeMode] = useState<MergeMode>("cell");
   const [templateName, setTemplateName] = useState("AIF Statement Template");
@@ -1129,13 +1172,186 @@ const failedBatchDocumentIds = useMemo(() => {
 
   const selectedColumn = selectedTableConfig?.columns.find((column) => column.id === selectedColumnId) || null;
 
+  const activeFundAccess = useMemo(() => {
+    const normalizedActiveFund = activeFundName.trim().toLowerCase();
+    return (
+      authorisedFunds.find(
+        (fund) =>
+          fund.fund_name.trim().toLowerCase() === normalizedActiveFund
+      ) ?? null
+    );
+  }, [authorisedFunds, activeFundName]);
+
+  function documentStudioBatchStorageKey(fundName: string) {
+    return `ventiq.documentStudio.activeBatchId.${fundName.trim().toLowerCase()}`;
+  }
+
+  function readRememberedBatchId(fundName: string) {
+    if (typeof window === "undefined" || !fundName.trim()) return "";
+    return window.localStorage.getItem(documentStudioBatchStorageKey(fundName)) || "";
+  }
+
+  function rememberBatchId(fundName: string, batchId: string) {
+    if (typeof window === "undefined" || !fundName.trim()) return;
+    const key = documentStudioBatchStorageKey(fundName);
+    if (batchId) {
+      window.localStorage.setItem(key, batchId);
+    } else {
+      window.localStorage.removeItem(key);
+    }
+  }
+
   useEffect(() => {
-    loadSavedTemplates();
+    try {
+      const savedTab = window.localStorage.getItem("ventiq.documentStudio.workspaceTab");
+      if (
+        savedTab === "start" ||
+        savedTab === "library" ||
+        savedTab === "builder" ||
+        savedTab === "preview" ||
+        savedTab === "batch" ||
+        savedTab === "publish"
+      ) {
+        setWorkspaceTab(savedTab);
+      }
+    } finally {
+      setWorkspaceStorageReady(true);
+    }
   }, []);
+
+  useEffect(() => {
+    if (!workspaceStorageReady) return;
+    window.localStorage.setItem("ventiq.documentStudio.workspaceTab", workspaceTab);
+  }, [workspaceTab, workspaceStorageReady]);
+
+  useEffect(() => {
+    if (!accessToken || !activeFundReady) return;
+
+    let cancelled = false;
+
+    async function loadGovernedFunds() {
+      setFundAccessReady(false);
+      setFundAccessMessage("");
+
+      try {
+        const response = await fetch("/api/document-studio/funds", {
+          cache: "no-store",
+          headers: authorisedHeaders(),
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            result.error || "Unable to load governed Document Studio funds."
+          );
+        }
+
+        if (cancelled) return;
+
+        const funds = (result.funds ?? []) as DocumentStudioFundOption[];
+        setAuthorisedFunds(funds);
+
+        if (funds.length === 0) {
+          setFundAccessMessage(
+            "No active fund access is available for Document Studio."
+          );
+          setFundAccessReady(true);
+          return;
+        }
+
+        const normalizedActiveFund = activeFundName.trim().toLowerCase();
+        const currentFundIsAllowed = funds.some(
+          (fund) =>
+            fund.fund_name.trim().toLowerCase() === normalizedActiveFund
+        );
+
+        if (!currentFundIsAllowed) {
+          const nextFund = funds[0].fund_name;
+          setActiveTemplateId("");
+          setActiveFundName(nextFund);
+          setFundAccessMessage(
+            `Document Studio moved to your first authorised fund: ${nextFund}.`
+          );
+        }
+
+        setFundAccessReady(true);
+      } catch (error) {
+        if (cancelled) return;
+        setAuthorisedFunds([]);
+        setFundAccessMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to load governed Document Studio fund access."
+        );
+        setFundAccessReady(true);
+      }
+    }
+
+    loadGovernedFunds();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, activeFundReady]);
+
+  useEffect(() => {
+    if (
+      !accessToken ||
+      !activeFundReady ||
+      !fundAccessReady ||
+      !activeFundName ||
+      !activeFundAccess
+    ) {
+      return;
+    }
+
+    loadSavedTemplates();
+
+    const rememberedBatchId = readRememberedBatchId(activeFundName);
+    loadGovernedBatch(rememberedBatchId, false, true);
+  }, [
+    accessToken,
+    activeFundName,
+    activeFundReady,
+    fundAccessReady,
+    activeFundAccess,
+  ]);
+
+  function authorisedHeaders(includeJson = false) {
+    if (!accessToken) {
+      throw new Error("A secure VENTIQ session is required for Document Studio.");
+    }
+
+    return {
+      Authorization: `Bearer ${accessToken}`,
+      ...(includeJson ? { "Content-Type": "application/json" } : {}),
+    };
+  }
+
+  function switchDocumentStudioFund(nextFundName: string) {
+    const normalizedFundName = nextFundName.trim();
+    if (!normalizedFundName || normalizedFundName === activeFundName) return;
+
+    setActiveTemplateId("");
+    setSavedTemplates([]);
+    setSelectedBatchDocumentIds([]);
+    setPreviewMergeData(null);
+    setBatchResult(null);
+    setPdfGenerationResult(null);
+    setPublishResult(null);
+    setActiveFundName(normalizedFundName);
+    setFundAccessMessage("");
+    setStatusMessage(
+      `Document Studio switched to ${normalizedFundName}. Saved records and publishing will remain scoped to this fund.`
+    );
+  }
 
   async function loadSavedTemplates() {
     try {
-      const response = await fetch("/api/document-studio/templates", { cache: "no-store" });
+      const response = await fetch(
+        `/api/document-studio/templates?fund_name=${encodeURIComponent(activeFundName)}`,
+        { cache: "no-store", headers: authorisedHeaders() }
+      );
       const result = await response.json();
 
       if (!response.ok) throw new Error(result.error || "Unable to load templates.");
@@ -1595,7 +1811,7 @@ function startDocumentPreset(preset: DocumentPreset) {
   }
 
   function renderContentWithSampleValues(content: string) {
-    return content.replace(/\{([^}]+)\}/g, (_match, code: string) => getInvestorValue(selectedInvestor, code.trim()));
+    return content.replace(/\{([^}]+)\}/g, (_match, code: string) => getInvestorValue(selectedInvestor, code.trim(), activeFundName));
   }
 
   function fallbackImportedBlocks(): TemplateBlock[] {
@@ -1640,9 +1856,11 @@ function startDocumentPreset(preset: DocumentPreset) {
       setStatusMessage("Uploading and analyzing existing Word/PDF template...");
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("fund_name", activeFundName);
 
       const response = await fetch("/api/document-studio/import-template", {
         method: "POST",
+        headers: authorisedHeaders(),
         body: formData,
       });
       const result = await response.json();
@@ -1659,13 +1877,21 @@ function startDocumentPreset(preset: DocumentPreset) {
 
   async function saveTemplate() {
     try {
+      if (!activeFundAccess) {
+        setStatusMessage(
+          "Select an authorised fund before saving a Document Studio template."
+        );
+        return;
+      }
+
       setApiBusy(true);
       setStatusMessage("Saving template to Document Studio...");
 
       const response = await fetch("/api/document-studio/templates", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authorisedHeaders(true),
         body: JSON.stringify({
+          fund_name: activeFundName,
           id: activeTemplateId || undefined,
           template_name: templateName,
           document_type: selectedDocumentType,
@@ -1727,8 +1953,9 @@ function startDocumentPreset(preset: DocumentPreset) {
 
       const response = await fetch("/api/document-studio/preview", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authorisedHeaders(true),
         body: JSON.stringify({
+          fund_name: activeFundName,
           template_id: activeTemplateId || undefined,
           document_type: selectedDocumentType,
           investor_code: selectedInvestor.code,
@@ -1751,6 +1978,77 @@ function startDocumentPreset(preset: DocumentPreset) {
     }
   }
 
+  async function loadGovernedBatch(
+    batchId = "",
+    announce = true,
+    fallbackToLatestIfMissing = false
+  ) {
+    try {
+      if (!activeFundName || !accessToken) return;
+
+      if (announce) {
+        setApiBusy(true);
+        setStatusMessage(
+          batchId
+            ? "Opening the selected governed batch..."
+            : "Refreshing the current governed batch queue..."
+        );
+      }
+
+      const query = new URLSearchParams({ fund_name: activeFundName });
+      if (batchId) query.set("batch_id", batchId);
+
+      const response = await fetch(
+        `/api/document-studio/batch?${query.toString()}`,
+        { cache: "no-store", headers: authorisedHeaders() }
+      );
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Unable to load the governed batch queue.");
+      }
+
+      if (!result.batch && batchId && fallbackToLatestIfMissing) {
+        rememberBatchId(activeFundName, "");
+        return loadGovernedBatch("", announce, false);
+      }
+
+      setBatchResult(result.batch ? result : null);
+      setPdfGenerationResult(null);
+      setPublishResult(null);
+      setSelectedBatchDocumentIds([]);
+
+      if (result.batch?.id) {
+        rememberBatchId(activeFundName, result.batch.id);
+      } else if (!batchId) {
+        rememberBatchId(activeFundName, "");
+      }
+
+      if (announce) {
+        setWorkspaceTab("batch");
+        setStatusMessage(
+          result.batch
+            ? result.message || "Governed batch loaded successfully."
+            : "No governed batch exists for this fund yet. Prepare one when you are ready."
+        );
+      }
+    } catch (error) {
+      if (announce) {
+        setStatusMessage(
+          error instanceof Error ? error.message : "Unable to refresh the batch queue."
+        );
+      } else {
+        console.warn("Unable to restore the latest Document Studio batch:", error);
+      }
+    } finally {
+      if (announce) setApiBusy(false);
+    }
+  }
+
+  async function loadLatestBatch(announce = true) {
+    return loadGovernedBatch("", announce);
+  }
+
   async function runBatch() {
   try {
     setApiBusy(true);
@@ -1758,8 +2056,9 @@ function startDocumentPreset(preset: DocumentPreset) {
 
     const response = await fetch("/api/document-studio/batch", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authorisedHeaders(true),
       body: JSON.stringify({
+        fund_name: activeFundName,
         template_id: activeTemplateId || undefined,
         document_type: selectedDocumentType,
       }),
@@ -1776,14 +2075,17 @@ function startDocumentPreset(preset: DocumentPreset) {
       .filter((id: string | undefined): id is string => Boolean(id));
 
     setBatchResult(result);
+    if (result.batch?.id) {
+      rememberBatchId(activeFundName, result.batch.id);
+    }
     setPdfGenerationResult(null);
     setPublishResult(null);
-    setSelectedBatchDocumentIds(queuedDocumentIds);
+    setSelectedBatchDocumentIds([]);
     setWorkspaceTab("batch");
 
     setStatusMessage(
       result.message ||
-        `Batch generation prepared. ${queuedDocumentIds.length} document(s) selected.`
+        `Batch generation prepared. ${queuedDocumentIds.length} document(s) queued. Nothing is selected automatically.`
     );
   } catch (error) {
     setBatchResult(null);
@@ -1836,7 +2138,7 @@ async function generatePdfFiles(mode: "selected" | "failed" | "all" = "selected"
 
     const response = await fetch("/api/document-studio/generate-pdfs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authorisedHeaders(true),
       body: JSON.stringify({
         batch_id: batchId,
         document_ids: selectedIds.length > 0 ? selectedIds : undefined,
@@ -1866,6 +2168,45 @@ async function generatePdfFiles(mode: "selected" | "failed" | "all" = "selected"
   }
 }
 
+async function openPrivatePdf(documentId?: string) {
+  if (!documentId) {
+    setStatusMessage("This generated document does not have a secure file reference yet.");
+    return;
+  }
+
+  const popup = window.open("", "_blank");
+
+  try {
+    setStatusMessage("Creating a short-lived secure PDF link...");
+
+    const response = await fetch("/api/document-studio/file-access", {
+      method: "POST",
+      headers: authorisedHeaders(true),
+      body: JSON.stringify({ document_id: documentId }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.signed_url) {
+      throw new Error(result.error || "Unable to open the private PDF.");
+    }
+
+    if (popup) {
+      popup.opener = null;
+      popup.location.href = result.signed_url;
+    } else {
+      window.location.href = result.signed_url;
+    }
+
+    setStatusMessage("Private PDF opened with a short-lived secure link.");
+  } catch (error) {
+    if (popup) popup.close();
+    setStatusMessage(
+      error instanceof Error ? error.message : "Unable to open the private PDF."
+    );
+  }
+}
+
   async function publishQueue() {
     try {
       setWorkspaceTab("publish");
@@ -1879,7 +2220,7 @@ async function generatePdfFiles(mode: "selected" | "failed" | "all" = "selected"
       setStatusMessage("Publishing generated document records to Investor Portal...");
       const response = await fetch("/api/document-studio/publish", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authorisedHeaders(true),
         body: JSON.stringify({ batch_id: batchId }),
       });
       const result = await response.json();
@@ -2312,7 +2653,7 @@ async function generatePdfFiles(mode: "selected" | "failed" | "all" = "selected"
         {block.kind === "letterhead" && (
           <div className="ids-letterhead">
             <div>
-              <strong>{getInvestorValue(selectedInvestor, "fund_name")}</strong>
+              <strong>{getInvestorValue(selectedInvestor, "fund_name", activeFundName)}</strong>
               <span>{block.content || "Registered AIF | GIFT City"}</span>
             </div>
             <div className="ids-logo-box">VENTIQ</div>
@@ -2411,7 +2752,7 @@ async function generatePdfFiles(mode: "selected" | "failed" | "all" = "selected"
         {block.kind === "signature" && (
           <div className="ids-signature-block">
             <div>
-              <strong>For {getInvestorValue(selectedInvestor, "fund_name")}</strong>
+              <strong>For {getInvestorValue(selectedInvestor, "fund_name", activeFundName)}</strong>
               <span>{block.content || "Authorized Signatory"}</span>
             </div>
             <div>
@@ -2684,7 +3025,7 @@ async function generatePdfFiles(mode: "selected" | "failed" | "all" = "selected"
       {block.kind === "letterhead" && (
         <div className="ids-generated-preview-letterhead">
           <div>
-            <h2>{getInvestorValue(selectedInvestor, "fund_name")}</h2>
+            <h2>{getInvestorValue(selectedInvestor, "fund_name", activeFundName)}</h2>
             <p>{block.content || "Registered AIF | GIFT City"}</p>
           </div>
           <strong>VENTIQ</strong>
@@ -2824,7 +3165,7 @@ async function generatePdfFiles(mode: "selected" | "failed" | "all" = "selected"
       {block.kind === "signature" && (
         <div className="ids-generated-preview-signature">
           <div>
-            <strong>For {getInvestorValue(selectedInvestor, "fund_name")}</strong>
+            <strong>For {getInvestorValue(selectedInvestor, "fund_name", activeFundName)}</strong>
             <span>{block.content || "Authorized Signatory"}</span>
           </div>
 
@@ -2899,10 +3240,15 @@ function renderPreview() {
 
 
  function renderBatch() {
-  const generatedCount = pdfGenerationResult?.generatedDocuments ?? 0;
-  const failedCount = pdfGenerationResult?.failedDocuments ?? 0;
+  const generatedCount = batchDocuments.filter((document) =>
+    ["generated", "published"].includes((document.generation_status || "").toLowerCase())
+  ).length;
+  const failedCount = batchDocuments.filter((document) =>
+    (document.generation_status || "").toLowerCase().includes("failed")
+  ).length;
   const queuedCount = batchResult?.queuedDocuments ?? batchDocuments.length;
   const selectedCount = selectedBatchDocumentIds.length;
+  const recentBatches = batchResult?.recentBatches ?? [];
 
   return (
     <div className="ids-workflow-page">
@@ -2928,7 +3274,7 @@ function renderPreview() {
           <button
             className="ids-secondary-btn"
             disabled={apiBusy}
-            onClick={runBatch}
+            onClick={() => loadLatestBatch(true)}
             type="button"
           >
             Refresh Queue
@@ -2936,7 +3282,12 @@ function renderPreview() {
 
           <button
             className="ids-primary-btn"
-            disabled={apiBusy || !batchResult?.batch?.id}
+            disabled={
+              apiBusy ||
+              !batchResult?.batch?.id ||
+              batchDocuments.length === 0 ||
+              selectedBatchDocumentIds.length === 0
+            }
             onClick={() => generatePdfFiles("selected")}
             type="button"
           >
@@ -2944,6 +3295,32 @@ function renderPreview() {
           </button>
         </div>
       </div>
+
+      {recentBatches.length > 0 && (
+        <div className="ids-batch-history-bar">
+          <div>
+            <strong>Recent governed batches</strong>
+            <span>Your selected batch is remembered for this fund and restored when you return.</span>
+          </div>
+          <select
+            aria-label="Recent governed batches"
+            disabled={apiBusy}
+            onChange={(event) => {
+              const nextBatchId = event.target.value;
+              if (nextBatchId && nextBatchId !== batchResult?.batch?.id) {
+                loadGovernedBatch(nextBatchId, true);
+              }
+            }}
+            value={batchResult?.batch?.id || ""}
+          >
+            {recentBatches.map((batch) => (
+              <option key={batch.id} value={batch.id}>
+                {`${batch.status || "Batch"} · ${batch.generated_count ?? 0} generated · ${batch.total_investors ?? 0} investors · ${batch.created_at ? new Date(batch.created_at).toLocaleString("en-IN") : batch.id.slice(0, 8)}`}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="ids-batch-grid">
         <div>
@@ -3021,14 +3398,26 @@ function renderPreview() {
 
       {batchDocuments.length === 0 && (
         <div className="ids-empty-card">
-          <strong>No batch queue loaded</strong>
-          <p>
-            Click Generate Batch from Preview or Refresh Queue here to prepare
-            investor-wise documents.
-          </p>
-          <button className="ids-primary-btn" onClick={runBatch} type="button">
-            Prepare Batch Queue
-          </button>
+          {batchResult?.batch?.id ? (
+            <>
+              <strong>Batch prepared — no investors found for this fund</strong>
+              <p>
+                The governed batch is valid and contains zero investors. Add or migrate
+                canonical investors for {activeFundName} before generating PDFs.
+              </p>
+            </>
+          ) : (
+            <>
+              <strong>No batch queue loaded</strong>
+              <p>
+                Prepare a governed batch queue to load investor-wise documents for the
+                selected fund.
+              </p>
+              <button className="ids-primary-btn" onClick={runBatch} type="button">
+                Prepare Batch Queue
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -3061,10 +3450,14 @@ function renderPreview() {
                 <p>{document.file_name || document.document_name || templateName}</p>
                 <em>{status}</em>
 
-                {document.file_url && (
-                  <a href={document.file_url} target="_blank">
-                    Open PDF
-                  </a>
+                {document.id && document.generation_status === "Generated" && (
+                  <button
+                    className="ids-secondary-btn"
+                    onClick={() => openPrivatePdf(document.id)}
+                    type="button"
+                  >
+                    Open Private PDF
+                  </button>
                 )}
               </div>
             );
@@ -3076,11 +3469,15 @@ function renderPreview() {
 }
 
   function renderPublish() {
-  const generatedPdfCards = pdfGenerationResult?.documents ?? [];
-  const generatedCount =
-    pdfGenerationResult?.generatedDocuments ?? generatedPdfCards.length;
-  const failedCount = pdfGenerationResult?.failedDocuments ?? 0;
-  const publishedCount = publishResult?.publishedDocuments ?? 0;
+  const generatedPdfCards = batchDocuments.filter((document) =>
+    ["generated", "published"].includes((document.generation_status || "").toLowerCase())
+  );
+  const generatedCount = generatedPdfCards.length;
+  const failedCount = batchDocuments.filter((document) =>
+    (document.generation_status || "").toLowerCase().includes("failed")
+  ).length;
+  const publishedCount =
+    publishResult?.publishedDocuments ?? batchResult?.batch?.published_count ?? 0;
 
   return (
     <div className="ids-workflow-page">
@@ -3108,7 +3505,9 @@ function renderPreview() {
 
           <button
             className="ids-primary-btn"
-            disabled={apiBusy || !batchResult?.batch?.id}
+            disabled={
+              apiBusy || !batchResult?.batch?.id || generatedCount === 0
+            }
             onClick={publishQueue}
             type="button"
           >
@@ -3175,11 +3574,17 @@ function renderPreview() {
                 {publishResult ? "Published to Portal" : "Generated PDF ready"}
               </em>
 
-              {document.file_url && (
-                <a href={document.file_url} target="_blank">
-                  Open PDF
-                </a>
-              )}
+              {document.id &&
+                (document.generation_status === "Generated" ||
+                  document.generation_status === "Published") && (
+                  <button
+                    className="ids-secondary-btn"
+                    onClick={() => openPrivatePdf(document.id)}
+                    type="button"
+                  >
+                    Open Private PDF
+                  </button>
+                )}
             </div>
           ))}
         </div>
@@ -3193,13 +3598,45 @@ function renderPreview() {
       <div className="ids-shell">
         <input ref={fileInputRef} type="file" accept=".docx,.pdf" onChange={importTemplateFile} style={{ display: "none" }} />
 
+        <div className="ids-fund-context">
+          <div className="ids-fund-context-copy">
+            <span>Governed fund context</span>
+            <strong>{activeFundAccess?.fund_name || "No authorised fund selected"}</strong>
+            <small>
+              Every template, batch, generated PDF and publish action is scoped to this fund.
+            </small>
+          </div>
+
+          <label className="ids-fund-selector">
+            <span>Document Studio Fund</span>
+            <select
+              value={activeFundAccess?.fund_name || ""}
+              disabled={!fundAccessReady || authorisedFunds.length === 0 || apiBusy}
+              onChange={(event) => switchDocumentStudioFund(event.target.value)}
+            >
+              <option value="" disabled>
+                {fundAccessReady ? "Select authorised fund" : "Loading fund access..."}
+              </option>
+              {authorisedFunds.map((fund) => (
+                <option key={fund.fund_name} value={fund.fund_name}>
+                  {fund.fund_name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {fundAccessMessage && (
+            <p className="ids-fund-context-message">{fundAccessMessage}</p>
+          )}
+        </div>
+
         <div className="ids-workspace-tabs">
           <button className={workspaceTab === "start" ? "active" : ""} onClick={() => setWorkspaceTab("start")} type="button">Start</button>
           <button className={workspaceTab === "library" ? "active" : ""} onClick={() => setWorkspaceTab("library")} type="button">Template Library</button>
           <button className={workspaceTab === "builder" ? "active" : ""} onClick={() => setWorkspaceTab("builder")} type="button">Template Builder</button>
-          <button className={workspaceTab === "preview" ? "active" : ""} onClick={previewTemplate} type="button">PDF Preview</button>
-          <button className={workspaceTab === "batch" ? "active" : ""} onClick={runBatch} type="button">Batch Generation</button>
-          <button className={workspaceTab === "publish" ? "active" : ""} onClick={publishQueue} type="button">Publish Queue</button>
+          <button className={workspaceTab === "preview" ? "active" : ""} onClick={() => setWorkspaceTab("preview")} type="button">PDF Preview</button>
+          <button className={workspaceTab === "batch" ? "active" : ""} onClick={() => setWorkspaceTab("batch")} type="button">Batch Generation</button>
+          <button className={workspaceTab === "publish" ? "active" : ""} onClick={() => setWorkspaceTab("publish")} type="button">Publish Queue</button>
         </div>
 
         {workspaceTab === "start" && renderStart()}
@@ -3279,6 +3716,79 @@ function renderPreview() {
           letter-spacing: 0.13em;
           text-transform: uppercase;
           margin: 0 0 8px;
+        }
+
+        .ids-fund-context {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+          gap: 14px 20px;
+          align-items: center;
+          background: #071a3a;
+          color: #ffffff;
+          border: 1px solid rgba(154, 115, 18, 0.42);
+          border-radius: 16px;
+          padding: 14px 16px;
+          margin-bottom: 10px;
+          box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+        }
+
+        .ids-fund-context-copy {
+          display: grid;
+          gap: 3px;
+        }
+
+        .ids-fund-context-copy span,
+        .ids-fund-selector span {
+          color: #d5aa3c;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+        }
+
+        .ids-fund-context-copy strong {
+          font-size: 17px;
+          letter-spacing: -0.01em;
+        }
+
+        .ids-fund-context-copy small {
+          color: #c8d4e8;
+          line-height: 1.4;
+        }
+
+        .ids-fund-selector {
+          display: grid;
+          gap: 6px;
+        }
+
+        .ids-fund-selector select {
+          width: 100%;
+          border: 1px solid #3d5271;
+          border-radius: 10px;
+          background: #0d274f;
+          color: #ffffff;
+          padding: 10px 12px;
+          font-weight: 800;
+          outline: none;
+        }
+
+        .ids-fund-selector select:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
+        .ids-fund-context-message {
+          grid-column: 1 / -1;
+          margin: 0;
+          color: #f6d979;
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        @media (max-width: 820px) {
+          .ids-fund-context {
+            grid-template-columns: 1fr;
+          }
         }
 
         .ids-workspace-tabs {
@@ -4029,6 +4539,12 @@ function renderPreview() {
 
         .ids-table-config-summary,
         .ids-import-grid,
+        .ids-batch-history-bar { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin: 0 0 16px; padding: 14px 16px; border: 1px solid rgba(168, 119, 0, 0.28); border-radius: 16px; background: rgba(255,255,255,0.52); }
+        .ids-batch-history-bar > div { display: grid; gap: 3px; }
+        .ids-batch-history-bar strong { color: #0b2148; }
+        .ids-batch-history-bar span { color: #62708a; font-size: 0.84rem; }
+        .ids-batch-history-bar select { min-width: 360px; max-width: 56%; padding: 10px 12px; border: 1px solid #d7c49a; border-radius: 12px; background: #fffdf8; color: #0b2148; font-weight: 700; }
+        @media (max-width: 900px) { .ids-batch-history-bar { align-items: stretch; flex-direction: column; } .ids-batch-history-bar select { min-width: 0; max-width: none; width: 100%; } }
         .ids-batch-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -4580,5 +5096,23 @@ function renderPreview() {
 }
       `}</style>
     </main>
+  );
+}
+
+export default function DocumentStudioPage() {
+  return (
+    <ProtectedWorkspace
+      allowedRoles={[
+        "fund_admin",
+        "managing_partner",
+        "finance_head",
+        "compliance_team",
+        "investor_relations",
+        "maker",
+        "checker",
+      ]}
+    >
+      <DocumentStudioWorkspace />
+    </ProtectedWorkspace>
   );
 }

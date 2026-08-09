@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  authenticateDocumentStudioUser,
+  documentStudioAuthErrorResponse,
+  requireDocumentStudioFundAccess,
+} from "../../../../lib/server/documentStudioAuth";
 
 export const runtime = "nodejs";
 
@@ -80,6 +85,7 @@ async function safeSelectRows(
       column: string;
       value: string;
     };
+    fundName?: string;
   }
 ) {
   try {
@@ -87,6 +93,10 @@ async function safeSelectRows(
 
     if (options?.eq) {
       query = query.eq(options.eq.column, options.eq.value);
+    }
+
+    if (options?.fundName) {
+      query = query.eq("fund_name", options.fundName);
     }
 
     const { data, error } = await query;
@@ -115,6 +125,12 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
+    const baseActor = await authenticateDocumentStudioUser(request);
+    const actor = await requireDocumentStudioFundAccess(
+      baseActor,
+      body.fund_name,
+      "view"
+    );
 
     const investorCode = String(body.investor_code || "").trim();
     const investorId = String(body.investor_id || "").trim();
@@ -127,6 +143,7 @@ export async function POST(request: NextRequest) {
           column: "id",
           value: investorId,
         },
+        fundName: actor.fundName,
       });
     }
 
@@ -136,12 +153,19 @@ export async function POST(request: NextRequest) {
           column: "investor_code",
           value: investorCode,
         },
+        fundName: actor.fundName,
       });
     }
 
     if (investorRows.length === 0) {
-      investorRows = await safeSelectRows(supabase, "investor_master");
+      investorRows = await safeSelectRows(supabase, "investor_master", {
+        fundName: actor.fundName,
+      });
     }
+
+    investorRows = investorRows.filter(
+      (row) => getString(row, ["fund_name"]) === actor.fundName
+    );
 
     const investor = investorRows[0] ?? null;
 
@@ -237,7 +261,7 @@ export async function POST(request: NextRequest) {
       email: getString(investor, ["email", "investor_email"]),
       investor_type: getString(investor, ["investor_type", "type"], "Investor"),
 
-      fund_name: getString(commitment, ["fund_name"], "VENTIQ Capital Fund I"),
+      fund_name: getString(commitment, ["fund_name"], actor.fundName),
       statement_period: body.statement_period || "Q1 FY 2025-26",
       report_date: body.report_date || "30-Jun-2025",
       generated_on: new Date().toLocaleDateString("en-IN"),
@@ -288,6 +312,9 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    const authResponse = documentStudioAuthErrorResponse(error);
+    if (authResponse) return authResponse;
+
     return NextResponse.json(
       {
         error:

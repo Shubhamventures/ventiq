@@ -1,4 +1,9 @@
 import { NextResponse } from "next/server";
+import {
+  authenticateDocumentStudioUser,
+  documentStudioAuthErrorResponse,
+  requireDocumentStudioFundAccess,
+} from "../../../../lib/server/documentStudioAuth";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -752,6 +757,12 @@ function analyzeTemplateText(text: string, fileName: string, extension: string):
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
+    const baseActor = await authenticateDocumentStudioUser(request);
+    const actor = await requireDocumentStudioFundAccess(
+      baseActor,
+      formData.get("fund_name"),
+      "edit"
+    );
     const file = formData.get("file");
 
     if (!(file instanceof File)) {
@@ -811,7 +822,7 @@ export async function POST(request: Request) {
       | undefined;
 
     if (supabaseAdmin) {
-      const storagePath = `imports/${Date.now()}-${cleanFileName(file.name)}`;
+      const storagePath = `imports/${actor.organisationId}/${actor.fundName.replace(/[^a-zA-Z0-9_-]/g, "_")}/${Date.now()}-${cleanFileName(file.name)}`;
 
       const uploadResult = await supabaseAdmin.storage
         .from(importBucketName)
@@ -858,6 +869,9 @@ export async function POST(request: Request) {
           suggested_blocks: analysis.suggestedBlocks,
           unmapped_items: analysis.unmappedItems,
           import_status: "Imported",
+          organisation_id: actor.organisationId,
+          fund_name: actor.fundName,
+          created_by: actor.userId,
         })
         .select(
           "id, file_name, file_type, import_confidence, detected_document_type"
@@ -898,6 +912,9 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    const authResponse = documentStudioAuthErrorResponse(error);
+    if (authResponse) return authResponse;
+
     return NextResponse.json(
       {
         error:

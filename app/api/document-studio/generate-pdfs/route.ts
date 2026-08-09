@@ -1,4 +1,9 @@
 import { NextResponse } from "next/server";
+import {
+  authenticateDocumentStudioUser,
+  documentStudioAuthErrorResponse,
+  requireDocumentStudioFundAccess,
+} from "../../../../lib/server/documentStudioAuth";
 import { createClient } from "@supabase/supabase-js";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 
@@ -56,6 +61,8 @@ type TemplateBlock = {
 
 type GeneratedDocument = {
   id: string;
+  organisation_id?: string | null;
+  fund_name?: string | null;
   template_id?: string | null;
   investor_id?: string | null;
   investor_code?: string | null;
@@ -74,6 +81,8 @@ type GeneratedDocument = {
 
 type BatchRecord = {
   id: string;
+  organisation_id?: string | null;
+  fund_name?: string | null;
   template_id?: string | null;
   document_type?: string | null;
   batch_name?: string | null;
@@ -450,7 +459,7 @@ function makeData(document: GeneratedDocument, documentType: string) {
     investor_name: investorName,
     investor_code: investorCode,
     investor_type: safePdfText(mergedFields.investor_type || "Investor"),
-    fund_name: safePdfText(mergedFields.fund_name || "VENTIQ Capital Fund I"),
+    fund_name: safePdfText(mergedFields.fund_name || document.fund_name || "VENTIQ"),
     fund_address: safePdfText(mergedFields.fund_address || "GIFT City, Gandhinagar"),
     statement_period: safePdfText(mergedFields.statement_period || "Q1 FY 2025-26"),
     report_date: safePdfText(mergedFields.report_date || "30-Jun-2025"),
@@ -942,6 +951,7 @@ async function createPdfForDocument(args: {
 
 export async function POST(request: Request) {
   try {
+    const baseActor = await authenticateDocumentStudioUser(request);
     const body = (await request.json()) as {
       batch_id?: string;
       document_ids?: unknown;
@@ -974,6 +984,26 @@ export async function POST(request: Request) {
       throw new Error(batchError?.message || "Batch not found.");
     }
 
+    if (!batch.organisation_id || !batch.fund_name) {
+      return NextResponse.json(
+        { error: "This batch is legacy/unowned. Prepare a new governed batch before generating PDFs." },
+        { status: 409 }
+      );
+    }
+
+    if (String(batch.organisation_id) !== baseActor.organisationId) {
+      return NextResponse.json(
+        { error: "Batch not found for your organisation." },
+        { status: 404 }
+      );
+    }
+
+    const actor = await requireDocumentStudioFundAccess(
+      baseActor,
+      batch.fund_name,
+      "edit"
+    );
+
     const documentType = batch.document_type || "Statement of Account (SOA)";
 
     let templateBlocks: TemplateBlock[] = getDefaultBlocks(documentType);
@@ -983,6 +1013,8 @@ export async function POST(request: Request) {
         .from("document_studio_templates")
         .select("blocks_json")
         .eq("id", batch.template_id)
+        .eq("organisation_id", actor.organisationId)
+        .eq("fund_name", actor.fundName)
         .maybeSingle();
 
       if (templateError) {
@@ -996,6 +1028,8 @@ export async function POST(request: Request) {
       .from("document_studio_generated_documents")
       .select("*")
       .eq("batch_id", batch_id)
+      .eq("organisation_id", actor.organisationId)
+      .eq("fund_name", actor.fundName)
       .in("generation_status", ["Ready", "Generated", "Failed"]);
 
     if (documentIds.length > 0) {
@@ -1029,7 +1063,9 @@ export async function POST(request: Request) {
       document_type?: string | null;
       document_name?: string | null;
       file_name: string;
-      file_url: string;
+      file_url: null;
+      storage_bucket: string;
+      storage_path: string;
       generation_status: string;
       portal_publish_status?: string | null;
     }[] = [];
@@ -1065,23 +1101,19 @@ export async function POST(request: Request) {
           throw new Error(uploadError.message);
         }
 
-        const publicUrlResult = supabase.storage
-          .from(bucketName)
-          .getPublicUrl(storagePath);
-
-        const fileUrl = publicUrlResult.data.publicUrl;
-
         const { error: updateError } = await supabase
           .from("document_studio_generated_documents")
           .update({
             file_name: fileName,
-            file_url: fileUrl,
+            file_url: null,
             storage_bucket: bucketName,
             storage_path: storagePath,
             generation_status: "Generated",
             generated_at: new Date().toISOString(),
           })
-          .eq("id", document.id);
+          .eq("id", document.id)
+          .eq("organisation_id", actor.organisationId)
+          .eq("fund_name", actor.fundName);
 
         if (updateError) {
           throw new Error(updateError.message);
@@ -1095,7 +1127,9 @@ export async function POST(request: Request) {
           document_type: document.document_type || documentType,
           document_name: document.document_name,
           file_name: fileName,
-          file_url: fileUrl,
+          file_url: null,
+          storage_bucket: bucketName,
+          storage_path: storagePath,
           generation_status: "Generated",
           portal_publish_status: document.portal_publish_status,
         });
@@ -1109,7 +1143,9 @@ export async function POST(request: Request) {
           .update({
             generation_status: "Failed",
           })
-          .eq("id", document.id);
+          .eq("id", document.id)
+          .eq("organisation_id", actor.organisationId)
+          .eq("fund_name", actor.fundName);
 
         if (failedUpdateError) {
           console.error("Unable to mark document as Failed:", failedUpdateError);
@@ -1120,12 +1156,16 @@ export async function POST(request: Request) {
     const { count: totalDocumentsCount } = await supabase
       .from("document_studio_generated_documents")
       .select("id", { count: "exact", head: true })
-      .eq("batch_id", batch_id);
+      .eq("batch_id", batch_id)
+      .eq("organisation_id", actor.organisationId)
+      .eq("fund_name", actor.fundName);
 
     const { count: totalGeneratedCount } = await supabase
       .from("document_studio_generated_documents")
       .select("id", { count: "exact", head: true })
       .eq("batch_id", batch_id)
+      .eq("organisation_id", actor.organisationId)
+      .eq("fund_name", actor.fundName)
       .eq("generation_status", "Generated");
 
     const nextBatchStatus =
@@ -1144,15 +1184,19 @@ export async function POST(request: Request) {
         status: nextBatchStatus,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", batch_id);
+      .eq("id", batch_id)
+      .eq("organisation_id", actor.organisationId)
+      .eq("fund_name", actor.fundName);
 
     const { data: currentDocuments, error: currentDocumentsError } =
       await supabase
         .from("document_studio_generated_documents")
         .select(
-          "id, investor_code, investor_name, email, document_type, document_name, file_name, file_url, generation_status, portal_publish_status"
+          "id, investor_code, investor_name, email, document_type, document_name, file_name, file_url, storage_bucket, storage_path, generation_status, portal_publish_status"
         )
         .eq("batch_id", batch_id)
+        .eq("organisation_id", actor.organisationId)
+        .eq("fund_name", actor.fundName)
         .order("investor_name", { ascending: true });
 
     if (currentDocumentsError) {
@@ -1174,6 +1218,9 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("generate-pdfs error:", error);
+
+    const authResponse = documentStudioAuthErrorResponse(error);
+    if (authResponse) return authResponse;
 
     return NextResponse.json(
       {
