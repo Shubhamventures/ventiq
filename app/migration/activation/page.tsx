@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 import { useVentiqAuth } from "../../../lib/auth/AuthProvider";
+import { useActiveFund } from "../../../lib/useActiveFund";
 
 type DataStatus = "Ready" | "Partial" | "Not Started" | "Needs Review";
 type ApprovalStatus = "Draft" | "Submitted" | "Changes Requested" | "Approved";
@@ -63,7 +64,15 @@ type ActivationRow = {
   activated_by?: string | null;
 };
 
-const ACTIVE_FUND_NAME = "VENTIQ Growth Fund II";
+type GovernedFundOption = {
+  fund_name: string;
+  role: string;
+  can_view: boolean;
+  can_edit: boolean;
+  can_approve: boolean;
+};
+
+const DEFAULT_FUND_NAME = "VENTIQ Growth Fund II";
 
 function formatCr(value: number) {
   return `₹${(value / 10000000).toFixed(2)} Cr`;
@@ -245,7 +254,15 @@ function deriveActivationStatus(layers: LayerCard[]): ActivationStatus {
 
 export default function DataActivationDashboardPage() {
   const { session, profile, activeRole, loading: authLoading } = useVentiqAuth();
+  const {
+    activeFundName,
+    setActiveFundName,
+    isReady: fundContextReady,
+  } = useActiveFund(DEFAULT_FUND_NAME);
 
+  const [authorisedFunds, setAuthorisedFunds] = useState<GovernedFundOption[]>([]);
+  const [fundAccessReady, setFundAccessReady] = useState(false);
+  const [fundAccessMessage, setFundAccessMessage] = useState("");
   const [layers, setLayers] = useState<LayerCard[]>(defaultLayers);
   const [loading, setLoading] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState("");
@@ -255,19 +272,32 @@ export default function DataActivationDashboardPage() {
   );
   const [workflowConfigured, setWorkflowConfigured] = useState(true);
 
+  const activeFundAccess = useMemo(() => {
+    const normalizedActiveFund = activeFundName.trim().toLowerCase();
+
+    return (
+      authorisedFunds.find(
+        (fund) => fund.fund_name.trim().toLowerCase() === normalizedActiveFund
+      ) ?? null
+    );
+  }, [authorisedFunds, activeFundName]);
+
+  const governedRole = activeFundAccess?.role || activeRole || "";
+
   const canSubmitApprovals =
-    activeRole === "maker" || activeRole === "fund_admin";
+    Boolean(activeFundAccess?.can_edit) &&
+    (governedRole === "maker" || governedRole === "fund_admin");
   const canReviewApprovals =
-    activeRole === "checker" || activeRole === "fund_admin";
-  const canActivateFund =
-    activeRole === "checker" || activeRole === "fund_admin";
+    Boolean(activeFundAccess?.can_approve) &&
+    (governedRole === "checker" || governedRole === "fund_admin");
+  const canActivateFund = canReviewApprovals;
 
   const workflowRole: WorkflowRole =
-    activeRole === "maker"
+    governedRole === "maker"
       ? "Maker"
-      : activeRole === "checker"
+      : governedRole === "checker"
         ? "Checker"
-        : activeRole === "fund_admin"
+        : governedRole === "fund_admin"
           ? "Fund Admin"
           : "Read Only";
 
@@ -287,8 +317,104 @@ export default function DataActivationDashboardPage() {
     []
   );
 
+  useEffect(() => {
+    if (authLoading || !fundContextReady) return;
+
+    const accessToken = session?.access_token?.trim() || "";
+
+    if (!accessToken) {
+      setAuthorisedFunds([]);
+      setFundAccessMessage("A secure VENTIQ session is required to load governed funds.");
+      setFundAccessReady(true);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadGovernedFunds() {
+      setFundAccessReady(false);
+      setFundAccessMessage("");
+
+      try {
+        const response = await fetch("/api/fund-context", {
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            result.error || "Unable to load governed VENTIQ fund context."
+          );
+        }
+
+        if (cancelled) return;
+
+        const funds = (result.funds ?? []) as GovernedFundOption[];
+        setAuthorisedFunds(funds);
+
+        if (funds.length === 0) {
+          setFundAccessMessage(
+            "No active fund access is available for this VENTIQ account."
+          );
+          setFundAccessReady(true);
+          return;
+        }
+
+        const normalizedActiveFund = activeFundName.trim().toLowerCase();
+        const currentFundIsAllowed = funds.some(
+          (fund) => fund.fund_name.trim().toLowerCase() === normalizedActiveFund
+        );
+
+        if (!currentFundIsAllowed) {
+          const nextFund = funds[0].fund_name;
+          setActiveFundName(nextFund);
+          setFundAccessMessage(
+            `Activation moved to your first authorised fund: ${nextFund}.`
+          );
+        }
+
+        setFundAccessReady(true);
+      } catch (error) {
+        if (cancelled) return;
+
+        setAuthorisedFunds([]);
+        setFundAccessMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to load governed VENTIQ fund context."
+        );
+        setFundAccessReady(true);
+      }
+    }
+
+    void loadGovernedFunds();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    authLoading,
+    fundContextReady,
+    session?.access_token,
+    activeFundName,
+    setActiveFundName,
+  ]);
+
   const loadActivationSnapshot = useCallback(async () => {
     const client = supabase;
+
+    if (!fundContextReady || !fundAccessReady) return;
+
+    if (!activeFundName.trim() || !activeFundAccess) {
+      setLayers(defaultLayers);
+      setPersistedActivation(null);
+      setNotice("Select an authorised fund before loading activation readiness.", "warning");
+      return;
+    }
 
     if (!isSupabaseConfigured || !client) {
       setNotice("Supabase is not configured. Add the project credentials in .env.local.", "error");
@@ -307,50 +433,80 @@ export default function DataActivationDashboardPage() {
         metrics: layer.metrics.map((metric) => ({ ...metric })),
       }));
 
-      const [investorResult, pdfResult, portfolioResult, fundResult, complianceResult] =
-        await Promise.all([
-          client
-            .from("investor_import_batches")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-          client
-            .from("pdf_intelligence_batches")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-          client
-            .from("portfolio_data_migration_batches")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-          client
+      const [
+        investorResult,
+        pdfResult,
+        portfolioResult,
+        fundAnchorResult,
+        complianceResult,
+      ] = await Promise.all([
+        client
+          .from("investor_import_batches")
+          .select("*")
+          .eq("fund_name", activeFundName)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        client
+          .from("pdf_intelligence_batches")
+          .select("*")
+          .eq("fund_name", activeFundName)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        client
+          .from("portfolio_data_migration_batches")
+          .select("*")
+          .eq("fund_name", activeFundName)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        client
+          .from("fund_master")
+          .select("batch_id")
+          .eq("fund_name", activeFundName)
+          .not("batch_id", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        client
+          .from("compliance_data_migration_batches")
+          .select("*")
+          .eq("fund_name", activeFundName)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      const labelledBatchErrors = [
+        ["Investor Data", investorResult.error],
+        ["PDF Intelligence", pdfResult.error],
+        ["Portfolio Data", portfolioResult.error],
+        ["Fund Data anchor", fundAnchorResult.error],
+        ["Compliance Data", complianceResult.error],
+      ] as const;
+
+      const firstBatchError = labelledBatchErrors.find(([, error]) => Boolean(error));
+      if (firstBatchError) {
+        const [label, error] = firstBatchError;
+        throw new Error(
+          `${label}: ${error?.message || "Unable to load the governed migration batch."}`
+        );
+      }
+
+      const fundBatchId = String(fundAnchorResult.data?.batch_id ?? "").trim();
+      const fundBatchResult = fundBatchId
+        ? await client
             .from("fund_data_migration_batches")
             .select("*")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-          client
-            .from("compliance_data_migration_batches")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-        ]);
+            .eq("id", fundBatchId)
+            .maybeSingle()
+        : { data: null, error: null };
 
-      const batchErrors = [
-        investorResult.error,
-        pdfResult.error,
-        portfolioResult.error,
-        fundResult.error,
-        complianceResult.error,
-      ].filter(Boolean);
-
-      if (batchErrors.length > 0) {
-        throw batchErrors[0];
+      if (fundBatchResult.error) {
+        throw new Error(
+          `Fund Data: ${fundBatchResult.error.message || "Unable to load the governed fund batch."}`
+        );
       }
 
       const investorBatch = investorResult.data;
@@ -453,7 +609,7 @@ export default function DataActivationDashboardPage() {
         };
       }
 
-      const fundBatch = fundResult.data;
+      const fundBatch = fundBatchResult.data;
       if (fundBatch) {
         const totalFunds = Number(fundBatch.total_funds ?? 0);
         const committedCapital = Number(fundBatch.total_committed_capital ?? 0);
@@ -521,7 +677,7 @@ export default function DataActivationDashboardPage() {
       const approvalResult = await client
         .from("migration_data_approvals")
         .select("*")
-        .eq("fund_name", ACTIVE_FUND_NAME);
+        .eq("fund_name", activeFundName);
 
       if (approvalResult.error) {
         if (isMissingTableError(approvalResult.error.message)) {
@@ -555,7 +711,7 @@ export default function DataActivationDashboardPage() {
       const activationResult = await client
         .from("fund_activation_status")
         .select("*")
-        .eq("fund_name", ACTIVE_FUND_NAME)
+        .eq("fund_name", activeFundName)
         .maybeSingle();
 
       if (activationResult.error) {
@@ -577,16 +733,31 @@ export default function DataActivationDashboardPage() {
         workflowAvailable ? "success" : "warning"
       );
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unable to load readiness.";
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : typeof error === "object" &&
+              error !== null &&
+              "message" in error &&
+              typeof (error as { message?: unknown }).message === "string"
+            ? (error as { message: string }).message
+            : "Unable to load readiness.";
       setNotice(errorMessage, "error");
     } finally {
       setLoading(false);
     }
-  }, [setNotice]);
+  }, [
+    activeFundAccess,
+    activeFundName,
+    fundAccessReady,
+    fundContextReady,
+    setNotice,
+  ]);
 
   useEffect(() => {
+    if (!fundAccessReady || !activeFundAccess) return;
     void loadActivationSnapshot();
-  }, [loadActivationSnapshot]);
+  }, [fundAccessReady, activeFundAccess, loadActivationSnapshot]);
 
   const readiness = useMemo(() => {
     const mandatoryLayers = layers.filter((layer) => layer.mandatory);
@@ -637,7 +808,7 @@ export default function DataActivationDashboardPage() {
     if (!supabase || !workflowConfigured) return;
 
     const { error } = await supabase.from("migration_activation_events").insert({
-      fund_name: ACTIVE_FUND_NAME,
+      fund_name: activeFundName,
       event_type: input.eventType,
       layer_key: input.layerKey ?? null,
       actor_name: input.actorName,
@@ -692,7 +863,7 @@ export default function DataActivationDashboardPage() {
 
       if (nextStatus === "Submitted") {
         const payload = {
-          fund_name: ACTIVE_FUND_NAME,
+          fund_name: activeFundName,
           layer_key: layer.id,
           layer_name: layer.title,
           source_table: layer.sourceTable,
@@ -734,7 +905,7 @@ export default function DataActivationDashboardPage() {
         const { data, error } = await supabase
           .from("migration_data_approvals")
           .update(checkerPayload)
-          .eq("fund_name", ACTIVE_FUND_NAME)
+          .eq("fund_name", activeFundName)
           .eq("layer_key", layer.id)
           .eq("source_batch_id", layer.batchId)
           .eq("status", "Submitted")
@@ -803,7 +974,7 @@ export default function DataActivationDashboardPage() {
 
       const { error } = await supabase.from("fund_activation_status").upsert(
         {
-          fund_name: ACTIVE_FUND_NAME,
+          fund_name: activeFundName,
           status: "Active",
           readiness_score: 100,
           activated_at: now,
@@ -820,7 +991,7 @@ export default function DataActivationDashboardPage() {
         eventType: "FUND_ACTIVATED",
         actorName,
         actorRole: workflowRole,
-        description: `${ACTIVE_FUND_NAME} was activated across VENTIQ.`,
+        description: `${activeFundName} was activated across VENTIQ.`,
         metadata: { approvedBatchMap, readinessScore: 100 },
       });
 
@@ -843,7 +1014,21 @@ export default function DataActivationDashboardPage() {
           </a>
           <div className="activation-fund-context">
             <span>Activation fund</span>
-            <strong>{ACTIVE_FUND_NAME}</strong>
+            <select
+              aria-label="Select authorised activation fund"
+              disabled={!fundAccessReady || authorisedFunds.length === 0 || loading}
+              onChange={(event) => setActiveFundName(event.target.value)}
+              value={activeFundAccess ? activeFundName : ""}
+            >
+              {!activeFundAccess && (
+                <option value="">Select authorised fund</option>
+              )}
+              {authorisedFunds.map((fund) => (
+                <option key={fund.fund_name} value={fund.fund_name}>
+                  {fund.fund_name}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="activation-role-switch" aria-label="Authenticated workflow role">
             <button className="active" disabled type="button">
@@ -851,6 +1036,12 @@ export default function DataActivationDashboardPage() {
             </button>
           </div>
         </div>
+
+        {fundAccessMessage && (
+          <div className="activation-note warning" role="status">
+            {fundAccessMessage}
+          </div>
+        )}
 
         <div className="activation-hero activation-command-hero">
           <div>
@@ -866,7 +1057,9 @@ export default function DataActivationDashboardPage() {
             <div className="activation-actions">
               <button
                 className="activation-primary-button"
-                disabled={loading || authLoading}
+                disabled={
+                  loading || authLoading || !fundAccessReady || !activeFundAccess
+                }
                 onClick={() => void loadActivationSnapshot()}
                 type="button"
               >

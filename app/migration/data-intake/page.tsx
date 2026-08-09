@@ -107,6 +107,14 @@ type ProcessApiResult = {
   summary?: ProcessSummary;
 };
 
+type GovernedFundOption = {
+  fund_name: string;
+  role: string;
+  can_view: boolean;
+  can_edit: boolean;
+  can_approve: boolean;
+};
+
 type CanonicalDataset = {
   sheetName: string;
   displayName: string;
@@ -1340,14 +1348,31 @@ function downloadLegacyTemplate(
 }
 
 export default function DataIntakeCommandCenterPage() {
-  const { session, activeRole } = useVentiqAuth();
-  const { activeFundName, isReady: fundContextReady } = useActiveFund(
-    "VENTIQ Growth Fund II"
-  );
+  const { session } = useVentiqAuth();
+  const {
+    activeFundName,
+    setActiveFundName,
+    isReady: fundContextReady,
+  } = useActiveFund("VENTIQ Growth Fund II");
 
+  const [authorisedFunds, setAuthorisedFunds] = useState<GovernedFundOption[]>([]);
+  const [fundAccessReady, setFundAccessReady] = useState(false);
+  const [fundAccessMessage, setFundAccessMessage] = useState("");
+
+  const activeFundAccess = useMemo(() => {
+    const normalizedActiveFund = activeFundName.trim().toLowerCase();
+    return (
+      authorisedFunds.find(
+        (fund) => fund.fund_name.trim().toLowerCase() === normalizedActiveFund
+      ) ?? null
+    );
+  }, [authorisedFunds, activeFundName]);
+
+  const effectiveFundRole = activeFundAccess?.role ?? "";
   const canManageIntake =
-    activeRole === "fund_admin" || activeRole === "maker";
-  const isCheckerView = activeRole === "checker";
+    Boolean(activeFundAccess?.can_edit) &&
+    (effectiveFundRole === "fund_admin" || effectiveFundRole === "maker");
+  const isCheckerView = effectiveFundRole === "checker";
 
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [message, setMessage] = useState("");
@@ -1362,7 +1387,99 @@ export default function DataIntakeCommandCenterPage() {
   useEffect(() => {
     const accessToken = session?.access_token;
 
-    if (!fundContextReady || !activeFundName.trim()) {
+    if (!fundContextReady) return;
+
+    if (!accessToken) {
+      setAuthorisedFunds([]);
+      setFundAccessMessage("Sign in to load your governed fund access.");
+      setFundAccessReady(true);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadGovernedFunds() {
+      setFundAccessReady(false);
+      setFundAccessMessage("");
+
+      try {
+        const response = await fetch("/api/fund-context", {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            result.error || "Unable to load governed VENTIQ fund context."
+          );
+        }
+
+        if (cancelled) return;
+
+        const funds = (result.funds ?? []) as GovernedFundOption[];
+        setAuthorisedFunds(funds);
+
+        if (funds.length === 0) {
+          setFundAccessMessage(
+            "No active fund access is available for this VENTIQ account."
+          );
+          setFundAccessReady(true);
+          return;
+        }
+
+        const normalizedActiveFund = activeFundName.trim().toLowerCase();
+        const currentFundIsAllowed = funds.some(
+          (fund) => fund.fund_name.trim().toLowerCase() === normalizedActiveFund
+        );
+
+        if (!currentFundIsAllowed) {
+          const nextFund = funds[0].fund_name;
+          setActiveFundName(nextFund);
+          setFundAccessMessage(
+            `Data Intake moved to your first authorised fund: ${nextFund}.`
+          );
+        }
+
+        setFundAccessReady(true);
+      } catch (error) {
+        if (cancelled) return;
+
+        setAuthorisedFunds([]);
+        setFundAccessMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to load governed VENTIQ fund context."
+        );
+        setFundAccessReady(true);
+      }
+    }
+
+    void loadGovernedFunds();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    fundContextReady,
+    session?.access_token,
+    activeFundName,
+    setActiveFundName,
+  ]);
+
+  useEffect(() => {
+    const accessToken = session?.access_token;
+
+    if (
+      !fundContextReady ||
+      !fundAccessReady ||
+      !activeFundName.trim() ||
+      !activeFundAccess
+    ) {
       return;
     }
 
@@ -1460,7 +1577,13 @@ export default function DataIntakeCommandCenterPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeFundName, fundContextReady, session?.access_token]);
+  }, [
+    activeFundName,
+    fundContextReady,
+    fundAccessReady,
+    activeFundAccess,
+    session?.access_token,
+  ]);
 
   useEffect(() => {
     if (!fundContextReady || !activeFundName.trim()) return;
@@ -1823,6 +1946,51 @@ export default function DataIntakeCommandCenterPage() {
           </Link>
         </div>
 
+        <div className="preview-card">
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">Governed Fund Context</p>
+              <h2>{activeFundName || "No authorised fund selected"}</h2>
+              <p>
+                Data Intake, restored batches and staged files remain scoped to the
+                selected authorised fund.
+              </p>
+            </div>
+
+            <span className="status-pill">
+              {fundAccessReady
+                ? activeFundAccess
+                  ? `${activeFundAccess.role} · ${activeFundAccess.can_edit ? "Edit" : "View"}`
+                  : "No Fund Access"
+                : "Loading Access"}
+            </span>
+          </div>
+
+          <label htmlFor="migration-intake-active-fund">
+            <strong>Switch active fund</strong>
+          </label>
+          <select
+            id="migration-intake-active-fund"
+            value={activeFundAccess ? activeFundName : ""}
+            onChange={(event) => setActiveFundName(event.target.value)}
+            disabled={!fundAccessReady || authorisedFunds.length === 0}
+          >
+            {authorisedFunds.length === 0 ? (
+              <option value="">No authorised funds available</option>
+            ) : (
+              authorisedFunds.map((fund) => (
+                <option key={fund.fund_name} value={fund.fund_name}>
+                  {fund.fund_name}
+                </option>
+              ))
+            )}
+          </select>
+
+          {fundAccessMessage && (
+            <div className="explain-box">{fundAccessMessage}</div>
+          )}
+        </div>
+
         <div className="sample-data-ribbon">
           Active fund: {activeFundName} · Canonical workbook · Deal cashflows ·
           Valuations · NAV · Investor PDFs
@@ -1867,7 +2035,7 @@ export default function DataIntakeCommandCenterPage() {
           <div className="action-row">
             <button
               className="monitor-btn monitor-btn-primary"
-              disabled={!fundContextReady}
+              disabled={!fundContextReady || !fundAccessReady || !activeFundAccess}
               onClick={() => downloadCanonicalWorkbook(activeFundName)}
               type="button"
             >
