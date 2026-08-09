@@ -22,6 +22,7 @@ type AuthorisedUser = {
   email: string;
   fullName: string;
   role: string;
+  organisationId: string;
 };
 
 type IntakeBatchRow = {
@@ -64,6 +65,7 @@ type ProcessingContext = {
   supabase: SupabaseAdmin;
   batchId: string;
   fundName: string;
+  organisationId: string;
   file: IntakeFile;
   investorIds: Map<string, string>;
   portfolioIds: Map<string, string>;
@@ -192,27 +194,27 @@ async function authoriseRequest(
     throw new Error("PROFILE_NOT_ACTIVE");
   }
 
+  const {
+    data: membership,
+    error: membershipError,
+  } = await supabase
+    .from("ventiq_organisation_members")
+    .select("organisation_id, role")
+    .eq("user_id", user.id)
+    .eq("status", "Active")
+    .order("is_primary", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (membershipError) {
+    throw new Error(
+      `Unable to load organisation membership: ${membershipError.message}`
+    );
+  }
+
   let role = String(profile.default_role || "").trim();
 
   if (!PROCESS_ROLES.has(role)) {
-    const {
-      data: membership,
-      error: membershipError,
-    } = await supabase
-      .from("ventiq_organisation_members")
-      .select("role")
-      .eq("user_id", user.id)
-      .eq("status", "Active")
-      .order("is_primary", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (membershipError) {
-      throw new Error(
-        `Unable to load organisation membership: ${membershipError.message}`
-      );
-    }
-
     role = String(membership?.role || "").trim();
   }
 
@@ -220,28 +222,40 @@ async function authoriseRequest(
     throw new Error("ROLE_NOT_ALLOWED");
   }
 
+  const {
+    data: fundAccess,
+    error: fundAccessError,
+  } = await supabase
+    .from("ventiq_user_fund_access")
+    .select("organisation_id, can_view, can_edit")
+    .eq("user_id", user.id)
+    .eq("status", "Active")
+    .ilike("fund_name", fundName)
+    .limit(1)
+    .maybeSingle();
+
+  if (fundAccessError) {
+    throw new Error(
+      `Unable to verify fund access: ${fundAccessError.message}`
+    );
+  }
+
+  // Preserve the existing Fund Admin operating model, while still deriving a
+  // tenant identity. Maker processing continues to require explicit fund edit
+  // access. Fund Admins use governed fund access when present, otherwise their
+  // active primary organisation membership.
   if (role !== "fund_admin") {
-    const {
-      data: fundAccess,
-      error: fundAccessError,
-    } = await supabase
-      .from("ventiq_user_fund_access")
-      .select("can_view, can_edit")
-      .eq("user_id", user.id)
-      .eq("status", "Active")
-      .ilike("fund_name", fundName)
-      .limit(1)
-      .maybeSingle();
-
-    if (fundAccessError) {
-      throw new Error(
-        `Unable to verify fund access: ${fundAccessError.message}`
-      );
-    }
-
     if (!fundAccess?.can_view || !fundAccess?.can_edit) {
       throw new Error("FUND_EDIT_ACCESS_REQUIRED");
     }
+  }
+
+  const organisationId = String(
+    fundAccess?.organisation_id || membership?.organisation_id || ""
+  ).trim();
+
+  if (!organisationId) {
+    throw new Error("ORGANISATION_CONTEXT_REQUIRED");
   }
 
   return {
@@ -251,6 +265,7 @@ async function authoriseRequest(
       profile.full_name || user.email || "VENTIQ User"
     ),
     role,
+    organisationId,
   };
 }
 
@@ -270,7 +285,8 @@ function getAuthErrorResponse(error: unknown) {
   if (
     message === "PROFILE_NOT_ACTIVE" ||
     message === "ROLE_NOT_ALLOWED" ||
-    message === "FUND_EDIT_ACCESS_REQUIRED"
+    message === "FUND_EDIT_ACCESS_REQUIRED" ||
+    message === "ORGANISATION_CONTEXT_REQUIRED"
   ) {
     return NextResponse.json(
       {
@@ -340,6 +356,38 @@ function parseNumber(value: unknown) {
 
 function getNumber(row: ParsedRow, keys: string[]) {
   return parseNumber(getValue(row, keys));
+}
+
+// Financial reporting data must distinguish a genuine zero from missing
+// evidence. This helper is intentionally used only where NULL carries that
+// meaning; the older getNumber helper remains unchanged for legacy modules.
+function getNullableNumber(row: ParsedRow, keys: string[]) {
+  const value = getValue(row, keys);
+
+  if (
+    value === undefined ||
+    value === null ||
+    (typeof value === "string" && value.trim() === "")
+  ) {
+    return null;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const cleaned = String(value)
+    .replace(/,/g, "")
+    .replace(/₹/g, "")
+    .replace(/%/g, "")
+    .trim();
+
+  if (!cleaned) {
+    return null;
+  }
+
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function parseBoolean(value: unknown, fallback = false) {
@@ -1962,6 +2010,310 @@ function makeLegacyCode(
   ).padStart(5, "0")}`;
 }
 
+type LegacyFinancialReportingMetadata = {
+  reportingDate: string | null;
+  reportingPeriod: string | null;
+  reportingDateCandidates: string[];
+  reportingPeriodCandidates: string[];
+};
+
+function getLegacyFinancialReportingMetadata(
+  rows: ParsedRow[]
+): LegacyFinancialReportingMetadata {
+  const dateCandidates = new Set<string>();
+  const periodCandidates = new Set<string>();
+
+  rows.forEach((row) => {
+    const reportingDate = getDate(row, [
+      "reporting_date",
+      "as_of_date",
+      "as_at_date",
+      "statement_date",
+      "valuation_date",
+    ]);
+
+    if (reportingDate) {
+      dateCandidates.add(reportingDate);
+    }
+
+    const reportingPeriod = getText(row, [
+      "reporting_period",
+      "statement_period",
+      "period",
+    ]);
+
+    if (reportingPeriod) {
+      periodCandidates.add(reportingPeriod);
+    }
+  });
+
+  const reportingDateCandidates = Array.from(dateCandidates).sort();
+  const reportingPeriodCandidates = Array.from(periodCandidates).sort();
+
+  return {
+    reportingDate:
+      reportingDateCandidates.length === 1
+        ? reportingDateCandidates[0]
+        : null,
+    reportingPeriod:
+      reportingPeriodCandidates.length === 1
+        ? reportingPeriodCandidates[0]
+        : null,
+    reportingDateCandidates,
+    reportingPeriodCandidates,
+  };
+}
+
+function sumKnownNumbers(values: Array<number | null>) {
+  const known = values.filter((value): value is number => value !== null);
+  return known.length > 0
+    ? known.reduce((total, value) => total + value, 0)
+    : null;
+}
+
+function averageKnownNumbers(values: Array<number | null>) {
+  const known = values.filter((value): value is number => value !== null);
+  return known.length > 0
+    ? known.reduce((total, value) => total + value, 0) / known.length
+    : null;
+}
+
+async function ensureLegacyInvestorFinancialBatch(
+  rows: ParsedRow[],
+  sheetName: string,
+  context: ProcessingContext,
+  stats: FileStats
+) {
+  const metadata = getLegacyFinancialReportingMetadata(rows);
+
+  if (metadata.reportingDateCandidates.length === 0) {
+    stats.warningRows += 1;
+    stats.issues.push(
+      makeIssue(
+        context,
+        "legacy_investor_positions",
+        sheetName,
+        null,
+        "Warning",
+        "FINANCIAL_REPORTING_DATE_MISSING",
+        "Investor financial data was imported without an authoritative reporting date. The financial batch remains draft and cannot become investor-statement eligible until the as-of date is established."
+      )
+    );
+  } else if (metadata.reportingDateCandidates.length > 1) {
+    stats.warningRows += 1;
+    stats.issues.push(
+      makeIssue(
+        context,
+        "legacy_investor_positions",
+        sheetName,
+        null,
+        "Warning",
+        "FINANCIAL_REPORTING_DATE_AMBIGUOUS",
+        `Multiple reporting dates were found in one investor financial file: ${metadata.reportingDateCandidates.join(
+          ", "
+        )}. No reporting date was assigned to the batch.`
+      )
+    );
+  }
+
+  if (metadata.reportingPeriodCandidates.length > 1) {
+    stats.warningRows += 1;
+    stats.issues.push(
+      makeIssue(
+        context,
+        "legacy_investor_positions",
+        sheetName,
+        null,
+        "Warning",
+        "FINANCIAL_REPORTING_PERIOD_AMBIGUOUS",
+        `Multiple reporting periods were found in one investor financial file: ${metadata.reportingPeriodCandidates.join(
+          ", "
+        )}. No reporting period was assigned to the batch.`
+      )
+    );
+  }
+
+  let fundNavSnapshotId: string | null = null;
+  let fundNavReportingPeriod: string | null = null;
+
+  // A Fund NAV snapshot may corroborate a source-supplied reporting date, but it
+  // must never be used to invent a date that the investor file did not contain.
+  if (metadata.reportingDate) {
+    const {
+      data: navAnchor,
+      error: navAnchorError,
+    } = await context.supabase
+      .from("fund_nav_snapshots")
+      .select("id, reporting_period, approved_at")
+      .eq("fund_name", context.fundName)
+      .eq("reporting_date", metadata.reportingDate)
+      .eq("status", "Approved")
+      .order("approved_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (navAnchorError) {
+      throw new Error(
+        `Unable to verify the approved Fund NAV reporting anchor: ${navAnchorError.message}`
+      );
+    }
+
+    if (navAnchor?.id) {
+      fundNavSnapshotId = String(navAnchor.id);
+      fundNavReportingPeriod = navAnchor.reporting_period
+        ? String(navAnchor.reporting_period)
+        : null;
+    } else {
+      stats.warningRows += 1;
+      stats.issues.push(
+        makeIssue(
+          context,
+          "legacy_investor_positions",
+          sheetName,
+          null,
+          "Warning",
+          "APPROVED_FUND_NAV_ANCHOR_NOT_FOUND",
+          `The investor file supplied reporting date ${metadata.reportingDate}, but no approved Fund NAV snapshot exists for the same date. The source date is retained, but Fund Memory reconciliation will remain incomplete.`
+        )
+      );
+    }
+  }
+
+  const investorCodes = rows
+    .map((row) =>
+      getText(row, ["investor_code", "investor_id", "lp_code"])
+    )
+    .filter(Boolean);
+
+  const uniqueInvestorCount = new Set(
+    investorCodes.map((value) => normalizeIdentity(value))
+  ).size;
+
+  const commitments = rows.map((row) =>
+    getNullableNumber(row, ["commitment_amount", "commitment"])
+  );
+  const called = rows.map((row) =>
+    getNullableNumber(row, [
+      "capital_called_till_date",
+      "capital_called",
+    ])
+  );
+  const uncalled = rows.map((row) =>
+    getNullableNumber(row, [
+      "uncalled_capital",
+      "remaining_commitment",
+    ])
+  );
+  const distributed = rows.map((row) =>
+    getNullableNumber(row, [
+      "distributions_till_date",
+      "distributed",
+      "distributions",
+    ])
+  );
+  const irrValues = rows.map((row) =>
+    getNullableNumber(row, ["investor_irr", "net_irr", "irr"])
+  );
+  const moicValues = rows.map((row) =>
+    getNullableNumber(row, ["investor_moic", "moic"])
+  );
+
+  const reportingPeriod =
+    metadata.reportingPeriod || fundNavReportingPeriod || null;
+
+  const reportingDateEvidence = {
+    migration_intake_batch_id: context.batchId,
+    migration_file_upload_id: context.file.id,
+    source_file_name:
+      context.file.original_file_name || "Unknown investor file",
+    source_sheet_name: sheetName,
+    reporting_date_candidates: metadata.reportingDateCandidates,
+    reporting_period_candidates: metadata.reportingPeriodCandidates,
+    fund_nav_snapshot_id: fundNavSnapshotId,
+    rule:
+      "Reporting date is accepted only when exactly one source-supplied as-of date is present. Fund NAV may corroborate that date but never supplies a missing date.",
+  };
+
+  const batchPayload = {
+    organisation_id: context.organisationId,
+    fund_name: context.fundName,
+    total_investors: uniqueInvestorCount,
+    total_commitment: sumKnownNumbers(commitments),
+    total_called: sumKnownNumbers(called),
+    total_uncalled: sumKnownNumbers(uncalled),
+    total_distributed: sumKnownNumbers(distributed),
+    average_irr: averageKnownNumbers(irrValues),
+    average_moic: averageKnownNumbers(moicValues),
+    status: "draft",
+    reporting_date: metadata.reportingDate,
+    reporting_period: reportingPeriod,
+    fund_nav_snapshot_id: fundNavSnapshotId,
+    reporting_date_source: metadata.reportingDate
+      ? "migration_file"
+      : null,
+    reporting_date_evidence: reportingDateEvidence,
+    updated_at: new Date().toISOString(),
+  };
+
+  const {
+    data: existingBatch,
+    error: existingBatchError,
+  } = await context.supabase
+    .from("investor_financial_migration_batches")
+    .select("id")
+    .eq("organisation_id", context.organisationId)
+    .eq("fund_name", context.fundName)
+    .contains("reporting_date_evidence", {
+      migration_file_upload_id: context.file.id,
+    })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingBatchError) {
+    throw new Error(
+      `Unable to inspect the investor financial batch: ${existingBatchError.message}`
+    );
+  }
+
+  if (existingBatch?.id) {
+    const { error: updateError } = await context.supabase
+      .from("investor_financial_migration_batches")
+      .update(batchPayload)
+      .eq("id", existingBatch.id);
+
+    if (updateError) {
+      throw new Error(
+        `Unable to update the investor financial batch: ${updateError.message}`
+      );
+    }
+
+    stats.updatedRows += 1;
+    addSummary(stats.summary, "investorFinancialBatchRows", 1);
+    return String(existingBatch.id);
+  }
+
+  const {
+    data: createdBatch,
+    error: createBatchError,
+  } = await context.supabase
+    .from("investor_financial_migration_batches")
+    .insert(batchPayload)
+    .select("id")
+    .single();
+
+  if (createBatchError || !createdBatch?.id) {
+    throw new Error(
+      createBatchError?.message ||
+        "Unable to create the investor financial reporting batch."
+    );
+  }
+
+  stats.insertedRows += 1;
+  addSummary(stats.summary, "investorFinancialBatchRows", 1);
+  return String(createdBatch.id);
+}
+
 async function processLegacyInvestorWorkbook(
   workbook: XLSX.WorkBook,
   context: ProcessingContext,
@@ -2033,6 +2385,17 @@ async function processLegacyInvestorWorkbook(
     { countRows: false }
   );
 
+  // Every investor financial position imported from this legacy workbook now
+  // belongs to one governed reporting batch. If the file does not establish an
+  // as-of date, the batch is still created but remains draft with explicit
+  // lineage and a validation warning. We never infer the date from Fund NAV.
+  const financialBatchId = await ensureLegacyInvestorFinancialBatch(
+    result.rows,
+    result.sheetName,
+    context,
+    stats
+  );
+
   const legacyCashflowDefinition: DatasetDefinition = {
     ...cashflowDefinition,
     mapRow: (row, ctx, sourceRowNumber) => {
@@ -2065,7 +2428,6 @@ async function processLegacyInvestorWorkbook(
   const positionRows: DatabaseRow[] = [];
 
   result.rows.forEach((row, index) => {
-    const sourceRowNumber = index + 2;
     const investorCode = getText(row, [
       "investor_code",
       "investor_id",
@@ -2079,77 +2441,90 @@ async function processLegacyInvestorWorkbook(
     const investorId =
       context.investorIds.get(normalizeIdentity(investorCode)) || null;
 
+    const commitmentAmount = getNullableNumber(row, [
+      "commitment_amount",
+      "commitment",
+    ]);
+    const capitalCalled = getNullableNumber(row, [
+      "capital_called_till_date",
+      "capital_called",
+    ]);
+    const uncalledCapital = getNullableNumber(row, [
+      "uncalled_capital",
+      "remaining_commitment",
+    ]);
+    const distributions = getNullableNumber(row, [
+      "distributions_till_date",
+      "distributed",
+      "distributions",
+    ]);
+    const currentNav = getNullableNumber(row, [
+      "current_nav",
+      "nav",
+      "latest_nav",
+    ]);
+    const investorDpi = getNullableNumber(row, ["investor_dpi", "dpi"]);
+    const investorTvpi = getNullableNumber(row, ["investor_tvpi", "tvpi"]);
+    const investorMoic = getNullableNumber(row, ["investor_moic", "moic"]);
+    const investorIrr = getNullableNumber(row, [
+      "investor_irr",
+      "net_irr",
+    ]);
+    const grossIrr = getNullableNumber(row, ["gross_irr", "irr"]);
+    const netIrr = getNullableNumber(row, ["net_irr"]);
+
     positionRows.push({
-      import_batch_id: context.batchId,
+      financial_batch_id: financialBatchId,
       investor_id: investorId,
       investor_code: investorCode,
       investor_name: getText(row, ["investor_name", "lp_name", "name"]),
       email: getText(row, ["email", "email_id"]),
       fund_name: context.fundName,
       class_name: getText(row, ["class_name", "class"]),
-      commitment_amount: getNumber(row, ["commitment_amount", "commitment"]),
-      capital_called_till_date: getNumber(row, [
-        "capital_called_till_date",
-        "capital_called",
-      ]),
-      uncalled_capital: getNumber(row, [
-        "uncalled_capital",
-        "remaining_commitment",
-      ]),
-      distributions_till_date: getNumber(row, [
-        "distributions_till_date",
-        "distributed",
-        "distributions",
-      ]),
-      setup_fee: getNumber(row, ["setup_fee"]),
-      management_fee: getNumber(row, ["management_fee"]),
-      net_contributed: getNumber(row, ["net_contributed"]),
-      current_nav: getNumber(row, ["current_nav", "nav", "latest_nav"]),
-      investor_irr: getNumber(row, ["investor_irr", "net_irr"]),
-      investor_moic: getNumber(row, ["investor_moic", "moic"]),
-      investor_dpi: getNumber(row, ["investor_dpi", "dpi"]),
-      investor_tvpi: getNumber(row, ["investor_tvpi", "tvpi"]),
-      status: getText(row, ["status"]) || "Ready",
-      capital_called: getNumber(row, [
-        "capital_called",
-        "capital_called_till_date",
-      ]),
-      distributions: getNumber(row, [
-        "distributions",
-        "distributions_till_date",
-        "distributed",
-      ]),
-      nav: getNumber(row, ["nav", "latest_nav"]),
-      dpi: getNumber(row, ["dpi"]),
-      tvpi: getNumber(row, ["tvpi"]),
-      moic: getNumber(row, ["moic"]),
-      gross_irr: getNumber(row, ["gross_irr", "irr"]),
-      net_irr: getNumber(row, ["net_irr"]),
-      _source_row_number: sourceRowNumber,
+      commitment_amount: commitmentAmount,
+      capital_called_till_date: capitalCalled,
+      uncalled_capital: uncalledCapital,
+      distributions_till_date: distributions,
+      setup_fee: getNullableNumber(row, ["setup_fee"]),
+      management_fee: getNullableNumber(row, ["management_fee"]),
+      net_contributed: getNullableNumber(row, ["net_contributed"]),
+      current_nav: currentNav,
+      investor_irr: investorIrr,
+      investor_moic: investorMoic,
+      investor_dpi: investorDpi,
+      investor_tvpi: investorTvpi,
+      // Raw migrated positions are evidence, not approved Fund Memory. They
+      // remain in Review until reconciliation/validation/approval occurs.
+      status: "Review",
+      capital_called: capitalCalled,
+      distributions,
+      nav: currentNav,
+      dpi: investorDpi,
+      tvpi: investorTvpi,
+      moic: investorMoic,
+      gross_irr: grossIrr,
+      net_irr: netIrr,
     });
   });
 
   const positionDefinition: SyncDefinition = {
     datasetKey: "legacy_investor_positions",
     table: "investor_financial_positions",
-    selectColumns: "id, fund_name, investor_code",
-    existingFilters: { fund_name: context.fundName },
+    selectColumns: "id, fund_name, investor_code, financial_batch_id",
+    existingFilters: {
+      fund_name: context.fundName,
+      financial_batch_id: financialBatchId,
+    },
     summaryKey: "investorFinancialPositionRows",
     makeKey: (row) =>
       `${normalizeIdentity(row.fund_name)}|${normalizeIdentity(
-        row.investor_code
-      )}`,
+        row.financial_batch_id
+      )}|${normalizeIdentity(row.investor_code)}`,
   };
-
-  const cleanedPositionRows = positionRows.map((row) => {
-    const cleaned = { ...row };
-    delete cleaned._source_row_number;
-    return cleaned;
-  });
 
   await syncRows(
     positionDefinition,
-    cleanedPositionRows,
+    positionRows,
     context,
     stats,
     result.sheetName
@@ -3051,6 +3426,7 @@ export async function POST(request: NextRequest) {
       supabase,
       batchId,
       fundName,
+      organisationId: actor.organisationId,
       investorIds: new Map<string, string>(),
       portfolioIds: new Map<string, string>(),
       fundMasterId: null,

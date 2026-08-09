@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 
@@ -29,7 +30,8 @@ type UploadStatus =
   | "Duplicate"
   | "Processed"
   | "Failed"
-  | "Review";
+  | "Review"
+  | "Reselect Required";
 
 type UploadedFile = {
   id: string;
@@ -115,6 +117,121 @@ type CanonicalDataset = {
 };
 
 const MAX_FILES_PER_UPLOAD_REQUEST = 10;
+const STAGED_STORAGE_PREFIX = "ventiq.migrationIntake.staged.";
+
+const LOCAL_PENDING_STATUSES = new Set<UploadStatus>([
+  "Staged",
+  "Review",
+  "Failed",
+  "Reselect Required",
+]);
+
+type VentiqMigrationWindow = Window & {
+  __ventiqMigrationIntakeStagedFiles?: Record<string, UploadedFile[]>;
+};
+
+function fundStateKey(fundName: string) {
+  return fundName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+function stagedStorageKey(fundName: string) {
+  return `${STAGED_STORAGE_PREFIX}${fundStateKey(fundName)}`;
+}
+
+function fileIdentity(file: Pick<UploadedFile, "category" | "datasetKey" | "name" | "size">) {
+  return `${file.category}|${file.datasetKey}|${file.name}|${file.size}`;
+}
+
+function getInMemoryStagedFiles(fundName: string): UploadedFile[] {
+  if (typeof window === "undefined") return [];
+
+  const ventiqWindow = window as VentiqMigrationWindow;
+  return (
+    ventiqWindow.__ventiqMigrationIntakeStagedFiles?.[fundStateKey(fundName)] ?? []
+  );
+}
+
+function setInMemoryStagedFiles(fundName: string, files: UploadedFile[]) {
+  if (typeof window === "undefined") return;
+
+  const ventiqWindow = window as VentiqMigrationWindow;
+  ventiqWindow.__ventiqMigrationIntakeStagedFiles ??= {};
+  ventiqWindow.__ventiqMigrationIntakeStagedFiles[fundStateKey(fundName)] = files;
+}
+
+function readPersistedStagedFiles(fundName: string): UploadedFile[] {
+  if (typeof window === "undefined") return [];
+
+  const inMemoryFiles = getInMemoryStagedFiles(fundName);
+  if (inMemoryFiles.length > 0) {
+    return inMemoryFiles;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(stagedStorageKey(fundName));
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw) as Array<Omit<UploadedFile, "file">>;
+
+    return parsed.map((file) => ({
+      ...file,
+      file: undefined,
+      status: "Reselect Required" as UploadStatus,
+      error:
+        "This file was staged before a browser reload. Reselect the same file to continue the upload.",
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function persistPendingStagedFiles(fundName: string, files: UploadedFile[]) {
+  if (typeof window === "undefined") return;
+
+  const localPendingFiles = files.filter(
+    (file) =>
+      LOCAL_PENDING_STATUSES.has(file.status) &&
+      (Boolean(file.file) || file.status === "Reselect Required")
+  );
+
+  setInMemoryStagedFiles(fundName, localPendingFiles);
+
+  try {
+    if (localPendingFiles.length === 0) {
+      window.sessionStorage.removeItem(stagedStorageKey(fundName));
+      return;
+    }
+
+    const serializableFiles = localPendingFiles.map(({ file: _file, ...metadata }) => ({
+      ...metadata,
+      status: "Reselect Required" as UploadStatus,
+      error:
+        "This file was staged before a browser reload. Reselect the same file to continue the upload.",
+    }));
+
+    window.sessionStorage.setItem(
+      stagedStorageKey(fundName),
+      JSON.stringify(serializableFiles)
+    );
+  } catch {
+    // Session persistence is a convenience layer only. Server-side uploaded
+    // batches remain the authoritative source of truth.
+  }
+}
+
+function mergeServerAndLocalFiles(
+  serverFiles: UploadedFile[],
+  localFiles: UploadedFile[]
+): UploadedFile[] {
+  const serverIdentities = new Set(serverFiles.map(fileIdentity));
+  const localPendingFiles = localFiles.filter(
+    (file) =>
+      LOCAL_PENDING_STATUSES.has(file.status) &&
+      !serverIdentities.has(fileIdentity(file))
+  );
+
+  return [...localPendingFiles, ...serverFiles];
+}
 
 function formatFileSize(size: number) {
   if (size < 1024) return `${size} B`;
@@ -1245,11 +1362,24 @@ export default function DataIntakeCommandCenterPage() {
   useEffect(() => {
     const accessToken = session?.access_token;
 
-    if (
-      !fundContextReady ||
-      !activeFundName.trim() ||
-      !accessToken
-    ) {
+    if (!fundContextReady || !activeFundName.trim()) {
+      return;
+    }
+
+    const restoredLocalFiles = readPersistedStagedFiles(activeFundName);
+
+    setUploadedFiles(restoredLocalFiles);
+    setBatchId("");
+    setBatchProcessingStatus("");
+    setProcessMessage("");
+    setMessage(
+      restoredLocalFiles.length > 0
+        ? `${restoredLocalFiles.length} staged file(s) restored for ${activeFundName}.`
+        : ""
+    );
+
+    if (!accessToken) {
+      setIsLoadingBatch(false);
       return;
     }
 
@@ -1285,17 +1415,19 @@ export default function DataIntakeCommandCenterPage() {
         if (!result.batch) {
           setBatchId("");
           setBatchProcessingStatus("");
-          setUploadedFiles([]);
+          setUploadedFiles((current) => mergeServerAndLocalFiles([], current));
           return;
         }
 
+        const serverFiles = (result.files ?? []).map((file) => ({
+          ...file,
+          file: undefined,
+        }));
+
         setBatchId(result.batch.id);
         setBatchProcessingStatus(result.batch.processingStatus);
-        setUploadedFiles(
-          (result.files ?? []).map((file) => ({
-            ...file,
-            file: undefined,
-          }))
+        setUploadedFiles((current) =>
+          mergeServerAndLocalFiles(serverFiles, current)
         );
         setMessage(
           `Restored migration batch ${result.batch.id}. Uploaded files: ${
@@ -1328,11 +1460,12 @@ export default function DataIntakeCommandCenterPage() {
     return () => {
       cancelled = true;
     };
-  }, [
-    activeFundName,
-    fundContextReady,
-    session?.access_token,
-  ]);
+  }, [activeFundName, fundContextReady, session?.access_token]);
+
+  useEffect(() => {
+    if (!fundContextReady || !activeFundName.trim()) return;
+    persistPendingStagedFiles(activeFundName, uploadedFiles);
+  }, [activeFundName, fundContextReady, uploadedFiles]);
 
   function handleFilesSelected(
     category: IntakeCategory,
@@ -1366,13 +1499,33 @@ export default function DataIntakeCommandCenterPage() {
     });
 
     setUploadedFiles((current) => {
-      const existingIds = new Set(current.map((file) => file.id));
-      const uniqueNewFiles = newFiles.filter((file) => !existingIds.has(file.id));
-      return [...uniqueNewFiles, ...current];
+      const nextFiles = [...current];
+
+      newFiles.forEach((newFile) => {
+        const existingIndex = nextFiles.findIndex(
+          (existingFile) => fileIdentity(existingFile) === fileIdentity(newFile)
+        );
+
+        if (existingIndex === -1) {
+          nextFiles.unshift(newFile);
+          return;
+        }
+
+        const existingFile = nextFiles[existingIndex];
+
+        if (
+          existingFile.status === "Reselect Required" ||
+          (existingFile.status === "Failed" && !existingFile.file)
+        ) {
+          nextFiles[existingIndex] = newFile;
+        }
+      });
+
+      return nextFiles;
     });
 
     setMessage(
-      `${newFiles.length} file(s) staged. Uploads will run in batches of ${MAX_FILES_PER_UPLOAD_REQUEST}.`
+      `${newFiles.length} file(s) staged. VENTIQ will keep this queue while you navigate between pages. Uploads will run in batches of ${MAX_FILES_PER_UPLOAD_REQUEST}.`
     );
   }
 
@@ -1495,12 +1648,13 @@ export default function DataIntakeCommandCenterPage() {
             if (!uploadedResult) return file;
 
             if (uploadedResult.status === "Uploaded") {
-              return { ...file, status: "Uploaded", error: "" };
+              return { ...file, file: undefined, status: "Uploaded", error: "" };
             }
 
             if (uploadedResult.status === "Duplicate") {
               return {
                 ...file,
+                file: undefined,
                 status: "Duplicate",
                 error: uploadedResult.error || "Duplicate file skipped.",
               };
@@ -1664,9 +1818,9 @@ export default function DataIntakeCommandCenterPage() {
             </p>
           </div>
 
-          <a className="back-link" href="/migration">
+          <Link className="back-link" href="/migration">
             Back to Migration
-          </a>
+          </Link>
         </div>
 
         <div className="sample-data-ribbon">
@@ -1720,12 +1874,12 @@ export default function DataIntakeCommandCenterPage() {
               Download Canonical Workbook
             </button>
 
-            <a
+            <Link
               className="monitor-btn monitor-btn-secondary"
               href="/migration/activation"
             >
               Open Activation Dashboard
-            </a>
+            </Link>
           </div>
         </div>
 
@@ -2022,12 +2176,12 @@ export default function DataIntakeCommandCenterPage() {
               </>
             )}
 
-            <a
+            <Link
               className="monitor-btn monitor-btn-secondary"
               href="/migration/pdf-intelligence"
             >
               Open PDF Intelligence
-            </a>
+            </Link>
           </div>
 
           {!canManageIntake && !isLoadingBatch && (
@@ -2055,6 +2209,14 @@ export default function DataIntakeCommandCenterPage() {
               Processing status: <strong>{batchProcessingStatus || "Not Started"}</strong>
             </div>
           )}
+        </div>
+
+        <div className="logic-note">
+          Workflow stability: uploaded batches are restored from the server. Files
+          staged but not yet uploaded are retained while you move between VENTIQ
+          pages in the same browser session. After a full browser refresh, the
+          staged queue remains visible but the browser requires you to reselect the
+          original file before uploading it.
         </div>
 
         <div className="preview-card">
