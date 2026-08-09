@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 import { useVentiqAuth } from "../../../lib/auth/AuthProvider";
@@ -1009,9 +1010,9 @@ export default function DataActivationDashboardPage() {
     <main className="activation-page">
       <section className="activation-shell">
         <div className="activation-topbar">
-          <a className="activation-brand" href="/">
+          <Link className="activation-brand" href="/">
             VENTIQ
-          </a>
+          </Link>
           <div className="activation-fund-context">
             <span>Activation fund</span>
             <select
@@ -1065,15 +1066,15 @@ export default function DataActivationDashboardPage() {
               >
                 {loading ? "Refreshing..." : "Refresh Readiness"}
               </button>
-              <a className="activation-secondary-button" href="/migration/data-intake">
+              <Link className="activation-secondary-button" href="/migration/data-intake">
                 Data Intake
-              </a>
-              <a className="activation-secondary-button" href="/migration/stakeholder-launch">
+              </Link>
+              <Link className="activation-secondary-button" href="/migration/stakeholder-launch">
                 Stakeholder Launch
-              </a>
-              <a className="activation-secondary-button" href="/admin/audit-workflow">
+              </Link>
+              <Link className="activation-secondary-button" href="/admin/audit-workflow">
                 Audit Workflow
-              </a>
+              </Link>
             </div>
           </div>
 
@@ -1282,9 +1283,9 @@ export default function DataActivationDashboardPage() {
                 )}
 
                 <div className="activation-card-actions">
-                  <a className="activation-card-link" href={layer.route}>
+                  <Link className="activation-card-link" href={layer.route}>
                     Open workspace →
-                  </a>
+                  </Link>
 
                   {canSubmitApprovals && (
                     <button

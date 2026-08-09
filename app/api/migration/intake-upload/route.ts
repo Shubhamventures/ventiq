@@ -467,6 +467,63 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const { data: issueData, error: issueError } = await supabase
+      .from("migration_validation_issues")
+      .select(
+        "id, batch_id, file_upload_id, fund_name, dataset_key, source_file_name, source_sheet_name, source_row_number, severity, issue_code, field_name, message, resolution_status"
+      )
+      .eq("batch_id", batchData.id)
+      .ilike("fund_name", fundName)
+      .eq("resolution_status", "Open");
+
+    if (issueError) {
+      throw new Error(
+        `Unable to load migration validation issues: ${issueError.message}`
+      );
+    }
+
+    const issues = (Array.isArray(issueData) ? issueData : []).map(
+      (issue: any) => ({
+        id: String(issue.id || ""),
+        batchId: String(issue.batch_id || batchData.id),
+        fileUploadId: String(issue.file_upload_id || ""),
+        fundName: String(issue.fund_name || fundName),
+        datasetKey: String(issue.dataset_key || "unknown"),
+        sourceFileName: String(issue.source_file_name || "Unknown file"),
+        sourceSheetName: issue.source_sheet_name
+          ? String(issue.source_sheet_name)
+          : null,
+        sourceRowNumber:
+          issue.source_row_number === null ||
+          issue.source_row_number === undefined
+            ? null
+            : Number(issue.source_row_number),
+        severity: String(issue.severity || "Warning"),
+        issueCode: String(issue.issue_code || "VALIDATION_ISSUE"),
+        fieldName: issue.field_name ? String(issue.field_name) : null,
+        message: String(issue.message || "Migration validation issue."),
+        resolutionStatus: String(issue.resolution_status || "Open"),
+      })
+    );
+
+    const issueSummary = issues.reduce(
+      (
+        summary: { total: number; errors: number; warnings: number },
+        issue: { severity: string }
+      ) => {
+        summary.total += 1;
+
+        if (issue.severity.trim().toLowerCase() === "error") {
+          summary.errors += 1;
+        } else {
+          summary.warnings += 1;
+        }
+
+        return summary;
+      },
+      { total: 0, errors: 0, warnings: 0 }
+    );
+
     const files = (Array.isArray(fileData) ? fileData : []).map((file: any) => {
       const processingStatus = String(file.processing_status || "");
       const uploadStatus = String(file.upload_status || "Uploaded");
@@ -514,6 +571,8 @@ export async function GET(request: NextRequest) {
         processedAt: batchData.processed_at || null,
       },
       files,
+      issues,
+      issueSummary,
     });
   } catch (error) {
     const authResponse = getAuthErrorResponse(error);

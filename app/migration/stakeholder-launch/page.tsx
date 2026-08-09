@@ -1,20 +1,57 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import { useVentiqAuth } from "../../../lib/auth/AuthProvider";
+import { useActiveFund } from "../../../lib/useActiveFund";
 
 type LayerKey = "investor" | "pdf" | "portfolio" | "fund" | "compliance";
 type LaunchStatus = "Ready" | "Partial" | "Not Started" | "Needs Review";
 
-type LayerState = {
+type GovernedFundOption = {
+  fund_name: string;
+  role: string;
+  can_view: boolean;
+  can_edit: boolean;
+  can_approve: boolean;
+};
+
+type ApiLayer = {
   key: LayerKey;
   title: string;
-  ready: boolean;
+  source_table: string;
+  source_batch_id: string;
+  batch_name: string;
+  data_ready: boolean;
+  approval_status: string;
+  approved: boolean;
+  operational: boolean;
   count: number;
-  batchName: string;
-  primaryMetric: string;
-  secondaryMetric: string;
-  warningCount: number;
+  primary_metric: string;
+  secondary_metric: string;
+  warning_count: number;
+  blockers: string[];
+};
+
+type LaunchSnapshot = {
+  ok?: boolean;
+  error?: string;
+  fund?: GovernedFundOption;
+  activation?: {
+    status: string;
+    readiness_score: number;
+    activated_at: string;
+    activated_by: string;
+    is_active: boolean;
+    using_frozen_batch_map: boolean;
+  };
+  layers?: ApiLayer[];
+  summary?: {
+    operational_layers: number;
+    total_layers: number;
+    launch_gate_open: boolean;
+  };
 };
 
 type StakeholderCard = {
@@ -25,13 +62,14 @@ type StakeholderCard = {
   requiredLayers: LayerKey[];
   status: LaunchStatus;
   missingLayers: LayerKey[];
+  blockers: string[];
   metrics: {
     label: string;
     value: string;
   }[];
 };
 
-type DataState = Record<LayerKey, LayerState>;
+const DEFAULT_FUND_NAME = "VENTIQ Growth Fund II";
 
 const layerLabels: Record<LayerKey, string> = {
   investor: "Investor Data",
@@ -41,62 +79,24 @@ const layerLabels: Record<LayerKey, string> = {
   compliance: "Compliance Data",
 };
 
-const defaultDataState: DataState = {
-  investor: {
-    key: "investor",
-    title: "Investor Data",
-    ready: false,
-    count: 0,
-    batchName: "No batch loaded",
-    primaryMetric: "₹0.00 Cr commitment",
-    secondaryMetric: "0 investors",
-    warningCount: 0,
-  },
-  pdf: {
-    key: "pdf",
-    title: "PDF Intelligence",
-    ready: false,
-    count: 0,
-    batchName: "No batch loaded",
-    primaryMetric: "0 PDFs",
-    secondaryMetric: "0 review items",
-    warningCount: 0,
-  },
-  portfolio: {
-    key: "portfolio",
-    title: "Portfolio Data",
-    ready: false,
-    count: 0,
-    batchName: "No batch loaded",
-    primaryMetric: "₹0.00 Cr value",
-    secondaryMetric: "0 at-risk",
-    warningCount: 0,
-  },
-  fund: {
-    key: "fund",
-    title: "Fund Data",
-    ready: false,
-    count: 0,
-    batchName: "No batch loaded",
-    primaryMetric: "₹0.00 Cr committed",
-    secondaryMetric: "0% carry",
-    warningCount: 0,
-  },
-  compliance: {
-    key: "compliance",
-    title: "Compliance Data",
-    ready: false,
-    count: 0,
-    batchName: "No batch loaded",
-    primaryMetric: "0 items",
-    secondaryMetric: "0 high-risk",
-    warningCount: 0,
-  },
-};
-
-function formatCr(value: number) {
-  return `₹${(value / 10000000).toFixed(2)} Cr`;
-}
+const emptyLayers: ApiLayer[] = (
+  ["investor", "pdf", "portfolio", "fund", "compliance"] as LayerKey[]
+).map((key) => ({
+  key,
+  title: layerLabels[key],
+  source_table: "",
+  source_batch_id: "",
+  batch_name: "No governed batch loaded",
+  data_ready: false,
+  approval_status: "Draft",
+  approved: false,
+  operational: false,
+  count: 0,
+  primary_metric: "No governed data",
+  secondary_metric: "Not ready",
+  warning_count: 0,
+  blockers: ["SOURCE_BATCH_MISSING"],
+}));
 
 function getStatusClass(status: LaunchStatus) {
   if (status === "Ready") return "healthy";
@@ -105,125 +105,72 @@ function getStatusClass(status: LaunchStatus) {
   return "neutral";
 }
 
-function evaluateStakeholderStatus(
-  requiredLayers: LayerKey[],
-  dataState: DataState
-) {
-  const missingLayers = requiredLayers.filter(
-    (layerKey) => !dataState[layerKey].ready
-  );
-
-  const warningCount = requiredLayers.reduce(
-    (sum, layerKey) => sum + dataState[layerKey].warningCount,
-    0
-  );
-
-  if (missingLayers.length === requiredLayers.length) {
-    return {
-      status: "Not Started" as LaunchStatus,
-      missingLayers,
-    };
-  }
-
-  if (missingLayers.length > 0) {
-    return {
-      status: "Partial" as LaunchStatus,
-      missingLayers,
-    };
-  }
-
-  if (warningCount > 0) {
-    return {
-      status: "Needs Review" as LaunchStatus,
-      missingLayers,
-    };
-  }
-
-  return {
-    status: "Ready" as LaunchStatus,
-    missingLayers,
+function humanizeBlocker(code: string) {
+  const labels: Record<string, string> = {
+    SOURCE_BATCH_MISSING: "source batch missing",
+    CHECKER_APPROVAL_REQUIRED: "checker approval required",
+    FUND_ACTIVATION_REQUIRED: "fund activation required",
+    INVESTOR_RECORDS_MISSING: "investor records missing",
+    INVESTOR_COMMITMENT_MISSING: "investor commitment missing",
+    INVESTOR_BATCH_NOT_FINAL: "investor batch not final",
+    PDF_FILES_MISSING: "PDF files missing",
+    PDF_REVIEW_REQUIRED: "PDF review required",
+    PDF_UNMATCHED: "unmatched PDFs remain",
+    PDF_CLASSIFICATION_INCOMPLETE: "PDF classification incomplete",
+    PORTFOLIO_RECORDS_MISSING: "portfolio records missing",
+    PORTFOLIO_VALUE_MISSING: "portfolio value missing",
+    FUND_RECORD_MISSING: "fund record missing",
+    FUND_COMMITMENT_MISSING: "fund commitment missing",
+    COMPLIANCE_ITEMS_MISSING: "compliance items missing",
+    COMPLIANCE_REVIEW_REQUIRED: "compliance review required",
+    COMPLIANCE_HIGH_RISK_OPEN: "high-risk compliance items open",
+    COMPLIANCE_EVIDENCE_MISSING: "compliance evidence missing",
   };
+
+  return labels[code] ?? code.toLowerCase().replaceAll("_", " ");
 }
 
-function buildStakeholders(dataState: DataState): StakeholderCard[] {
-  const stakeholderDefinitions = [
+function buildStakeholders(layers: ApiLayer[]): StakeholderCard[] {
+  const byKey = new Map(layers.map((layer) => [layer.key, layer]));
+
+  const definitions = [
     {
       id: "investor-portal",
       title: "Investor Portal",
       description:
-        "Launch investor login with documents, financial position, capital account and notices.",
+        "Launch investor login with governed documents, financial position, capital account and notices.",
       route: "/investor-portal",
       requiredLayers: ["investor", "pdf"] as LayerKey[],
-      metrics: [
-        {
-          label: "Investors",
-          value: String(dataState.investor.count),
-        },
-        {
-          label: "PDF documents",
-          value: String(dataState.pdf.count),
-        },
-      ],
     },
     {
       id: "finance-head",
       title: "Finance Head Workspace",
       description:
-        "Activate fund economics, investor data, compliance evidence and finance operating workflows.",
+        "Operate fund economics, investor data, compliance evidence and finance workflows.",
       route: "/finance-head-ai",
       requiredLayers: ["investor", "fund", "compliance"] as LayerKey[],
-      metrics: [
-        {
-          label: "Commitment",
-          value: dataState.investor.primaryMetric,
-        },
-        {
-          label: "Compliance items",
-          value: String(dataState.compliance.count),
-        },
-      ],
     },
     {
       id: "investment-team",
       title: "Investment Team Workspace",
       description:
-        "Activate portfolio monitoring, repayment schedules, risk tracking and exit visibility.",
+        "Operate portfolio monitoring, repayment schedules, risk tracking and exit visibility.",
       route: "/investment-team-ai",
       requiredLayers: ["portfolio", "pdf"] as LayerKey[],
-      metrics: [
-        {
-          label: "Investments",
-          value: String(dataState.portfolio.count),
-        },
-        {
-          label: "Portfolio value",
-          value: dataState.portfolio.primaryMetric,
-        },
-      ],
     },
     {
       id: "compliance",
       title: "Compliance Dashboard",
       description:
-        "Activate filing status, due dates, risk items, evidence tracking and owner accountability.",
+        "Operate filing status, due dates, risk items, evidence tracking and owner accountability.",
       route: "/compliance-ai",
       requiredLayers: ["fund", "compliance", "pdf"] as LayerKey[],
-      metrics: [
-        {
-          label: "Compliance records",
-          value: String(dataState.compliance.count),
-        },
-        {
-          label: "High-risk items",
-          value: String(dataState.compliance.warningCount),
-        },
-      ],
     },
     {
       id: "managing-partner",
       title: "Managing Partner Dashboard",
       description:
-        "Activate leadership view across fund, investor, portfolio, PDF and compliance data.",
+        "Leadership view across governed fund, investor, portfolio, PDF and compliance data.",
       route: "/managing-partner-ai",
       requiredLayers: [
         "investor",
@@ -232,227 +179,314 @@ function buildStakeholders(dataState: DataState): StakeholderCard[] {
         "fund",
         "compliance",
       ] as LayerKey[],
-      metrics: [
-        {
-          label: "Ready layers",
-          value: String(
-            Object.values(dataState).filter((layer) => layer.ready).length
-          ),
-        },
-        {
-          label: "Review signals",
-          value: String(
-            Object.values(dataState).reduce(
-              (sum, layer) => sum + layer.warningCount,
-              0
-            )
-          ),
-        },
-      ],
     },
     {
       id: "investor-relations",
       title: "Investor Relations",
       description:
-        "Activate LP communication layer for investor documents, pending items and reporting follow-ups.",
+        "Operate LP communication, investor documents, pending items and reporting follow-ups.",
       route: "/fundraising-ai",
       requiredLayers: ["investor", "pdf", "compliance"] as LayerKey[],
-      metrics: [
-        {
-          label: "Investors",
-          value: String(dataState.investor.count),
-        },
-        {
-          label: "Review items",
-          value: String(dataState.pdf.warningCount + dataState.compliance.warningCount),
-        },
-      ],
     },
   ];
 
-  return stakeholderDefinitions.map((definition) => {
-    const evaluation = evaluateStakeholderStatus(
-      definition.requiredLayers,
-      dataState
+  return definitions.map((definition) => {
+    const required = definition.requiredLayers
+      .map((key) => byKey.get(key))
+      .filter((layer): layer is ApiLayer => Boolean(layer));
+
+    const missingLayers = required
+      .filter((layer) => !layer.operational)
+      .map((layer) => layer.key);
+
+    const blockers = Array.from(
+      new Set(
+        required
+          .filter((layer) => !layer.operational)
+          .flatMap((layer) => layer.blockers)
+      )
     );
+
+    const operationalCount = required.filter((layer) => layer.operational).length;
+    const anyEvidence = required.some(
+      (layer) => layer.source_batch_id || layer.data_ready || layer.approved
+    );
+
+    let status: LaunchStatus = "Not Started";
+
+    if (required.length > 0 && operationalCount === required.length) {
+      status = "Ready";
+    } else if (operationalCount > 0) {
+      status = "Partial";
+    } else if (anyEvidence) {
+      status = "Needs Review";
+    }
+
+    const investor = byKey.get("investor");
+    const pdf = byKey.get("pdf");
+    const portfolio = byKey.get("portfolio");
+    const compliance = byKey.get("compliance");
+    const fund = byKey.get("fund");
+
+    const metrics =
+      definition.id === "investor-portal"
+        ? [
+            { label: "Investors", value: String(investor?.count ?? 0) },
+            { label: "PDF documents", value: String(pdf?.count ?? 0) },
+          ]
+        : definition.id === "finance-head"
+          ? [
+              {
+                label: "Commitment",
+                value: investor?.primary_metric ?? "No governed data",
+              },
+              {
+                label: "Compliance items",
+                value: String(compliance?.count ?? 0),
+              },
+            ]
+          : definition.id === "investment-team"
+            ? [
+                {
+                  label: "Investments",
+                  value: String(portfolio?.count ?? 0),
+                },
+                {
+                  label: "Portfolio value",
+                  value: portfolio?.primary_metric ?? "No governed data",
+                },
+              ]
+            : definition.id === "compliance"
+              ? [
+                  {
+                    label: "Compliance records",
+                    value: String(compliance?.count ?? 0),
+                  },
+                  {
+                    label: "Review signals",
+                    value: String(compliance?.warning_count ?? 0),
+                  },
+                ]
+              : definition.id === "managing-partner"
+                ? [
+                    {
+                      label: "Operational layers",
+                      value: String(layers.filter((layer) => layer.operational).length),
+                    },
+                    {
+                      label: "Approved fund",
+                      value: fund?.approved ? "Yes" : "No",
+                    },
+                  ]
+                : [
+                    {
+                      label: "Investors",
+                      value: String(investor?.count ?? 0),
+                    },
+                    {
+                      label: "Review signals",
+                      value: String(
+                        (pdf?.warning_count ?? 0) +
+                          (compliance?.warning_count ?? 0)
+                      ),
+                    },
+                  ];
 
     return {
       ...definition,
-      status: evaluation.status,
-      missingLayers: evaluation.missingLayers,
+      status,
+      missingLayers,
+      blockers,
+      metrics,
     };
   });
 }
 
 export default function StakeholderLaunchCenterPage() {
-  const [dataState, setDataState] = useState<DataState>(defaultDataState);
+  const { session } = useVentiqAuth();
+  const {
+    activeFundName,
+    setActiveFundName,
+    isReady: fundContextReady,
+  } = useActiveFund(DEFAULT_FUND_NAME);
+
+  const [authorisedFunds, setAuthorisedFunds] = useState<GovernedFundOption[]>([]);
+  const [fundAccessReady, setFundAccessReady] = useState(false);
+  const [fundAccessMessage, setFundAccessMessage] = useState("");
+  const [snapshot, setSnapshot] = useState<LaunchSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  async function loadLaunchSnapshot() {
-    const client = supabase;
+  const activeFundAccess = useMemo(() => {
+    const normalized = activeFundName.trim().toLowerCase();
+    return (
+      authorisedFunds.find(
+        (fund) => fund.fund_name.trim().toLowerCase() === normalized
+      ) ?? null
+    );
+  }, [authorisedFunds, activeFundName]);
 
-    if (!isSupabaseConfigured || !client) {
-      setMessage("Supabase is not configured.");
+  useEffect(() => {
+    const accessToken = session?.access_token?.trim() || "";
+
+    if (!fundContextReady) return;
+
+    if (!accessToken) {
+      setAuthorisedFunds([]);
+      setFundAccessMessage("Sign in to load your governed fund access.");
+      setFundAccessReady(true);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadGovernedFunds() {
+      setFundAccessReady(false);
+      setFundAccessMessage("");
+
+      try {
+        const response = await fetch("/api/fund-context", {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            result.error || "Unable to load governed VENTIQ fund context."
+          );
+        }
+
+        if (cancelled) return;
+
+        const funds = (result.funds ?? []) as GovernedFundOption[];
+        setAuthorisedFunds(funds);
+
+        if (funds.length === 0) {
+          setFundAccessMessage(
+            "No active fund access is available for this VENTIQ account."
+          );
+          setFundAccessReady(true);
+          return;
+        }
+
+        const normalizedActiveFund = activeFundName.trim().toLowerCase();
+        const currentFundIsAllowed = funds.some(
+          (fund) => fund.fund_name.trim().toLowerCase() === normalizedActiveFund
+        );
+
+        if (!currentFundIsAllowed) {
+          const nextFund = funds[0].fund_name;
+          setActiveFundName(nextFund);
+          setFundAccessMessage(
+            `Stakeholder Launch moved to your first authorised fund: ${nextFund}.`
+          );
+        }
+
+        setFundAccessReady(true);
+      } catch (error) {
+        if (cancelled) return;
+
+        setAuthorisedFunds([]);
+        setFundAccessMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to load governed VENTIQ fund context."
+        );
+        setFundAccessReady(true);
+      }
+    }
+
+    void loadGovernedFunds();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    fundContextReady,
+    session?.access_token,
+    activeFundName,
+    setActiveFundName,
+  ]);
+
+  const loadLaunchSnapshot = useCallback(async () => {
+    const accessToken = session?.access_token?.trim() || "";
+
+    if (
+      !fundContextReady ||
+      !fundAccessReady ||
+      !activeFundAccess ||
+      !activeFundName.trim()
+    ) {
+      return;
+    }
+
+    if (!accessToken) {
+      setSnapshot(null);
+      setMessage("A secure VENTIQ session is required.");
       return;
     }
 
     setLoading(true);
-    setMessage("Loading stakeholder launch readiness...");
+    setMessage("Loading governed stakeholder launch readiness...");
 
     try {
-      const nextState: DataState = structuredClone(defaultDataState);
+      const response = await fetch(
+        `/api/migration/stakeholder-launch?fund_name=${encodeURIComponent(
+          activeFundName
+        )}`,
+        {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
 
-      const { data: investorBatch } = await client
-        .from("investor_import_batches")
-        .select("id, batch_name, total_records, total_commitment, status")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const result = (await response.json()) as LaunchSnapshot;
 
-      if (investorBatch) {
-        const totalRecords = Number(investorBatch.total_records ?? 0);
-        const totalCommitment = Number(investorBatch.total_commitment ?? 0);
-
-        nextState.investor = {
-          ...nextState.investor,
-          ready: totalRecords > 0,
-          count: totalRecords,
-          batchName: investorBatch.batch_name ?? "Latest investor batch",
-          primaryMetric: `${formatCr(totalCommitment)} commitment`,
-          secondaryMetric: `${totalRecords} investors`,
-          warningCount: 0,
-        };
-      }
-
-      const { data: pdfBatch } = await client
-        .from("pdf_intelligence_batches")
-        .select(
-          "id, batch_name, total_files, ready_files, review_files, unmatched_files, status"
-        )
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (pdfBatch) {
-        const totalFiles = Number(pdfBatch.total_files ?? 0);
-        const reviewFiles = Number(pdfBatch.review_files ?? 0);
-        const unmatchedFiles = Number(pdfBatch.unmatched_files ?? 0);
-
-        nextState.pdf = {
-          ...nextState.pdf,
-          ready: totalFiles > 0,
-          count: totalFiles,
-          batchName: pdfBatch.batch_name ?? "Latest PDF intelligence batch",
-          primaryMetric: `${totalFiles} PDFs processed`,
-          secondaryMetric: `${reviewFiles + unmatchedFiles} review items`,
-          warningCount: reviewFiles + unmatchedFiles,
-        };
-      }
-
-      const { data: portfolioBatch } = await client
-        .from("portfolio_data_migration_batches")
-        .select(
-          "id, batch_name, total_records, current_portfolio_value, portfolio_moic, at_risk_count, repayment_count, status"
-        )
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (portfolioBatch) {
-        const totalRecords = Number(portfolioBatch.total_records ?? 0);
-        const currentValue = Number(
-          portfolioBatch.current_portfolio_value ?? 0
+      if (!response.ok) {
+        throw new Error(
+          result.error || "Unable to load stakeholder launch readiness."
         );
-        const atRiskCount = Number(portfolioBatch.at_risk_count ?? 0);
-        const moic = Number(portfolioBatch.portfolio_moic ?? 0);
-
-        nextState.portfolio = {
-          ...nextState.portfolio,
-          ready: totalRecords > 0,
-          count: totalRecords,
-          batchName: portfolioBatch.batch_name ?? "Latest portfolio batch",
-          primaryMetric: `${formatCr(currentValue)} value`,
-          secondaryMetric: `${moic.toFixed(2)}x MOIC`,
-          warningCount: atRiskCount,
-        };
       }
 
-      const { data: fundBatch } = await client
-        .from("fund_data_migration_batches")
-        .select(
-          "id, batch_name, total_funds, total_committed_capital, average_carry, status"
-        )
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (fundBatch) {
-        const totalFunds = Number(fundBatch.total_funds ?? 0);
-        const committedCapital = Number(
-          fundBatch.total_committed_capital ?? 0
-        );
-        const averageCarry = Number(fundBatch.average_carry ?? 0);
-
-        nextState.fund = {
-          ...nextState.fund,
-          ready: totalFunds > 0,
-          count: totalFunds,
-          batchName: fundBatch.batch_name ?? "Latest fund data batch",
-          primaryMetric: `${formatCr(committedCapital)} committed`,
-          secondaryMetric: `${averageCarry.toFixed(0)}% carry`,
-          warningCount: 0,
-        };
-      }
-
-      const { data: complianceBatch } = await client
-        .from("compliance_data_migration_batches")
-        .select(
-          "id, batch_name, total_items, evidence_available_count, pending_review_count, high_risk_count, ready_count, status"
-        )
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (complianceBatch) {
-        const totalItems = Number(complianceBatch.total_items ?? 0);
-        const pendingReview = Number(
-          complianceBatch.pending_review_count ?? 0
-        );
-        const highRisk = Number(complianceBatch.high_risk_count ?? 0);
-        const evidenceAvailable = Number(
-          complianceBatch.evidence_available_count ?? 0
-        );
-
-        nextState.compliance = {
-          ...nextState.compliance,
-          ready: totalItems > 0,
-          count: totalItems,
-          batchName:
-            complianceBatch.batch_name ?? "Latest compliance data batch",
-          primaryMetric: `${evidenceAvailable} evidence items`,
-          secondaryMetric: `${highRisk} high-risk items`,
-          warningCount: pendingReview + highRisk,
-        };
-      }
-
-      setDataState(nextState);
-      setMessage("Stakeholder launch readiness loaded.");
+      setSnapshot(result);
+      setMessage(
+        result.activation?.is_active
+          ? `Governed launch state loaded for ${activeFundName}.`
+          : `${activeFundName} is not activated. Stakeholder launch remains locked.`
+      );
     } catch (error) {
-      setMessage((error as Error).message);
+      setSnapshot(null);
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load stakeholder launch readiness."
+      );
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
-  }
+  }, [
+    session?.access_token,
+    fundContextReady,
+    fundAccessReady,
+    activeFundAccess,
+    activeFundName,
+  ]);
 
   useEffect(() => {
-    loadLaunchSnapshot();
-  }, []);
+    void loadLaunchSnapshot();
+  }, [loadLaunchSnapshot]);
 
-  const stakeholders = useMemo(
-    () => buildStakeholders(dataState),
-    [dataState]
-  );
+  const layers = snapshot?.layers ?? emptyLayers;
+
+  const stakeholders = useMemo(() => buildStakeholders(layers), [layers]);
 
   const launchSummary = useMemo(() => {
     const readyStakeholders = stakeholders.filter(
@@ -469,24 +503,73 @@ export default function StakeholderLaunchCenterPage() {
       (stakeholder) => stakeholder.status === "Not Started"
     ).length;
 
-    const readyLayers = Object.values(dataState).filter(
-      (layer) => layer.ready
-    ).length;
-
     return {
       readyStakeholders,
       reviewStakeholders,
       notStartedStakeholders,
-      readyLayers,
-      launchScore: Math.round(
-        (readyStakeholders / stakeholders.length) * 100
-      ),
+      readyLayers: layers.filter((layer) => layer.operational).length,
+      launchScore:
+        stakeholders.length === 0
+          ? 0
+          : Math.round((readyStakeholders / stakeholders.length) * 100),
     };
-  }, [dataState, stakeholders]);
+  }, [layers, stakeholders]);
+
+  const activation = snapshot?.activation;
+  const launchGateOpen = Boolean(snapshot?.summary?.launch_gate_open);
 
   return (
     <main className="activation-page">
       <section className="activation-shell">
+        <div className="activation-panel">
+          <div className="section-heading-row">
+            <div>
+              <p className="activation-eyebrow">
+                <span>VENTIQ</span> Governed Fund Context
+              </p>
+              <h2>{activeFundName || "No authorised fund selected"}</h2>
+              <p>
+                Stakeholder launch now follows the same governed active fund used
+                by Data Intake and Activation.
+              </p>
+            </div>
+
+            <span className="activation-status-pill healthy">
+              {activeFundAccess
+                ? `${activeFundAccess.role} · ${
+                    activeFundAccess.can_view ? "View" : "No View"
+                  }`
+                : fundAccessReady
+                  ? "No Fund Access"
+                  : "Loading Access"}
+            </span>
+          </div>
+
+          <label htmlFor="stakeholder-launch-active-fund">
+            <strong>Switch active fund</strong>
+          </label>
+          <select
+            id="stakeholder-launch-active-fund"
+            value={activeFundAccess ? activeFundName : ""}
+            onChange={(event) => setActiveFundName(event.target.value)}
+            disabled={!fundAccessReady || authorisedFunds.length === 0}
+          >
+            {authorisedFunds.length === 0 ? (
+              <option value="">No authorised funds available</option>
+            ) : (
+              authorisedFunds.map((fund) => (
+                <option key={fund.fund_name} value={fund.fund_name}>
+                  {fund.fund_name}
+                </option>
+              ))
+            )}
+          </select>
+
+          {fundAccessMessage && (
+            <div className="activation-note">{fundAccessMessage}</div>
+          )}
+        </div>
+
         <div className="activation-hero">
           <div>
             <p className="activation-eyebrow">
@@ -496,34 +579,34 @@ export default function StakeholderLaunchCenterPage() {
             <h1>Stakeholder Launch Center</h1>
 
             <p>
-              Convert migrated fund data into live stakeholder dashboards. This
-              page checks which dashboards are ready for Investor, Finance,
-              Investment, Compliance, IR and Managing Partner users.
+              Launch only from the fund&apos;s governed, checker-approved and
+              activated migration state. Newer unapproved batches do not silently
+              replace the frozen activation baseline.
             </p>
 
             <div className="activation-actions">
               <button
                 className="activation-primary-button"
-                disabled={loading}
-                onClick={loadLaunchSnapshot}
+                disabled={loading || !activeFundAccess}
+                onClick={() => void loadLaunchSnapshot()}
                 type="button"
               >
                 {loading ? "Refreshing..." : "Refresh Launch Readiness"}
               </button>
 
-              <a
+              <Link
                 className="activation-secondary-button"
                 href="/migration/activation"
               >
                 Back to Activation Dashboard
-              </a>
+              </Link>
 
-              <a
+              <Link
                 className="activation-secondary-button"
                 href="/migration/data-intake"
               >
                 Back to Data Intake
-              </a>
+              </Link>
             </div>
           </div>
 
@@ -535,6 +618,13 @@ export default function StakeholderLaunchCenterPage() {
               {launchSummary.reviewStakeholders} review ·{" "}
               {launchSummary.notStartedStakeholders} not started
             </p>
+            <span
+              className={`activation-status-pill ${
+                launchGateOpen ? "healthy" : "neutral"
+              }`}
+            >
+              {launchGateOpen ? "Launch Gate Open" : "Launch Locked"}
+            </span>
           </div>
         </div>
 
@@ -555,35 +645,44 @@ export default function StakeholderLaunchCenterPage() {
 
           <div className="activation-kpi-card">
             <span>◇</span>
-            <p>Ready data layers</p>
+            <p>Operational layers</p>
             <h3>{launchSummary.readyLayers}/5</h3>
           </div>
 
           <div className="activation-kpi-card">
             <span>◎</span>
-            <p>Total dashboards</p>
-            <h3>{stakeholders.length}</h3>
+            <p>Fund activation</p>
+            <h3>{activation?.is_active ? "Active" : "Locked"}</h3>
           </div>
         </div>
 
         <div className="stakeholder-layer-strip">
-          {Object.values(dataState).map((layer) => (
+          {layers.map((layer) => (
             <div className="stakeholder-layer-card" key={layer.key}>
               <div>
                 <span>{layer.title}</span>
                 <strong>{layer.count}</strong>
               </div>
 
-              <p>{layer.primaryMetric}</p>
-              <small>{layer.secondaryMetric}</small>
+              <p>{layer.primary_metric}</p>
+              <small>{layer.secondary_metric}</small>
+              <small>
+                Approval: {layer.approval_status} · Batch: {layer.batch_name}
+              </small>
 
               <span
                 className={`activation-status-pill ${
-                  layer.ready ? "healthy" : "neutral"
+                  layer.operational ? "healthy" : "neutral"
                 }`}
               >
-                {layer.ready ? "Loaded" : "Missing"}
+                {layer.operational ? "Operational" : "Blocked"}
               </span>
+
+              {!layer.operational && layer.blockers.length > 0 && (
+                <small>
+                  {layer.blockers.map(humanizeBlocker).join(" · ")}
+                </small>
+              )}
             </div>
           ))}
         </div>
@@ -609,30 +708,38 @@ export default function StakeholderLaunchCenterPage() {
               <p>{stakeholder.description}</p>
 
               <div className="stakeholder-requirements">
-                <small>Required data layers</small>
+                <small>Required governed layers</small>
 
                 <div>
-                  {stakeholder.requiredLayers.map((layerKey) => (
-                    <span
-                      className={
-                        dataState[layerKey].ready
-                          ? "requirement-chip ready"
-                          : "requirement-chip missing"
-                      }
-                      key={`${stakeholder.id}-${layerKey}`}
-                    >
-                      {layerLabels[layerKey]}
-                    </span>
-                  ))}
+                  {stakeholder.requiredLayers.map((layerKey) => {
+                    const layer = layers.find(
+                      (candidate) => candidate.key === layerKey
+                    );
+
+                    return (
+                      <span
+                        className={
+                          layer?.operational
+                            ? "requirement-chip ready"
+                            : "requirement-chip missing"
+                        }
+                        key={`${stakeholder.id}-${layerKey}`}
+                      >
+                        {layerLabels[layerKey]}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
 
               {stakeholder.missingLayers.length > 0 && (
                 <div className="stakeholder-warning">
-                  Missing:{" "}
-                  {stakeholder.missingLayers
-                    .map((layerKey) => layerLabels[layerKey])
-                    .join(", ")}
+                  Blocked by:{" "}
+                  {stakeholder.blockers.length > 0
+                    ? stakeholder.blockers.map(humanizeBlocker).join(", ")
+                    : stakeholder.missingLayers
+                        .map((layerKey) => layerLabels[layerKey])
+                        .join(", ")}
                 </div>
               )}
 
@@ -645,17 +752,26 @@ export default function StakeholderLaunchCenterPage() {
                 ))}
               </div>
 
-              <a className="activation-card-link" href={stakeholder.route}>
-                Open dashboard →
-              </a>
+              {stakeholder.status === "Ready" ? (
+                <Link className="activation-card-link" href={stakeholder.route}>
+                  Open dashboard →
+                </Link>
+              ) : (
+                <Link
+                  className="activation-card-link"
+                  href="/migration/activation"
+                >
+                  Resolve launch blockers →
+                </Link>
+              )}
             </div>
           ))}
         </div>
 
         <div className="activation-panel">
           <div>
-            <p className="activation-eyebrow">Commercial Demo Narrative</p>
-            <h2>What this proves in a client walkthrough</h2>
+            <p className="activation-eyebrow">Controlled launch sequence</p>
+            <h2>Migration evidence → approval → activation → stakeholder access</h2>
           </div>
 
           <div className="activation-flow-grid">
@@ -663,35 +779,35 @@ export default function StakeholderLaunchCenterPage() {
               <span>1</span>
               <strong>Upload once</strong>
               <p>
-                Historical investor, PDF, portfolio, fund and compliance data
-                can be uploaded into one operating layer.
+                Historical investor, PDF, portfolio, fund and compliance data is
+                staged under the selected governed fund.
               </p>
             </div>
 
             <div>
               <span>2</span>
-              <strong>Validate readiness</strong>
+              <strong>Validate and approve</strong>
               <p>
-                The fund team can see what is ready, what is missing and what
-                requires review before dashboard launch.
+                Each mandatory layer must satisfy its readiness checks and retain
+                the exact checker-approved source batch.
               </p>
             </div>
 
             <div>
               <span>3</span>
-              <strong>Launch by role</strong>
+              <strong>Activate the fund</strong>
               <p>
-                Every stakeholder gets a role-specific dashboard instead of
-                searching through files, emails and Excel sheets.
+                Activation freezes the approved batch map so later unapproved
+                migration activity cannot silently change stakeholder data.
               </p>
             </div>
 
             <div>
               <span>4</span>
-              <strong>Operate continuously</strong>
+              <strong>Launch by role</strong>
               <p>
-                The same data layer later supports capital calls, notices,
-                repayments, filings, reporting and investor communication.
+                Only stakeholder workspaces whose required governed layers are
+                operational are presented as ready to launch.
               </p>
             </div>
           </div>

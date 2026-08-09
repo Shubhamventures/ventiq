@@ -64,6 +64,28 @@ type UploadApiResult = {
   totalFiles?: number;
 };
 
+type MigrationValidationIssue = {
+  id: string;
+  batchId: string;
+  fileUploadId: string;
+  fundName: string;
+  datasetKey: string;
+  sourceFileName: string;
+  sourceSheetName: string | null;
+  sourceRowNumber: number | null;
+  severity: string;
+  issueCode: string;
+  fieldName: string | null;
+  message: string;
+  resolutionStatus: string;
+};
+
+type MigrationIssueSummary = {
+  total: number;
+  errors: number;
+  warnings: number;
+};
+
 type IntakeStatusApiResult = {
   error?: string;
   batch?: null | {
@@ -97,6 +119,8 @@ type IntakeStatusApiResult = {
     note: string;
     error?: string;
   }>;
+  issues?: MigrationValidationIssue[];
+  issueSummary?: MigrationIssueSummary;
 };
 
 type ProcessSummary = Record<string, number>;
@@ -1383,6 +1407,9 @@ export default function DataIntakeCommandCenterPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isLoadingBatch, setIsLoadingBatch] = useState(true);
   const [batchProcessingStatus, setBatchProcessingStatus] = useState("");
+  const [validationIssues, setValidationIssues] = useState<MigrationValidationIssue[]>([]);
+  const [validationIssueSummary, setValidationIssueSummary] =
+    useState<MigrationIssueSummary>({ total: 0, errors: 0, warnings: 0 });
 
   useEffect(() => {
     const accessToken = session?.access_token;
@@ -1489,6 +1516,8 @@ export default function DataIntakeCommandCenterPage() {
     setBatchId("");
     setBatchProcessingStatus("");
     setProcessMessage("");
+    setValidationIssues([]);
+    setValidationIssueSummary({ total: 0, errors: 0, warnings: 0 });
     setMessage(
       restoredLocalFiles.length > 0
         ? `${restoredLocalFiles.length} staged file(s) restored for ${activeFundName}.`
@@ -1532,6 +1561,8 @@ export default function DataIntakeCommandCenterPage() {
         if (!result.batch) {
           setBatchId("");
           setBatchProcessingStatus("");
+          setValidationIssues([]);
+          setValidationIssueSummary({ total: 0, errors: 0, warnings: 0 });
           setUploadedFiles((current) => mergeServerAndLocalFiles([], current));
           return;
         }
@@ -1543,6 +1574,10 @@ export default function DataIntakeCommandCenterPage() {
 
         setBatchId(result.batch.id);
         setBatchProcessingStatus(result.batch.processingStatus);
+        setValidationIssues(result.issues ?? []);
+        setValidationIssueSummary(
+          result.issueSummary ?? { total: 0, errors: 0, warnings: 0 }
+        );
         setUploadedFiles((current) =>
           mergeServerAndLocalFiles(serverFiles, current)
         );
@@ -1826,6 +1861,52 @@ export default function DataIntakeCommandCenterPage() {
     }
   }
 
+  async function refreshValidationIssues() {
+    const accessToken = session?.access_token?.trim() || "";
+
+    if (!accessToken || !activeFundName.trim()) {
+      return;
+    }
+
+    const response = await fetch(
+      `/api/migration/intake-upload?fundName=${encodeURIComponent(
+        activeFundName
+      )}`,
+      {
+        method: "GET",
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    const result = (await response.json()) as IntakeStatusApiResult;
+
+    if (!response.ok) {
+      throw new Error(
+        result.error || "Unable to refresh migration validation exceptions."
+      );
+    }
+
+    if (!result.batch) {
+      setValidationIssues([]);
+      setValidationIssueSummary({ total: 0, errors: 0, warnings: 0 });
+      return;
+    }
+
+    // Do not display exceptions from a different restored batch if the local
+    // screen is still holding another batch id.
+    if (batchId && result.batch.id !== batchId) {
+      return;
+    }
+
+    setValidationIssues(result.issues ?? []);
+    setValidationIssueSummary(
+      result.issueSummary ?? { total: 0, errors: 0, warnings: 0 }
+    );
+  }
+
   async function processMigrationData() {
     if (!canManageIntake) {
       setProcessMessage(
@@ -1876,6 +1957,19 @@ export default function DataIntakeCommandCenterPage() {
           ? `Processing completed. ${summaryText}.`
           : result.message || "Processing completed with no inserted rows."
       );
+
+      try {
+        await refreshValidationIssues();
+      } catch (issueRefreshError) {
+        setProcessMessage(
+          (current) =>
+            `${current} Validation exceptions could not be refreshed automatically: ${
+              issueRefreshError instanceof Error
+                ? issueRefreshError.message
+                : "unknown error"
+            }.`
+        );
+      }
     } catch (error) {
       setProcessMessage(
         error instanceof Error
@@ -2377,6 +2471,110 @@ export default function DataIntakeCommandCenterPage() {
               Processing status: <strong>{batchProcessingStatus || "Not Started"}</strong>
             </div>
           )}
+        </div>
+
+        <div className="preview-card">
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">Review / Exceptions</p>
+              <h2>Migration validation exceptions</h2>
+              <p>
+                Open warnings and errors are read from the restored migration batch
+                for the selected governed fund. Nothing is auto-resolved here.
+              </p>
+            </div>
+            <span className="status-pill">
+              {validationIssueSummary.total} Open
+            </span>
+          </div>
+
+          <div className="queue-grid">
+            <div className="queue-item">
+              <span className="small-pill">Errors</span>
+              <br />
+              <strong>{validationIssueSummary.errors}</strong>
+              <br />
+              Blocking validation exceptions
+            </div>
+
+            <div className="queue-item">
+              <span className="small-pill">Warnings</span>
+              <br />
+              <strong>{validationIssueSummary.warnings}</strong>
+              <br />
+              Review signals requiring evidence or confirmation
+            </div>
+
+            <div className="queue-item">
+              <span className="small-pill">Batch</span>
+              <br />
+              <strong>{batchId ? "Restored" : "None"}</strong>
+              <br />
+              {batchProcessingStatus || "Not Started"}
+            </div>
+          </div>
+
+          {!batchId ? (
+            <div className="explain-box">
+              Upload and process a migration batch to populate validation exceptions.
+            </div>
+          ) : validationIssues.length === 0 ? (
+            <div className="explain-box">
+              {batchProcessingStatus === "Completed"
+                ? "No open migration validation exceptions are recorded for this batch."
+                : "No open exceptions are currently recorded. Process the batch to run validation."}
+            </div>
+          ) : (
+            <>
+              <div className="queue-grid">
+                {validationIssues.slice(0, 50).map((issue) => (
+                  <div className="queue-item" key={issue.id}>
+                    <span className="small-pill">{issue.severity}</span>
+                    <br />
+                    <strong>{issue.issueCode}</strong>
+                    <br />
+                    Dataset: {issue.datasetKey}
+                    <br />
+                    File: {issue.sourceFileName}
+                    {issue.sourceSheetName && (
+                      <>
+                        <br />
+                        Sheet: {issue.sourceSheetName}
+                      </>
+                    )}
+                    {issue.sourceRowNumber !== null && (
+                      <>
+                        <br />
+                        Row: {issue.sourceRowNumber}
+                      </>
+                    )}
+                    {issue.fieldName && (
+                      <>
+                        <br />
+                        Field: {issue.fieldName}
+                      </>
+                    )}
+                    <br />
+                    Message: {issue.message}
+                    <br />
+                    Resolution: {issue.resolutionStatus}
+                  </div>
+                ))}
+              </div>
+
+              {validationIssues.length > 50 && (
+                <div className="logic-note">
+                  Showing the first 50 of {validationIssues.length} open exceptions.
+                  Resolve the source data and reprocess before activation.
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="logic-note">
+            Correction rule: fix the source evidence or governed mapping and reprocess.
+            VENTIQ does not silently convert warnings into approved data.
+          </div>
         </div>
 
         <div className="logic-note">
