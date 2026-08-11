@@ -50,7 +50,10 @@ type AuthorisedUser = {
   email: string;
   fullName: string;
   role: string;
+  organisationId: string;
   investorCodes: string[];
+  questionInvestorCodes: string[];
+  resolvedInvestorCode: string;
   canSubmitQuestions: boolean;
   canUseDataRoom: boolean;
 };
@@ -165,7 +168,9 @@ async function authoriseRequest(
     error: profileError,
   } = await supabase
     .from("ventiq_user_profiles")
-    .select("*")
+    .select(
+      "user_id,email,full_name,default_role,active_organisation_id,investor_id,status"
+    )
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -183,14 +188,16 @@ async function authoriseRequest(
 
   const allowedRoles = mode === "edit" ? EDIT_ROLES : VIEW_ROLES;
   let role = normalizeText(profile.default_role);
+  let organisationId = normalizeText(profile.active_organisation_id);
+  let fundAccessInvestorId = "";
 
-  if (!allowedRoles.has(role)) {
+  if (!allowedRoles.has(role) || !organisationId) {
     const {
       data: rawMembership,
       error: membershipError,
     } = await supabase
       .from("ventiq_organisation_members")
-      .select("*")
+      .select("role,organisation_id,status,is_primary")
       .eq("user_id", user.id)
       .eq("status", "Active")
       .order("is_primary", { ascending: false })
@@ -204,11 +211,22 @@ async function authoriseRequest(
     }
 
     const membership = rawMembership as unknown as DataRow | null;
-    role = normalizeText(membership?.role);
+
+    if (!allowedRoles.has(role)) {
+      role = normalizeText(membership?.role);
+    }
+
+    if (!organisationId) {
+      organisationId = normalizeText(membership?.organisation_id);
+    }
   }
 
   if (!allowedRoles.has(role)) {
     throw new Error("ROLE_NOT_ALLOWED");
+  }
+
+  if (!organisationId) {
+    throw new Error("ORGANISATION_REQUIRED");
   }
 
   if (role !== "fund_admin") {
@@ -217,7 +235,9 @@ async function authoriseRequest(
       error: fundAccessError,
     } = await supabase
       .from("ventiq_user_fund_access")
-      .select("*")
+      .select(
+        "organisation_id,can_view,can_edit,investor_id,status"
+      )
       .eq("user_id", user.id)
       .eq("status", "Active")
       .ilike("fund_name", fundName)
@@ -233,6 +253,19 @@ async function authoriseRequest(
     const fundAccess = rawFundAccess as unknown as DataRow | null;
     const canView = Boolean(fundAccess?.can_view);
     const canEdit = Boolean(fundAccess?.can_edit);
+    const fundOrganisationId = normalizeText(
+      fundAccess?.organisation_id
+    );
+
+    fundAccessInvestorId = normalizeText(fundAccess?.investor_id);
+
+    if (
+      fundOrganisationId &&
+      organisationId &&
+      fundOrganisationId !== organisationId
+    ) {
+      throw new Error("FUND_VIEW_ACCESS_REQUIRED");
+    }
 
     if (!canView || (mode === "edit" && !canEdit)) {
       throw new Error(
@@ -244,6 +277,8 @@ async function authoriseRequest(
   }
 
   let investorCodes: string[] = [];
+  let questionInvestorCodes: string[] = [];
+  let resolvedInvestorCode = "";
   let canSubmitQuestions = role !== "investor";
   let canUseDataRoom = role !== "investor";
 
@@ -279,21 +314,47 @@ async function authoriseRequest(
       )
     );
 
-    canUseDataRoom = investorCodes.length > 0;
-    canSubmitQuestions = activeEntitlements.some(
-      (row: any) =>
-        Boolean(row?.can_use_data_room) &&
-        Boolean(row?.can_submit_questions) &&
-        investorCodes.some(
-          (code) =>
-            code.toLowerCase() ===
-            normalizeText(row?.investor_code).toLowerCase()
-        )
+    questionInvestorCodes = Array.from(
+      new Set(
+        activeEntitlements
+          .filter(
+            (row: any) =>
+              Boolean(row?.can_use_data_room) &&
+              Boolean(row?.can_submit_questions)
+          )
+          .map((row: any) => normalizeText(row?.investor_code))
+          .filter(Boolean)
+      )
     );
+
+    canUseDataRoom = investorCodes.length > 0;
 
     if (!canUseDataRoom) {
       throw new Error("INVESTOR_DATA_ROOM_ACCESS_REQUIRED");
     }
+
+    const preferredCodes = [
+      normalizeText(profile.investor_id),
+      fundAccessInvestorId,
+    ].filter(Boolean);
+
+    resolvedInvestorCode =
+      preferredCodes.find((code) =>
+        investorCodes.some(
+          (entitledCode) =>
+            entitledCode.toLowerCase() === code.toLowerCase()
+        )
+      ) ||
+      (investorCodes.length === 1 ? investorCodes[0] : "");
+
+    if (!resolvedInvestorCode) {
+      throw new Error("INVESTOR_CONTEXT_AMBIGUOUS");
+    }
+
+    canSubmitQuestions = questionInvestorCodes.some(
+      (code) =>
+        code.toLowerCase() === resolvedInvestorCode.toLowerCase()
+    );
   }
 
   return {
@@ -304,7 +365,10 @@ async function authoriseRequest(
       normalizeText(user.email) ||
       "VENTIQ User",
     role,
+    organisationId,
     investorCodes,
+    questionInvestorCodes,
+    resolvedInvestorCode,
     canSubmitQuestions,
     canUseDataRoom,
   };
@@ -317,11 +381,9 @@ function assertInvestorCodeAllowed(
   if (user.role !== "investor") return;
 
   const requested = normalizeText(requestedInvestorCode).toLowerCase();
-  const allowed = new Set(
-    user.investorCodes.map((code) => code.toLowerCase())
-  );
+  const resolved = normalizeText(user.resolvedInvestorCode).toLowerCase();
 
-  if (!requested || !allowed.has(requested)) {
+  if (!requested || !resolved || requested !== resolved) {
     throw new Error("INVESTOR_ENTITLEMENT_REQUIRED");
   }
 }
@@ -350,6 +412,85 @@ function canInvestorAccessDocument(
   return false;
 }
 
+async function assertInvestorDataRoomModuleActive(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  fundName: string
+) {
+  if (user.role !== "investor") return;
+
+  const [moduleResult, fullFundResult] = await Promise.all([
+    supabase
+      .from("ventiq_module_activation_status")
+      .select("status")
+      .eq("organisation_id", user.organisationId)
+      .ilike("fund_name", fundName)
+      .eq("module_key", "investor_data_room_portal")
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("fund_activation_status")
+      .select("status")
+      .ilike("fund_name", fundName)
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (moduleResult.error) {
+    throw new Error(
+      `Unable to verify Investor Data Room activation: ${moduleResult.error.message}`
+    );
+  }
+
+  if (fullFundResult.error) {
+    throw new Error(
+      `Unable to verify full-fund activation: ${fullFundResult.error.message}`
+    );
+  }
+
+  const moduleActive =
+    normalizeText(moduleResult.data?.status).toLowerCase() === "active";
+  const fullFundActive =
+    normalizeText(fullFundResult.data?.status).toLowerCase() === "active";
+
+  if (!moduleActive && !fullFundActive) {
+    throw new Error("INVESTOR_DATA_ROOM_NOT_ACTIVE");
+  }
+}
+
+function sanitizeEngagementEventForInvestor(row: DataRow): DataRow {
+  return {
+    id: normalizeText(row.id),
+    fund_name: normalizeText(row.fund_name),
+    source_batch_id: normalizeText(row.source_batch_id),
+    document_id: normalizeText(row.document_id) || null,
+    investor_code: normalizeText(row.investor_code) || null,
+    investor_name: normalizeText(row.investor_name) || null,
+    document_name: normalizeText(row.document_name) || null,
+    action: normalizeText(row.action) || null,
+    event_time: normalizeText(row.event_time) || null,
+    note: normalizeText(row.note) || null,
+  };
+}
+
+function sanitizeQuestionForInvestor(row: DataRow): DataRow {
+  return {
+    id: normalizeText(row.id),
+    fund_name: normalizeText(row.fund_name),
+    source_batch_id: normalizeText(row.source_batch_id),
+    document_id: normalizeText(row.document_id) || null,
+    investor_code: normalizeText(row.investor_code) || null,
+    investor_name: normalizeText(row.investor_name) || null,
+    document_name: normalizeText(row.document_name) || null,
+    category: normalizeText(row.category) || null,
+    question: normalizeText(row.question) || null,
+    answer: normalizeText(row.answer) || null,
+    status: normalizeText(row.status) || null,
+    asked_at: normalizeText(row.asked_at) || null,
+    answered_at: normalizeText(row.answered_at) || null,
+  };
+}
+
 function getAuthErrorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "";
 
@@ -369,9 +510,12 @@ function getAuthErrorResponse(error: unknown) {
   if (
     message === "PROFILE_NOT_ACTIVE" ||
     message === "ROLE_NOT_ALLOWED" ||
+    message === "ORGANISATION_REQUIRED" ||
     message === "FUND_EDIT_ACCESS_REQUIRED" ||
     message === "FUND_VIEW_ACCESS_REQUIRED" ||
     message === "INVESTOR_DATA_ROOM_ACCESS_REQUIRED" ||
+    message === "INVESTOR_DATA_ROOM_NOT_ACTIVE" ||
+    message === "INVESTOR_CONTEXT_AMBIGUOUS" ||
     message === "INVESTOR_ENTITLEMENT_REQUIRED" ||
     message === "INVESTOR_QUESTION_ACCESS_REQUIRED"
   ) {
@@ -414,19 +558,28 @@ function getValidationErrorResponse(error: unknown) {
 
   if (!messages[message]) return null;
 
-  const conflictErrors = new Set([
-    "SOURCE_BATCH_NOT_AVAILABLE",
-    "SOURCE_BATCH_NOT_FOUND",
-    "SOURCE_BATCH_FUND_MISMATCH",
-    "SOURCE_BATCH_NOT_COMPLETED",
+  const notFoundErrors = new Set([
     "QUESTION_NOT_FOUND",
     "DOCUMENT_NOT_FOUND",
     "INVESTOR_NOT_FOUND",
   ]);
 
+  const conflictErrors = new Set([
+    "SOURCE_BATCH_NOT_AVAILABLE",
+    "SOURCE_BATCH_NOT_FOUND",
+    "SOURCE_BATCH_FUND_MISMATCH",
+    "SOURCE_BATCH_NOT_COMPLETED",
+  ]);
+
   return NextResponse.json(
     { error: messages[message] },
-    { status: conflictErrors.has(message) ? 409 : 400 }
+    {
+      status: notFoundErrors.has(message)
+        ? 404
+        : conflictErrors.has(message)
+        ? 409
+        : 400,
+    }
   );
 }
 
@@ -678,6 +831,7 @@ export async function GET(request: NextRequest) {
     }
 
     const user = await authoriseRequest(request, supabase, fundName, "view");
+    await assertInvestorDataRoomModuleActive(supabase, user, fundName);
 
     const sourceBatch = await resolveSourceBatch(
       supabase,
@@ -702,17 +856,15 @@ export async function GET(request: NextRequest) {
       .limit(limit);
 
     if (user.role === "investor") {
-      if (investorCode) {
-        assertInvestorCodeAllowed(user, investorCode);
-      }
-
-      engagementQuery = engagementQuery.in(
+      // Investor-role query-string identity is deliberately ignored.
+      // The workflow is locked to the resolved signed-in entitlement.
+      engagementQuery = engagementQuery.eq(
         "investor_code",
-        user.investorCodes
+        user.resolvedInvestorCode
       );
-      questionQuery = questionQuery.in(
+      questionQuery = questionQuery.eq(
         "investor_code",
-        user.investorCodes
+        user.resolvedInvestorCode
       );
     } else if (investorCode) {
       engagementQuery = engagementQuery.eq(
@@ -754,12 +906,22 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const engagementEvents = Array.isArray(engagementResult.data)
+    const rawEngagementEvents = Array.isArray(engagementResult.data)
       ? (engagementResult.data as unknown as DataRow[])
       : [];
-    const questions = Array.isArray(questionResult.data)
+    const rawQuestions = Array.isArray(questionResult.data)
       ? (questionResult.data as unknown as DataRow[])
       : [];
+
+    const engagementEvents =
+      user.role === "investor"
+        ? rawEngagementEvents.map(sanitizeEngagementEventForInvestor)
+        : rawEngagementEvents;
+
+    const questions =
+      user.role === "investor"
+        ? rawQuestions.map(sanitizeQuestionForInvestor)
+        : rawQuestions;
 
     return NextResponse.json(
       {
@@ -851,8 +1013,9 @@ export async function POST(request: NextRequest) {
       request,
       supabase,
       fundName,
-      operation === "record_engagement" ? "view" : "view"
+      "view"
     );
+    await assertInvestorDataRoomModuleActive(supabase, user, fundName);
 
     const sourceBatch = await resolveSourceBatch(
       supabase,
@@ -874,19 +1037,15 @@ export async function POST(request: NextRequest) {
 
     const requestedInvestorCode =
       user.role === "investor"
-        ? normalizeText(body.investorCode) ||
-          (user.investorCodes.length === 1 ? user.investorCodes[0] : "")
+        ? user.resolvedInvestorCode
         : normalizeText(body.investorCode);
 
-    if (user.role === "investor") {
-      assertInvestorCodeAllowed(user, requestedInvestorCode);
-
-      if (
-        operation === "create_question" &&
-        !user.canSubmitQuestions
-      ) {
-        throw new Error("INVESTOR_QUESTION_ACCESS_REQUIRED");
-      }
+    if (
+      user.role === "investor" &&
+      operation === "create_question" &&
+      !user.canSubmitQuestions
+    ) {
+      throw new Error("INVESTOR_QUESTION_ACCESS_REQUIRED");
     }
 
     const investor = await resolveInvestorIdentity(
@@ -957,12 +1116,16 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const engagementEvent = rawEvent as unknown as DataRow;
+
       return NextResponse.json(
         {
           message: `${action} event recorded successfully.`,
           sourceBatch,
           engagementEvent:
-            rawEvent as unknown as DataRow,
+            user.role === "investor"
+              ? sanitizeEngagementEventForInvestor(engagementEvent)
+              : engagementEvent,
         },
         { status: 201 }
       );
@@ -1059,12 +1222,17 @@ export async function POST(request: NextRequest) {
         "The question was saved, but its engagement event could not be recorded.";
     }
 
+    const createdQuestion = rawQuestion as unknown as DataRow;
+
     return NextResponse.json(
       {
         message: "DDQ question created successfully.",
         warning: engagementWarning || undefined,
         sourceBatch,
-        question: rawQuestion as unknown as DataRow,
+        question:
+          user.role === "investor"
+            ? sanitizeQuestionForInvestor(createdQuestion)
+            : createdQuestion,
       },
       { status: 201 }
     );

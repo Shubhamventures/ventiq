@@ -62,6 +62,7 @@ type AuditLog = {
 
 type ApprovalForm = {
   sourceModule: string;
+  linkedRecordId: string;
   linkedRecordType: string;
   actionType: string;
   actionTitle: string;
@@ -86,6 +87,7 @@ type WorkflowCapabilities = {
 
 const emptyApprovalForm: ApprovalForm = {
   sourceModule: "Debt LMS",
+  linkedRecordId: "",
   linkedRecordType: "Repayment Schedule",
   actionType: "Receipt Update",
   actionTitle: "",
@@ -431,7 +433,23 @@ export default function AuditWorkflowPage() {
   }, [approvals, auditLogs]);
 
   function updateApprovalForm(field: keyof ApprovalForm, value: string) {
-    setApprovalForm((currentForm) => ({ ...currentForm, [field]: value }));
+    setApprovalForm((currentForm) => {
+      const nextForm = { ...currentForm, [field]: value };
+
+      if (field === "actionType" && value === "Fund Memory Approval") {
+        nextForm.sourceModule = "Document Studio";
+        nextForm.linkedRecordType = "Fund Memory Snapshot";
+        nextForm.priority = "High";
+      }
+
+      if (field === "actionType" && value === "Capital Call Approval") {
+        nextForm.sourceModule = "Capital Call";
+        nextForm.linkedRecordType = "Capital Call";
+        nextForm.priority = "High";
+      }
+
+      return nextForm;
+    });
   }
 
   function canActOnApproval(approval: ApprovalRequest) {
@@ -461,6 +479,18 @@ export default function AuditWorkflowPage() {
     }
     if (!approvalForm.actionDescription.trim()) {
       setFormMessage("Action description is required.");
+      return;
+    }
+    if (
+      (approvalForm.actionType === "Capital Call Approval" ||
+        approvalForm.actionType === "Fund Memory Approval") &&
+      !approvalForm.linkedRecordId.trim()
+    ) {
+      setFormMessage(
+        approvalForm.actionType === "Fund Memory Approval"
+          ? "Paste the canonical Fund Memory snapshot ID before submitting."
+          : "Paste the saved capital call ID before submitting."
+      );
       return;
     }
 
@@ -1103,15 +1133,36 @@ export default function AuditWorkflowPage() {
                   </select>
                 </div>
                 <div className="field">
+                  <label>Linked Record ID</label>
+                  <input
+                    value={approvalForm.linkedRecordId}
+                    onChange={(e) => updateApprovalForm("linkedRecordId", e.target.value)}
+                    placeholder={
+                      approvalForm.actionType === "Fund Memory Approval"
+                        ? "Canonical snapshot UUID"
+                        : approvalForm.actionType === "Capital Call Approval"
+                        ? "Saved capital call UUID"
+                        : "Optional for generic approval requests"
+                    }
+                  />
+                  {(approvalForm.actionType === "Fund Memory Approval" ||
+                    approvalForm.actionType === "Capital Call Approval") && (
+                    <div className="field-hint">
+                      Required for this approval type. The server validates the linked record and your governed fund access.
+                    </div>
+                  )}
+                </div>
+
+                <div className="field">
                   <label>Linked Record Type</label>
                   <select value={approvalForm.linkedRecordType} onChange={(e) => updateApprovalForm("linkedRecordType", e.target.value)}>
-                    <option>Repayment Schedule</option><option>Bank Transaction</option><option>Stakeholder Access</option><option>Investor Notice</option><option>Capital Call</option><option>Distribution</option><option>Data Request</option><option>Covenant Breach</option><option>Security Tracker</option>
+                    <option>Repayment Schedule</option><option>Bank Transaction</option><option>Stakeholder Access</option><option>Investor Notice</option><option>Capital Call</option><option>Distribution</option><option>Data Request</option><option>Covenant Breach</option><option>Security Tracker</option><option>Fund Memory Snapshot</option>
                   </select>
                 </div>
                 <div className="field">
                   <label>Action Type</label>
                   <select value={approvalForm.actionType} onChange={(e) => updateApprovalForm("actionType", e.target.value)}>
-                    <option>Receipt Update</option><option>AI Mapping Approval</option><option>Penalty Waiver</option><option>Default Marking</option><option>Notice Dispatch</option><option>Investor Invite</option><option>Access Revocation</option><option>Capital Call Approval</option><option>Distribution Approval</option><option>Data Deletion Approval</option>
+                    <option>Receipt Update</option><option>AI Mapping Approval</option><option>Penalty Waiver</option><option>Default Marking</option><option>Notice Dispatch</option><option>Investor Invite</option><option>Access Revocation</option><option>Capital Call Approval</option><option>Distribution Approval</option><option>Data Deletion Approval</option><option>Fund Memory Approval</option>
                   </select>
                 </div>
                 <div className="field">

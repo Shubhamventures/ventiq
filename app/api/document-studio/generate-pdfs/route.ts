@@ -137,56 +137,24 @@ function renderTemplateText(template: string, data: Record<string, string>) {
   );
 }
 
-function getFieldValue(fieldKey: string, data: Record<string, string>) {
-  const fallbackValues: Record<string, string> = {
-    transaction_date: "24-Apr-24",
-    transaction_description: "Units Allotment",
-    transaction_type: "Capital Call",
-    transaction_amount: "INR 1,98,82,000",
-    units: "1,98,820",
-    nav: "INR 100.00",
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
 
-    particular: "Interest / Fee Income",
-    reference: "A",
-    amount: "INR 8,38,428",
-    formula: "C = A + B",
+function getFieldValue(
+  fieldKey: string,
+  data: Record<string, string>,
+  row?: Record<string, unknown>
+) {
+  if (row && Object.prototype.hasOwnProperty.call(row, fieldKey)) {
+    const rowValue = safePdfText(row[fieldKey]);
+    if (rowValue) return rowValue;
+  }
 
-    cashflow_date: "24-Apr-24",
-    cashflow_type: "Capital Call",
-    remarks: "Investor cashflow",
-
-    opening_capital: "INR 1,50,00,000",
-    capital_contribution: "INR 50,00,000",
-    income_allocation: "INR 8,44,514",
-    distribution: "INR 5,91,981",
-    closing_capital: "INR 1,82,40,000",
-
-    income_head: "Interest income",
-    gross_income: "INR 8,44,514",
-    tds: "INR 84,451",
-    net_income: "INR 7,60,063",
-
-    distribution_date: "02-Jul-24",
-    gross_distribution: "INR 5,91,981",
-    tax_withheld: "INR 59,198",
-    net_distribution: "INR 5,32,783",
-
-    unit_date: "24-Apr-24",
-    opening_units: "0",
-    units_added: "1,98,820",
-    units_redeemed: "0",
-    closing_units: "1,98,820",
-
-    company_name: "Portfolio Co A",
-    invested_amount: "INR 50,00,000",
-    current_value: data.current_nav || "INR 1,82,40,000",
-    moic: "1.64x",
-    irr: data.irr || "18.7%",
-
-    particulars: "Sample line item",
-  };
-
-  return data[fieldKey] ?? fallbackValues[fieldKey] ?? `{${fieldKey}}`;
+  const value = safePdfText(data[fieldKey]);
+  return value || "Unavailable";
 }
 
 function getDefaultTableConfig(
@@ -440,44 +408,140 @@ function normalizeBlocks(value: unknown, documentType: string): TemplateBlock[] 
 }
 
 function makeData(document: GeneratedDocument, documentType: string) {
-  const previewData =
-    document.preview_data && typeof document.preview_data === "object"
-      ? (document.preview_data as Record<string, unknown>)
-      : {};
+  const previewData = asRecord(document.preview_data);
+  const fundMemory = asRecord(previewData.fundMemory);
+  const mergedFields = asRecord(previewData.mergedFields);
+  const tablesValue = asRecord(previewData.tables);
 
-  const mergedFields =
-    previewData.mergedFields && typeof previewData.mergedFields === "object"
-      ? (previewData.mergedFields as Record<string, unknown>)
-      : {};
+  if (previewData.canonical !== true) {
+    throw new Error(
+      "CANONICAL_PREVIEW_DATA_REQUIRED: This queued document was not prepared from governed Fund Memory. Prepare a new canonical batch."
+    );
+  }
 
-  const investorName =
-    safePdfText(mergedFields.investor_name || document.investor_name || "Investor");
-  const investorCode =
-    safePdfText(mergedFields.investor_code || document.investor_code || "INV-0000");
+  if (
+    fundMemory.eligible !== true ||
+    !safePdfText(fundMemory.snapshot_id) ||
+    safePdfText(fundMemory.approval_status).toLowerCase() !== "approved"
+  ) {
+    throw new Error(
+      "CANONICAL_FUND_MEMORY_NOT_ELIGIBLE: PDF generation requires an approved, statement-eligible Fund Memory snapshot."
+    );
+  }
 
-  return {
-    investor_name: investorName,
-    investor_code: investorCode,
-    investor_type: safePdfText(mergedFields.investor_type || "Investor"),
-    fund_name: safePdfText(mergedFields.fund_name || document.fund_name || "VENTIQ"),
-    fund_address: safePdfText(mergedFields.fund_address || "GIFT City, Gandhinagar"),
-    statement_period: safePdfText(mergedFields.statement_period || "Q1 FY 2025-26"),
-    report_date: safePdfText(mergedFields.report_date || "30-Jun-2025"),
-    commitment_amount: formatAmount(mergedFields.commitment_amount || "INR 2,50,00,000"),
-    capital_called: formatAmount(mergedFields.capital_called || "INR 1,50,00,000"),
-    uncalled_capital: formatAmount(mergedFields.uncalled_capital || "INR 1,00,00,000"),
-    current_nav: formatAmount(mergedFields.current_nav || "INR 1,82,40,000"),
-    distribution_amount: formatAmount(mergedFields.distribution_amount || "INR 42,00,000"),
-    dpi: safePdfText(mergedFields.dpi || "0.28x"),
-    tvpi: safePdfText(mergedFields.tvpi || "1.49x"),
-    irr: safePdfText(mergedFields.irr || "18.7%"),
-    generated_on: new Date().toLocaleDateString("en-IN", {
+  const data: Record<string, string> = {};
+  for (const [key, value] of Object.entries(mergedFields)) {
+    const cleanValue = safePdfText(value);
+    data[key] = cleanValue || "Unavailable";
+  }
+
+  const requiredIdentityFields = [
+    "investor_id",
+    "investor_code",
+    "investor_name",
+    "fund_name",
+    "statement_period",
+    "report_date",
+  ];
+
+  const missingIdentityFields = requiredIdentityFields.filter((key) => {
+    const value = safePdfText(mergedFields[key]);
+    return !value || value === "Unavailable";
+  });
+
+  if (missingIdentityFields.length > 0) {
+    throw new Error(
+      `CANONICAL_PREVIEW_DATA_INCOMPLETE: Missing ${missingIdentityFields.join(", ")}.`
+    );
+  }
+
+  // Non-financial layout text may use safe defaults. Investor-facing financial
+  // fields never receive sample/default economic values.
+  data.fund_address = safePdfText(mergedFields.fund_address) || "GIFT City, Gandhinagar";
+  data.generated_on =
+    safePdfText(mergedFields.generated_on) ||
+    new Date().toLocaleDateString("en-IN", {
       day: "2-digit",
       month: "short",
       year: "numeric",
-    }),
-    document_type: safePdfText(documentType),
-  };
+    });
+  data.document_type = safePdfText(documentType);
+
+  const tables: Record<string, Record<string, unknown>[]> = {};
+  for (const [key, value] of Object.entries(tablesValue)) {
+    if (Array.isArray(value)) {
+      tables[key] = value
+        .filter((row) => row && typeof row === "object" && !Array.isArray(row))
+        .map((row) => row as Record<string, unknown>);
+    }
+  }
+
+  return { data, tables, fundMemory };
+}
+
+async function assertCanonicalDocumentStillEligible(args: {
+  supabase: ReturnType<typeof getSupabaseAdmin>;
+  document: GeneratedDocument;
+  organisationId: string;
+  fundName: string;
+}) {
+  const { supabase, document, organisationId, fundName } = args;
+  const previewData = asRecord(document.preview_data);
+  const fundMemory = asRecord(previewData.fundMemory);
+  const mergedFields = asRecord(previewData.mergedFields);
+  const snapshotId = safePdfText(fundMemory.snapshot_id);
+  const investorId = safePdfText(mergedFields.investor_id || document.investor_id);
+
+  if (previewData.canonical !== true || !snapshotId || !investorId) {
+    throw new Error(
+      "CANONICAL_PREVIEW_DATA_REQUIRED: Prepare a new governed batch before generating PDFs."
+    );
+  }
+
+  const { data: control, error: controlError } = await supabase
+    .from("investor_position_snapshot_controls")
+    .select("snapshot_id, investor_statement_eligible, blocker_codes")
+    .eq("snapshot_id", snapshotId)
+    .eq("organisation_id", organisationId)
+    .eq("fund_name", fundName)
+    .eq("investor_id", investorId)
+    .eq("investor_statement_eligible", true)
+    .limit(1)
+    .maybeSingle();
+
+  if (controlError) {
+    throw new Error(
+      `Unable to revalidate Fund Memory eligibility: ${controlError.message}`
+    );
+  }
+
+  if (!control) {
+    throw new Error(
+      "FUND_MEMORY_NO_LONGER_STATEMENT_ELIGIBLE: The canonical snapshot must be reviewed before PDF generation."
+    );
+  }
+
+  const { data: snapshot, error: snapshotError } = await supabase
+    .from("investor_position_snapshots")
+    .select("id, approval_status, superseded_at")
+    .eq("id", snapshotId)
+    .eq("organisation_id", organisationId)
+    .eq("fund_name", fundName)
+    .eq("investor_id", investorId)
+    .eq("approval_status", "approved")
+    .is("superseded_at", null)
+    .limit(1)
+    .maybeSingle();
+
+  if (snapshotError) {
+    throw new Error(`Unable to revalidate canonical Fund Memory: ${snapshotError.message}`);
+  }
+
+  if (!snapshot) {
+    throw new Error(
+      "FUND_MEMORY_NO_LONGER_LIVE: The queued canonical snapshot is no longer the live approved snapshot. Prepare a new batch."
+    );
+  }
 }
 
 function drawWrappedText(args: {
@@ -557,7 +621,9 @@ async function createPdfForDocument(args: {
   let page = pdfDoc.addPage(pageSize);
   let y = pageSize[1] - margin;
 
-  const data = makeData(document, documentType);
+  const canonical = makeData(document, documentType);
+  const data = canonical.data;
+  const tables = canonical.tables;
 
   function ensureSpace(requiredHeight: number) {
     if (y - requiredHeight > margin) {
@@ -655,7 +721,10 @@ async function createPdfForDocument(args: {
         : getDefaultTableConfig(repeatSource);
 
     const columns = tableConfig.columns;
-    const rowCount = tableConfig.repeatRows ? 3 : 1;
+    const canonicalRows = tables[repeatSource] ?? [];
+    const tableRows = canonicalRows.length > 0 ? canonicalRows : [data];
+    const rowsToRender = tableConfig.repeatRows ? tableRows.slice(0, 25) : tableRows.slice(0, 1);
+    const rowCount = Math.max(1, rowsToRender.length);
     const headerHeight = 24;
     const rowHeight = 24;
     const tableHeight = headerHeight * 2 + rowHeight * rowCount + 22;
@@ -736,7 +805,8 @@ async function createPdfForDocument(args: {
           color: rowIndex % 2 === 0 ? rgb(1, 1, 1) : rgb(0.99, 0.97, 0.94),
         });
 
-        const value = getFieldValue(column.fieldKey, data);
+        const row = rowsToRender[rowIndex] ?? data;
+        const value = getFieldValue(column.fieldKey, data, row);
         const textWidth = regularFont.widthOfTextAtSize(safePdfText(value), 7.5);
         const textX =
           column.align === "right"
@@ -762,7 +832,7 @@ async function createPdfForDocument(args: {
 
     page.drawText(
       safePdfText(
-        `${tableConfig.repeatRows ? "Repeats from" : "Static table from"} ${tableConfig.repeatSource} - ${columns.length} mapped columns`
+        `${tableConfig.repeatRows ? "Canonical rows from" : "Canonical table from"} ${tableConfig.repeatSource} - ${rowsToRender.length} row(s)`
       ),
       {
         x: margin,
@@ -848,37 +918,31 @@ async function createPdfForDocument(args: {
     }
 
     if (block.kind === "chart") {
-      sectionTitle(block.chartConfig?.title || block.title || "Performance Chart", block.subtitle);
-      ensureSpace(120);
-
-      const barValues = [42, 78, 56, 92];
-      const barWidth = 42;
-      const gap = 24;
-      const chartBaseY = y - 95;
-      const startX = margin + 80;
-
-      barValues.forEach((height, index) => {
-        page.drawRectangle({
-          x: startX + index * (barWidth + gap),
-          y: chartBaseY,
-          width: barWidth,
-          height,
-          color: index === 1 ? rgb(0.71, 0.51, 0.08) : rgb(0.12, 0.37, 0.66),
-        });
-      });
-
-      page.drawText(
-        safePdfText(`Series: ${block.chartConfig?.series || "current_nav"}`),
-        {
-          x: margin,
-          y: chartBaseY - 18,
-          size: 8,
-          font: regularFont,
-          color: rgb(0.39, 0.45, 0.55),
-        }
+      const series = block.chartConfig?.series || "current_nav";
+      sectionTitle(
+        block.chartConfig?.title || block.title || "Performance Chart",
+        block.subtitle
       );
+      drawKeyValueGrid([
+        {
+          label: series.replace(/_/g, " ").toUpperCase(),
+          value: data[series] || "Unavailable",
+        },
+      ]);
 
-      y -= 140;
+      y = drawWrappedText({
+        page,
+        text:
+          "Point-in-time canonical value shown. Historical chart series remain unavailable until governed time-series Fund Memory is connected.",
+        x: margin,
+        y,
+        maxWidth: usableWidth,
+        size: 8,
+        font: regularFont,
+        color: rgb(0.39, 0.45, 0.55),
+        lineHeight: 11,
+      });
+      y -= 18;
       return;
     }
 
@@ -1074,6 +1138,13 @@ export async function POST(request: Request) {
 
     for (const document of documents) {
       try {
+        await assertCanonicalDocumentStillEligible({
+          supabase,
+          document,
+          organisationId: actor.organisationId,
+          fundName: actor.fundName,
+        });
+
         const investorCode = safePdfText(document.investor_code || "INV");
         const investorName = safePdfText(document.investor_name || "Investor");
         const cleanDocumentType = safePdfText(documentType).replace(/\s+/g, "_");

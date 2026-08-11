@@ -14,8 +14,6 @@ type Investor = {
   country: string | null;
   kyc_status: string | null;
   bank_status: string | null;
-  source_batch_id: string | null;
-  updated_at: string | null;
   source: "migration" | "legacy";
 };
 
@@ -33,6 +31,7 @@ type Commitment = {
 type InvestorDocument = {
   id: string;
   investor_id?: string | null;
+  investor_master_id?: string | null;
   investor_code?: string | null;
   document_type: string | null;
   document_name: string | null;
@@ -55,10 +54,41 @@ type InvestorDocument = {
   migration_status?: string | null;
   confidence_score?: number | null;
   period_label?: string | null;
+  organisation_id?: string | null;
+  document_studio_batch_id?: string | null;
+  document_studio_generated_document_id?: string | null;
+  fund_memory_snapshot_id?: string | null;
+  fund_memory_reporting_date?: string | null;
+  fund_memory_reporting_period?: string | null;
+  fund_memory_snapshot_version?: number | null;
+  fund_memory_source_kind?: string | null;
+  canonical_lineage?: Record<string, unknown> | null;
   uploaded_at?: string | null;
   published_at?: string | null;
   generated_at?: string | null;
   created_at?: string | null;
+  download_ready?: boolean;
+  canonical?: boolean;
+};
+
+type InvestorDocumentsApiResponse = {
+  available?: boolean;
+  fund_name?: string;
+  investor_code?: string;
+  investor_name?: string;
+  permissions?: {
+    can_view_documents?: boolean;
+    can_download_documents?: boolean;
+  };
+  summary?: {
+    total_documents?: number;
+    download_ready?: number;
+    canonical_documents?: number;
+  };
+  documents?: InvestorDocument[];
+  reason?: string;
+  message?: string;
+  error?: string;
 };
 
 type InvestorFinancialPosition = {
@@ -78,8 +108,9 @@ type InvestorFinancialPosition = {
   net_contributed: number | null;
   current_nav: number | null;
   investor_irr: number | null;
-  investor_rvpi: number | null;
+  investor_moic: number | null;
   investor_dpi: number | null;
+  investor_rvpi: number | null;
   investor_tvpi: number | null;
   status: string | null;
   created_at: string | null;
@@ -96,6 +127,75 @@ type InvestorCashflow = {
   amount: number | null;
   direction: string | null;
   description: string | null;
+};
+
+type InvestorCapitalCall = {
+  capital_call_code: string;
+  call_name?: string | null;
+  call_date?: string | null;
+  due_date?: string | null;
+  purpose?: string | null;
+  allocation_code?: string | null;
+  commitment_amount?: number | null;
+  call_percentage?: number | null;
+  called_amount?: number | null;
+  total_due?: number | null;
+  amount_received?: number | null;
+  net_contribution?: number | null;
+  outstanding_amount?: number | null;
+  allocation_status?: string | null;
+  receipt_status?: string | null;
+  receipt_date?: string | null;
+  bank_reference?: string | null;
+  payment_method?: string | null;
+  days_late?: number | null;
+  currency?: string | null;
+};
+
+type InvestorDistribution = {
+  distribution_code: string;
+  distribution_name?: string | null;
+  distribution_type?: string | null;
+  declaration_date?: string | null;
+  record_date?: string | null;
+  payment_date?: string | null;
+  gross_distribution?: number | null;
+  return_of_capital?: number | null;
+  income_distribution?: number | null;
+  interest_distribution?: number | null;
+  dividend_distribution?: number | null;
+  capital_gain_distribution?: number | null;
+  fee_rebate?: number | null;
+  tax_withheld?: number | null;
+  other_deductions?: number | null;
+  net_distribution?: number | null;
+  payment_status?: string | null;
+  bank_reference?: string | null;
+  currency?: string | null;
+};
+
+type InvestorCashflowSummary = {
+  capital_call_count?: number | null;
+  receipt_count?: number | null;
+  distribution_count?: number | null;
+  total_called?: number | null;
+  total_due?: number | null;
+  total_received?: number | null;
+  total_outstanding?: number | null;
+  total_distributed?: number | null;
+};
+
+type InvestorCashflowsApiResponse = {
+  available?: boolean;
+  fund_name?: string;
+  investor_code?: string;
+  investor_name?: string;
+  summary?: InvestorCashflowSummary;
+  capital_calls?: InvestorCapitalCall[];
+  distributions?: InvestorDistribution[];
+  reason?: string;
+  message?: string;
+  error?: string;
 };
 
 type DataRoomEvent = {
@@ -135,6 +235,56 @@ type DataRoomDocument = {
 
 type DataRow = Record<string, unknown>;
 
+type PerformanceCalculationResponse = {
+  run?: DataRow | null;
+  fundMetric?: DataRow | null;
+  portfolioMetrics?: DataRow[];
+  investorMetrics?: DataRow[];
+  reconciliations?: DataRow[];
+  portfolioValuations?: DataRow[];
+  error?: string;
+};
+
+type FinancialVerification = {
+  calculation_version?: string | null;
+  as_of_date?: string | null;
+  calculation_status?: string | null;
+  reconciliation_status?: string | null;
+  controls_passed?: number | null;
+  controls_total?: number | null;
+};
+
+type FinancialPositionApiResponse = {
+  available?: boolean;
+  fund_name?: string;
+  investor_code?: string;
+  investor_name?: string;
+  class_name?: string | null;
+  currency?: string;
+  verification?: FinancialVerification;
+  financial_position?: {
+    commitment_amount?: number | null;
+    paid_in_capital?: number | null;
+    total_distributions?: number | null;
+    gross_distributions?: number | null;
+    withholding_tax?: number | null;
+    net_distributions?: number | null;
+    performance_distribution_basis?: string | null;
+    uncalled_commitment?: number | null;
+    allocated_nav?: number | null;
+    nav_allocation_percentage?: number | null;
+    nav_allocation_method?: string | null;
+    dpi?: number | null;
+    rvpi?: number | null;
+    tvpi?: number | null;
+    net_irr?: number | null;
+    cashflow_count?: number | null;
+    calculation_status?: string | null;
+  };
+  reason?: string;
+  message?: string;
+  error?: string;
+};
 
 type PortalActivityEvent = {
   id: string;
@@ -195,6 +345,14 @@ function getPositionNumber(
 
 function formatCr(value: number) {
   return `₹${value.toFixed(2)} Cr`;
+}
+
+function formatInr(value: number | null | undefined) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0));
 }
 
 function formatPercent(value: number | null | undefined) {
@@ -296,13 +454,10 @@ function getDocumentDate(documentRecord: InvestorDocument) {
   );
 }
 
-function getDocumentUrl(documentRecord: InvestorDocument) {
-  return documentRecord.storage_url || documentRecord.file_url || "";
-}
-
 function hasStoredPdf(documentRecord: InvestorDocument) {
   return Boolean(
-    documentRecord.storage_url ||
+    documentRecord.download_ready ||
+      documentRecord.storage_url ||
       documentRecord.file_url ||
       documentRecord.storage_path
   );
@@ -361,7 +516,6 @@ function filterRowsForFund<T extends DataRow>(
     return rowFundName === normalizedFundName;
   });
 }
-
 
 function isPdfUpload(row: DataRow) {
   const text = [
@@ -546,40 +700,55 @@ export default function InvestorPortalPage() {
     session,
     activeRole,
     fundAccess,
+    investorId,
     loading: authLoading,
   } = useVentiqAuth();
+  const isInvestorRole = activeRole === "investor";
 
-  const availableFunds = useMemo(() => {
-    const authorisedFunds = Array.from(
+  const investorAllowedFunds = useMemo(() => {
+    if (!isInvestorRole) return [];
+
+    return Array.from(
       new Set(
         fundAccess
           .filter(
             (access) =>
-              access.role === "investor" &&
               access.status === "Active" &&
-              access.can_view &&
-              access.fund_name?.trim()
+              Boolean(access.can_view) &&
+              Boolean(access.fund_name?.trim())
           )
           .map((access) => access.fund_name.trim())
       )
     ).sort();
-
-    return authorisedFunds.length > 0
-      ? authorisedFunds
-      : [activeFundName];
-  }, [fundAccess, activeFundName]);
-
+  }, [fundAccess, isInvestorRole]);
+  const [availableFunds, setAvailableFunds] = useState<string[]>([
+    "VENTIQ Growth Fund II",
+  ]);
   const [fundActivationStatus, setFundActivationStatus] =
     useState("Setup Not Started");
   const [fundActivatedAt, setFundActivatedAt] = useState("");
   const [fundActivatedBy, setFundActivatedBy] = useState("");
+  const [investorDocumentsModuleStatus, setInvestorDocumentsModuleStatus] =
+    useState("Setup Not Started");
+  const [investorDocumentsModuleActivatedAt, setInvestorDocumentsModuleActivatedAt] =
+    useState("");
+  const [investorDocumentsModuleActivatedBy, setInvestorDocumentsModuleActivatedBy] =
+    useState("");
   const [investors, setInvestors] = useState<Investor[]>([]);
   const [selectedInvestorId, setSelectedInvestorId] = useState("");
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [documents, setDocuments] = useState<InvestorDocument[]>([]);
+  const [investorEntitlements, setInvestorEntitlements] = useState<DataRow[]>([]);
   const [financialPosition, setFinancialPosition] =
     useState<InvestorFinancialPosition | null>(null);
   const [cashflows, setCashflows] = useState<InvestorCashflow[]>([]);
+  const [capitalCalls, setCapitalCalls] = useState<InvestorCapitalCall[]>([]);
+  const [distributionHistory, setDistributionHistory] = useState<
+    InvestorDistribution[]
+  >([]);
+  const [cashflowSummary, setCashflowSummary] =
+    useState<InvestorCashflowSummary | null>(null);
+  const [cashflowAccessMessage, setCashflowAccessMessage] = useState("");
 
   const [latestInvestorBatch, setLatestInvestorBatch] =
     useState<DataRow | null>(null);
@@ -588,11 +757,19 @@ export default function InvestorPortalPage() {
     useState<DataRow | null>(null);
   const [latestCalculationRun, setLatestCalculationRun] =
     useState<DataRow | null>(null);
+  const [calculatedFundMetric, setCalculatedFundMetric] =
+    useState<DataRow | null>(null);
   const [calculatedInvestorMetrics, setCalculatedInvestorMetrics] = useState<
+    DataRow[]
+  >([]);
+  const [calculationReconciliations, setCalculationReconciliations] = useState<
     DataRow[]
   >([]);
   const [sourceBatch, setSourceBatch] = useState("");
   const [calculationLoadMessage, setCalculationLoadMessage] = useState("");
+  const [financialVerification, setFinancialVerification] =
+    useState<FinancialVerification | null>(null);
+  const [financialAccessMessage, setFinancialAccessMessage] = useState("");
 
   const [dataRoomDocuments, setDataRoomDocuments] = useState<DataRoomDocument[]>(
     []
@@ -609,33 +786,155 @@ export default function InvestorPortalPage() {
   const [loading, setLoading] = useState(true);
   const [loadingInvestorData, setLoadingInvestorData] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [documentAccessBusyKey, setDocumentAccessBusyKey] = useState("");
+  const [documentAccessMessage, setDocumentAccessMessage] = useState("");
+  const [documentListMessage, setDocumentListMessage] = useState("");
+  const [documentDownloadAllowed, setDocumentDownloadAllowed] = useState(true);
 
   useEffect(() => {
-    if (!fundContextReady || authLoading || availableFunds.length === 0) {
+    if (!fundContextReady || authLoading || !isInvestorRole) return;
+
+    if (investorAllowedFunds.length === 0) {
+      setAvailableFunds([]);
       return;
     }
 
-    if (
-      activeRole === "investor" &&
-      !availableFunds.some(
-        (fundName) =>
-          fundName.trim().toLowerCase() === activeFundName.trim().toLowerCase()
-      )
-    ) {
-      setActiveFundName(availableFunds[0]);
+    setAvailableFunds(investorAllowedFunds);
+
+    const hasCurrentFundAccess = investorAllowedFunds.some(
+      (fundName) =>
+        fundName.trim().toLowerCase() === activeFundName.trim().toLowerCase()
+    );
+
+    if (!hasCurrentFundAccess) {
+      setActiveFundName(investorAllowedFunds[0]);
     }
   }, [
     activeFundName,
-    activeRole,
     authLoading,
-    availableFunds,
     fundContextReady,
+    investorAllowedFunds,
+    isInvestorRole,
     setActiveFundName,
   ]);
+
+  async function accessInvestorDocument(
+    documentRecord: InvestorDocument,
+    accessMode: "view" | "download"
+  ) {
+    const accessToken = session?.access_token ?? "";
+
+    if (!accessToken) {
+      setDocumentAccessMessage("Please sign in before opening investor documents.");
+      return;
+    }
+
+    if (!documentRecord.id) {
+      setDocumentAccessMessage("The selected investor document has no governed record ID.");
+      return;
+    }
+
+    if (accessMode === "download" && !documentDownloadAllowed) {
+      setDocumentAccessMessage(
+        "Download access is not enabled for your investor entitlement. You can still view the document securely."
+      );
+      return;
+    }
+
+    const busyKey = `${documentRecord.id}:${accessMode}`;
+    const previewWindow =
+      accessMode === "view" ? window.open("about:blank", "_blank") : null;
+
+    if (previewWindow) {
+      previewWindow.opener = null;
+      previewWindow.document.title = "Opening secure VENTIQ document...";
+    }
+
+    try {
+      setDocumentAccessBusyKey(busyKey);
+      setDocumentAccessMessage(
+        accessMode === "download"
+          ? "Preparing governed PDF download..."
+          : "Preparing secure PDF access..."
+      );
+
+      const response = await fetch("/api/investor-portal/document-access", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          document_id: documentRecord.id,
+          access_mode: accessMode,
+        }),
+        cache: "no-store",
+      });
+
+      const result = (await response.json()) as {
+        error?: string;
+        signed_url?: string;
+        expires_in_seconds?: number;
+      };
+
+      if (!response.ok || !result.signed_url) {
+        throw new Error(result.error || "Unable to open the investor PDF securely.");
+      }
+
+      setDocumentAccessMessage(
+        `Secure ${accessMode} access created. Link expires in ${
+          result.expires_in_seconds ?? 180
+        } seconds.`
+      );
+
+      if (accessMode === "view") {
+        if (previewWindow) {
+          previewWindow.location.href = result.signed_url;
+        } else {
+          window.open(result.signed_url, "_blank", "noopener,noreferrer");
+        }
+      } else {
+        const link = document.createElement("a");
+        link.href = result.signed_url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+    } catch (error) {
+      if (previewWindow) previewWindow.close();
+      setDocumentAccessMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to open the investor PDF securely."
+      );
+    } finally {
+      setDocumentAccessBusyKey("");
+    }
+  }
 
   useEffect(() => {
     async function loadInvestors() {
       if (!fundContextReady || authLoading) return;
+
+      if (isInvestorRole && investorAllowedFunds.length === 0) {
+        setErrorMessage(
+          "Your investor account has no active governed fund access."
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (
+        isInvestorRole &&
+        !investorAllowedFunds.some(
+          (fundName) =>
+            fundName.trim().toLowerCase() === activeFundName.trim().toLowerCase()
+        )
+      ) {
+        return;
+      }
 
       if (!isSupabaseConfigured || !supabase) {
         setErrorMessage(
@@ -653,82 +952,221 @@ export default function InvestorPortalPage() {
         return;
       }
 
-      if (activeRole !== "investor") {
-        setErrorMessage(
-          "This workspace requires an authenticated Investor role."
-        );
-        setLoading(false);
-        return;
-      }
-
       setLoading(true);
       setErrorMessage("");
       setCalculationLoadMessage("");
-      setLatestCalculationRun(null);
-      setCalculatedInvestorMetrics([]);
-      setSourceBatch("");
 
       try {
+        let calculationRun: DataRow | null = null;
+        let authoritativeBatch = "";
+
+        // Internal Calculation Engine data remains an internal support layer.
+        // Investor-role users never call /api/metrics/calculate; their financial
+        // position is released later through the governed LP-safe endpoint.
+        if (!isInvestorRole) {
+          try {
+            const calculationResponse = await fetch(
+              `/api/metrics/calculate?fundName=${encodeURIComponent(activeFundName)}`,
+              {
+                method: "GET",
+                headers: { Authorization: `Bearer ${accessToken}` },
+                cache: "no-store",
+              }
+            );
+            const calculationData =
+              (await calculationResponse.json()) as PerformanceCalculationResponse;
+
+            if (calculationResponse.ok) {
+              calculationRun = calculationData.run ?? null;
+              const sourceBatchIds = calculationRun?.source_batch_ids;
+              authoritativeBatch = Array.isArray(sourceBatchIds)
+                ? String(sourceBatchIds[0] ?? "")
+                : "";
+
+              setLatestCalculationRun(calculationRun);
+              setCalculatedFundMetric(calculationData.fundMetric ?? null);
+              setCalculatedInvestorMetrics(calculationData.investorMetrics ?? []);
+              setCalculationReconciliations(calculationData.reconciliations ?? []);
+              setSourceBatch(authoritativeBatch);
+
+              if (!authoritativeBatch) {
+                setCalculationLoadMessage(
+                  "No completed verified Calculation Engine source batch is available for this fund yet. Canonical published documents remain independently governed by Fund Memory."
+                );
+              }
+            } else {
+              setLatestCalculationRun(null);
+              setCalculatedFundMetric(null);
+              setCalculatedInvestorMetrics([]);
+              setCalculationReconciliations([]);
+              setSourceBatch("");
+              setCalculationLoadMessage(
+                calculationData.error ||
+                  "Verified investor calculations are not available for this fund yet. Canonical published documents can still be discovered from Fund Memory lineage after fund activation."
+              );
+            }
+          } catch (calculationError) {
+            setLatestCalculationRun(null);
+            setCalculatedFundMetric(null);
+            setCalculatedInvestorMetrics([]);
+            setCalculationReconciliations([]);
+            setSourceBatch("");
+            setCalculationLoadMessage(
+              calculationError instanceof Error
+                ? calculationError.message
+                : "Verified investor calculations are not available for this fund yet."
+            );
+          }
+        } else {
+          setLatestCalculationRun(null);
+          setCalculatedFundMetric(null);
+          setCalculatedInvestorMetrics([]);
+          setCalculationReconciliations([]);
+          setSourceBatch("");
+          setCalculationLoadMessage("");
+        }
+
         const db = supabase as any;
 
-        const [activationResult, investorsResult, commitmentsResult] =
-          await Promise.all([
-            db
-              .from("fund_activation_status")
-              .select(
-                "status, activated_at, activated_by, readiness_score, approved_batch_map"
-              )
-              .eq("fund_name", activeFundName)
-              .maybeSingle(),
+        let activeInvestorEntitlements: DataRow[] = [];
 
-            db
-              .from("investor_master")
-              .select("*")
-              .eq("fund_name", activeFundName)
-              .order("updated_at", { ascending: false }),
+        if (isInvestorRole) {
+          const entitlementResult = await db
+            .from("ventiq_user_investor_access")
+            .select(
+              "investor_code,fund_name,status,expires_at,can_view_profile,can_view_financials,can_view_documents,can_download_documents,can_use_data_room,can_submit_questions"
+            )
+            .eq("status", "Active")
+            .eq("fund_name", activeFundName);
 
-            db
-              .from("fund_commitments")
-              .select("*")
-              .eq("fund_name", activeFundName),
-          ]);
+          if (entitlementResult.error) {
+            throw new Error(
+              `Unable to resolve your investor entitlement: ${entitlementResult.error.message}`
+            );
+          }
 
-        if (activationResult.error) {
-          throw new Error(activationResult.error.message);
+          const now = Date.now();
+          activeInvestorEntitlements = (
+            (entitlementResult.data ?? []) as DataRow[]
+          ).filter((row) => {
+            const expiresAt = getString(row, ["expires_at"], "");
+            if (!expiresAt) return true;
+            const expiry = Date.parse(expiresAt);
+            return Number.isFinite(expiry) && expiry > now;
+          });
+
+          setInvestorEntitlements(activeInvestorEntitlements);
+
+          if (activeInvestorEntitlements.length === 0) {
+            throw new Error(
+              `Your investor account has no active entitlement for ${activeFundName}.`
+            );
+          }
+        } else {
+          setInvestorEntitlements([]);
         }
+
+        let investorsQuery = db
+          .from("investor_master")
+          .select("*")
+          .eq("fund_name", activeFundName)
+          .order("investor_code", { ascending: true });
+
+        let commitmentsQuery = db
+          .from("fund_commitments")
+          .select("*")
+          .eq("fund_name", activeFundName);
+
+        let uploadsQuery = db.from("migration_file_uploads").select("*");
+
+        let complianceQuery = db
+          .from("compliance_items")
+          .select("*")
+          .eq("fund_name", activeFundName);
+
+        if (authoritativeBatch) {
+          investorsQuery = investorsQuery.eq("source_batch_id", authoritativeBatch);
+          commitmentsQuery = commitmentsQuery.eq(
+            "source_batch_id",
+            authoritativeBatch
+          );
+          uploadsQuery = uploadsQuery.eq("batch_id", authoritativeBatch);
+          complianceQuery = complianceQuery.eq(
+            "source_batch_id",
+            authoritativeBatch
+          );
+        } else {
+          // Without a verified Calculation Engine batch we still load the
+          // governed investor master so canonical documents can be matched.
+          // Batch-scoped operating records remain unavailable rather than being
+          // mixed across historical migration batches.
+          const impossibleBatch = "__VENTIQ_NO_VERIFIED_SOURCE_BATCH__";
+          commitmentsQuery = commitmentsQuery.eq("source_batch_id", impossibleBatch);
+          uploadsQuery = uploadsQuery.eq("batch_id", impossibleBatch);
+          complianceQuery = complianceQuery.eq("source_batch_id", impossibleBatch);
+        }
+
+        const [
+          investorsResult,
+          commitmentsResult,
+          fundOptionsResult,
+          activationResult,
+          moduleActivationResult,
+          uploadsResult,
+          complianceResult,
+        ] = await Promise.all([
+          investorsQuery,
+          commitmentsQuery,
+          db.from("fund_master").select("fund_name").not("fund_name", "is", null),
+          db
+            .from("fund_activation_status")
+            .select("status, activated_at, activated_by, readiness_score")
+            .eq("fund_name", activeFundName)
+            .maybeSingle(),
+          db
+            .from("ventiq_module_activation_status")
+            .select(
+              "status, activated_at, activated_by_name, module_key, readiness_score"
+            )
+            .eq("fund_name", activeFundName)
+            .eq("module_key", "investor_documents_portal")
+            .maybeSingle(),
+          uploadsQuery,
+          complianceQuery,
+        ]);
 
         if (investorsResult.error) {
           throw new Error(investorsResult.error.message);
         }
-
         if (commitmentsResult.error) {
           throw new Error(commitmentsResult.error.message);
         }
 
-        if (activationResult.data) {
-          setFundActivationStatus(
-            String(activationResult.data.status ?? "Setup Not Started")
-          );
-          setFundActivatedAt(
-            String(activationResult.data.activated_at ?? "")
-          );
-          setFundActivatedBy(
-            String(activationResult.data.activated_by ?? "")
-          );
-        } else {
-          setFundActivationStatus("Setup Not Started");
-          setFundActivatedAt("");
-          setFundActivatedBy("");
-        }
+        const commitmentRows = (commitmentsResult.data ?? []) as DataRow[];
+        const activeInvestorIds = new Set(
+          commitmentRows
+            .map((row) => getString(row, ["investor_id"], ""))
+            .filter(Boolean)
+        );
+        const activeInvestorCodes = new Set(
+          commitmentRows
+            .map((row) => getString(row, ["investor_code"], ""))
+            .filter(Boolean)
+        );
 
-        const rawInvestorRows = (investorsResult.data ?? []) as DataRow[];
-        const seenInvestorCodes = new Set<string>();
+        const restrictToVerifiedCommitments =
+          Boolean(authoritativeBatch) && commitmentRows.length > 0;
 
-        const investorData = rawInvestorRows
+        const entitledInvestorCodes = new Set(
+          activeInvestorEntitlements
+            .map((row) => getString(row, ["investor_code"], ""))
+            .filter(Boolean)
+        );
+
+        const investorData = ((investorsResult.data ?? []) as DataRow[])
           .map((investor) => ({
             id: getString(investor, ["id"], ""),
-            investor_code:
-              getString(investor, ["investor_code"], "") || null,
+            investor_code: getString(investor, ["investor_code"], "") || null,
             name: getString(
               investor,
               ["investor_name", "name"],
@@ -737,113 +1175,183 @@ export default function InvestorPortalPage() {
             investor_type:
               getString(investor, ["investor_type", "type"], "") || null,
             email: getString(investor, ["email"], "") || null,
-            country:
-              getString(investor, ["country"], "India") || "India",
-            kyc_status:
-              getString(investor, ["kyc_status"], "") || null,
-            bank_status:
-              getString(investor, ["bank_status"], "") || null,
-            source_batch_id:
-              getString(investor, ["source_batch_id"], "") || null,
-            updated_at:
-              getString(
-                investor,
-                ["updated_at", "created_at"],
-                ""
-              ) || null,
+            country: getString(investor, ["country"], "India") || "India",
+            kyc_status: getString(investor, ["kyc_status"], "") || null,
+            bank_status: getString(investor, ["bank_status"], "") || null,
             source: "migration" as const,
           }))
+          .filter((investor) =>
+            restrictToVerifiedCommitments
+              ? activeInvestorIds.has(investor.id) ||
+                activeInvestorCodes.has(investor.investor_code || "")
+              : true
+          )
           .filter((investor) => {
-            const code = normalizeText(investor.investor_code);
+            if (!isInvestorRole) return true;
 
-            if (!code || seenInvestorCodes.has(code)) {
-              return false;
-            }
-
-            seenInvestorCodes.add(code);
-            return true;
+            return Boolean(
+              (investor.investor_code &&
+                entitledInvestorCodes.has(investor.investor_code)) ||
+                (investorId &&
+                  (investor.id === investorId ||
+                    investor.investor_code === investorId))
+            );
           });
 
+        if (isInvestorRole && investorData.length === 0) {
+          throw new Error(
+            "Your investor entitlement is active, but no matching governed investor record is available."
+          );
+        }
+
         setInvestors(investorData);
+
+        if (!isInvestorRole && !fundOptionsResult.error) {
+          const fundNames = Array.from(
+            new Set<string>(
+              ((fundOptionsResult.data ?? []) as DataRow[])
+                .map((row) => getString(row, ["fund_name"], ""))
+                .filter(Boolean)
+            )
+          ).sort();
+
+          setAvailableFunds(
+            Array.from(new Set([activeFundName, ...fundNames])).filter(Boolean)
+          );
+        }
+
+        if (!activationResult.error && activationResult.data) {
+          setFundActivationStatus(
+            String(activationResult.data.status ?? "Setup Not Started")
+          );
+          setFundActivatedAt(String(activationResult.data.activated_at ?? ""));
+          setFundActivatedBy(String(activationResult.data.activated_by ?? ""));
+        } else {
+          setFundActivationStatus("Setup Not Started");
+          setFundActivatedAt("");
+          setFundActivatedBy("");
+        }
+
+        if (!moduleActivationResult.error && moduleActivationResult.data) {
+          setInvestorDocumentsModuleStatus(
+            String(moduleActivationResult.data.status ?? "Setup Not Started")
+          );
+          setInvestorDocumentsModuleActivatedAt(
+            String(moduleActivationResult.data.activated_at ?? "")
+          );
+          setInvestorDocumentsModuleActivatedBy(
+            String(moduleActivationResult.data.activated_by_name ?? "")
+          );
+        } else {
+          setInvestorDocumentsModuleStatus("Setup Not Started");
+          setInvestorDocumentsModuleActivatedAt("");
+          setInvestorDocumentsModuleActivatedBy("");
+        }
+
+        if (authoritativeBatch) {
+          const totalCommitment = commitmentRows.reduce(
+            (sum, row) =>
+              sum +
+              getNumber(row, [
+                "commitment_amount",
+                "committed_amount",
+                "commitment",
+              ]),
+            0
+          );
+          setLatestInvestorBatch({
+            id: authoritativeBatch,
+            total_records: investorData.length,
+            total_commitment: totalCommitment,
+            created_at: getString(
+              calculationRun ?? undefined,
+              ["completed_at"],
+              ""
+            ),
+          });
+        } else {
+          setLatestInvestorBatch(null);
+        }
+
+        const pdfUploads = uploadsResult.error
+          ? []
+          : ((uploadsResult.data ?? []) as DataRow[]).filter(isPdfUpload);
+        setLatestPdfBatch(
+          authoritativeBatch
+            ? {
+                id: authoritativeBatch,
+                total_files: pdfUploads.length,
+                ready_files: 0,
+                review_files: 0,
+                unmatched_files: 0,
+              }
+            : null
+        );
+
+        const complianceRows = complianceResult.error
+          ? []
+          : ((complianceResult.data ?? []) as DataRow[]);
+        const complianceEvidence = complianceRows.filter((row) => {
+          const value = row.evidence_available;
+          return value === true || String(value).toLowerCase() === "true";
+        }).length;
+        const compliancePending = complianceRows.filter((row) => {
+          const status = getString(
+            row,
+            ["filing_status", "status"],
+            ""
+          ).toLowerCase();
+          return !["filed", "completed", "closed", "approved"].includes(status);
+        }).length;
+        setLatestComplianceBatch(
+          authoritativeBatch
+            ? {
+                id: authoritativeBatch,
+                total_items: complianceRows.length,
+                evidence_available_count: complianceEvidence,
+                pending_review_count: compliancePending,
+              }
+            : null
+        );
+
+        // Data-room/DDQ records are not inferred from unrelated historical
+        // batches when no verified source batch exists.
+        setDataRoomDocuments([]);
+        setDataRoomEngagementEvents([]);
+        setDataRoomQuestions([]);
 
         const investorIdFromUrl =
           typeof window !== "undefined"
             ? new URLSearchParams(window.location.search).get("investorId")
             : "";
-
         const investorCodeFromUrl =
           typeof window !== "undefined"
             ? new URLSearchParams(window.location.search).get("investorCode")
             : "";
 
-        const investorFromUrl = investorData.find(
-          (investor) =>
-            (investorIdFromUrl && investor.id === investorIdFromUrl) ||
-            (investorCodeFromUrl &&
-              investor.investor_code === investorCodeFromUrl)
-        );
+        const investorFromUrl = isInvestorRole
+          ? undefined
+          : investorData.find(
+              (investor) =>
+                (investorIdFromUrl && investor.id === investorIdFromUrl) ||
+                (investorCodeFromUrl &&
+                  investor.investor_code === investorCodeFromUrl)
+            );
 
-        const recommendedInvestor = investorFromUrl ?? investorData[0] ?? null;
+        const recommendedInvestor = isInvestorRole
+          ? investorData[0]
+          : investorFromUrl ?? investorData[0];
 
         setSelectedInvestorId(recommendedInvestor?.id ?? "");
-        setSourceBatch(recommendedInvestor?.source_batch_id ?? "");
-
-        const commitmentRows = (commitmentsResult.data ?? []) as DataRow[];
-
-        const currentCommitmentRows = recommendedInvestor?.source_batch_id
-          ? commitmentRows.filter(
-              (row) =>
-                getString(row, ["source_batch_id"], "") ===
-                recommendedInvestor.source_batch_id
-            )
-          : commitmentRows;
-
-        const totalCommitment = currentCommitmentRows.reduce(
-          (sum, row) =>
-            sum +
-            getNumber(row, [
-              "commitment_amount",
-              "committed_amount",
-              "commitment",
-            ]),
-          0
-        );
-
-        setLatestInvestorBatch({
-          id: recommendedInvestor?.source_batch_id ?? "",
-          total_records: investorData.length,
-          total_commitment: totalCommitment,
-          created_at: recommendedInvestor?.updated_at ?? "",
-        });
-
-        // LPs should never receive internal migration/compliance diagnostics.
-        setLatestPdfBatch({
-          id: recommendedInvestor?.source_batch_id ?? "",
-          total_files: 0,
-          ready_files: 0,
-          review_files: 0,
-          unmatched_files: 0,
-        });
-
-        setLatestComplianceBatch({
-          id: recommendedInvestor?.source_batch_id ?? "",
-          total_items: 0,
-          evidence_available_count: 0,
-          pending_review_count: 0,
-        });
-
-        setDataRoomDocuments([]);
-        setDataRoomEngagementEvents([]);
-        setDataRoomQuestions([]);
       } catch (error) {
         const message =
-          error instanceof Error
-            ? error.message
-            : "Unable to load investor portal.";
-
+          error instanceof Error ? error.message : "Unable to load investor portal.";
         setErrorMessage(message);
-        setInvestors([]);
-        setSelectedInvestorId("");
+        setCalculationLoadMessage(message);
+        setLatestCalculationRun(null);
+        setCalculatedFundMetric(null);
+        setCalculatedInvestorMetrics([]);
+        setCalculationReconciliations([]);
         setSourceBatch("");
       } finally {
         setLoading(false);
@@ -853,9 +1361,11 @@ export default function InvestorPortalPage() {
     loadInvestors();
   }, [
     activeFundName,
-    activeRole,
     authLoading,
     fundContextReady,
+    investorAllowedFunds,
+    investorId,
+    isInvestorRole,
     session?.access_token,
   ]);
 
@@ -866,321 +1376,359 @@ export default function InvestorPortalPage() {
       const selectedInvestor = investors.find(
         (investor) => investor.id === selectedInvestorId
       );
-
-      if (!selectedInvestor || !selectedInvestor.investor_code) return;
+      if (!selectedInvestor) return;
 
       setLoadingInvestorData(true);
       setErrorMessage("");
-      setCalculationLoadMessage("");
 
       try {
         const db = supabase as any;
-        const investorCode = selectedInvestor.investor_code;
-        const investorSourceBatch = selectedInvestor.source_batch_id ?? "";
 
         let commitmentQuery = db
           .from("fund_commitments")
           .select("*")
-          .eq("fund_name", activeFundName)
-          .eq("investor_code", investorCode);
+          .eq("fund_name", activeFundName);
 
-        let cashflowQuery = db
-          .from("investor_cashflows")
-          .select("*")
-          .eq("fund_name", activeFundName)
-          .eq("investor_code", investorCode)
-          .order("cashflow_date", { ascending: false });
-
-        if (investorSourceBatch) {
+        // Commitments remain tied to the verified calculation source batch.
+        // Capital calls, receipts and distributions are loaded separately through
+        // the entitlement-scoped server API below. Published canonical Document
+        // Studio documents carry their own immutable Fund Memory lineage.
+        if (sourceBatch) {
+          commitmentQuery = commitmentQuery.eq("source_batch_id", sourceBatch);
+        } else {
+          const impossibleSourceBatch = "__VENTIQ_NO_VERIFIED_SOURCE_BATCH__";
           commitmentQuery = commitmentQuery.eq(
             "source_batch_id",
-            investorSourceBatch
-          );
-
-          cashflowQuery = cashflowQuery.eq(
-            "source_batch_id",
-            investorSourceBatch
+            impossibleSourceBatch
           );
         }
 
-        const [
-          commitmentResult,
-          documentResult,
-          cashflowResult,
-          performanceResult,
-        ] = await Promise.all([
-          commitmentQuery,
+        const commitmentResult = await commitmentQuery;
 
-          db
-            .from("investor_documents")
-            .select("*")
-            .eq("fund_name", activeFundName)
-            .eq("investor_code", investorCode)
-            .order("published_at", { ascending: false }),
-
-          cashflowQuery,
-
-          db
-            .from("investor_performance_metrics")
-            .select("*")
-            .eq("fund_name", activeFundName)
-            .eq("investor_code", investorCode)
-            .order("as_of_date", { ascending: false })
-            .order("updated_at", { ascending: false }),
-        ]);
-
-        if (commitmentResult.error) {
-          throw new Error(commitmentResult.error.message);
-        }
-
-        if (cashflowResult.error) {
-          throw new Error(cashflowResult.error.message);
-        }
-
-        if (performanceResult.error) {
-          throw new Error(performanceResult.error.message);
-        }
-
-        const commitmentRows = (commitmentResult.data ?? []) as DataRow[];
-
-        const normalizedCommitments: Commitment[] = commitmentRows.map(
-          (row) => {
-            const commitmentAmount = getNumber(row, [
-              "commitment_amount",
-              "committed_amount",
-              "commitment",
-            ]);
-
-            const uncalledAmount = getNumber(row, [
-              "uncalled_commitment",
-              "unfunded_commitment",
-              "unfunded_amount",
-            ]);
-
-            const paidInAmount = getNumber(row, [
-              "paid_in_capital",
-              "called_amount",
-              "capital_called",
-            ]);
-
-            return {
-              id: getString(row, ["id", "commitment_code"], ""),
-              investor_id: getString(
-                row,
-                ["investor_id"],
-                selectedInvestorId
-              ),
-              fund_name: getString(
-                row,
-                ["fund_name"],
-                activeFundName
-              ),
-              class_name:
-                getString(row, ["class_name"], "") || null,
-              commitment_amount: commitmentAmount,
-              called_amount:
-                paidInAmount > 0
-                  ? paidInAmount
-                  : Math.max(
-                      commitmentAmount - uncalledAmount,
-                      0
-                    ),
-              unfunded_amount: uncalledAmount,
-              status:
-                getString(
-                  row,
-                  ["commitment_status", "status"],
-                  "Active"
-                ) || null,
-            };
-          }
-        );
-
-        setCommitments(normalizedCommitments);
-
-        const investorDocuments = documentResult.error
+        const commitmentRows = commitmentResult.error
           ? []
-          : ((documentResult.data ?? []) as unknown as InvestorDocument[]);
+          : ((commitmentResult.data ?? []) as DataRow[]).filter((row) => {
+              const rowInvestorId = getString(row, ["investor_id"], "");
+              const rowInvestorCode = getString(row, ["investor_code"], "");
+              return (
+                rowInvestorId === selectedInvestorId ||
+                (selectedInvestor.investor_code &&
+                  rowInvestorCode === selectedInvestor.investor_code)
+              );
+            });
 
-        setDocuments(investorDocuments);
+        const normalizedCommitments: Commitment[] = commitmentRows.map((row) => {
+          const commitmentAmount = getNumber(row, [
+            "commitment_amount",
+            "committed_amount",
+            "commitment",
+          ]);
+          const uncalledAmount = getNumber(row, [
+            "uncalled_commitment",
+            "unfunded_commitment",
+            "unfunded_amount",
+          ]);
+          const paidInAmount = getNumber(row, [
+            "paid_in_capital",
+            "called_amount",
+            "capital_called",
+          ]);
 
-        const performanceRows =
-          (performanceResult.data ?? []) as DataRow[];
-
-        const investorMetric = performanceRows[0];
-
-        setCalculatedInvestorMetrics(
-          investorMetric ? [investorMetric] : []
-        );
-
-        if (investorMetric) {
-          const paidInCapital = getNumber(
-            investorMetric,
-            ["paid_in_capital"]
-          );
-
-          const netDistributions = getNumber(
-            investorMetric,
-            ["net_distributions", "total_distributions"]
-          );
-
-          const allocatedNav = getNumber(
-            investorMetric,
-            ["allocated_nav"]
-          );
-
-          const asOfDate = getString(
-            investorMetric,
-            ["as_of_date"],
-            ""
-          );
-
-          const updatedAt = getString(
-            investorMetric,
-            ["updated_at", "created_at"],
-            ""
-          );
-
-          const calculationRunId = getString(
-            investorMetric,
-            ["calculation_run_id"],
-            ""
-          );
-
-          setLatestCalculationRun({
-            calculation_run_id: calculationRunId,
-            as_of_date: asOfDate,
-            completed_at: updatedAt,
-          });
-
-          setFinancialPosition({
-            id: getString(
-              investorMetric,
-              ["id"],
-              selectedInvestor.investor_code ||
-                selectedInvestorId
-            ),
-            investor_id: selectedInvestorId,
-            investor_code: selectedInvestor.investor_code,
-            investor_name: selectedInvestor.name,
-            email: selectedInvestor.email,
-            fund_name: activeFundName,
-            class_name:
-              getString(investorMetric, ["class_name"], "") || null,
-            commitment_amount: getNumber(
-              investorMetric,
-              ["commitment_amount"]
-            ),
-            capital_called_till_date: paidInCapital,
-            uncalled_capital: getNumber(
-              investorMetric,
-              ["uncalled_commitment"]
-            ),
-            distributions_till_date: netDistributions,
-            setup_fee: 0,
-            management_fee: 0,
-            net_contributed: Math.max(
-              paidInCapital - netDistributions,
-              0
-            ),
-            current_nav: allocatedNav,
-            investor_irr: getNumber(
-              investorMetric,
-              ["net_irr"]
-            ),
-            investor_rvpi: getNumber(
-              investorMetric,
-              ["rvpi"]
-            ),
-            investor_dpi: getNumber(
-              investorMetric,
-              ["dpi"]
-            ),
-            investor_tvpi: getNumber(
-              investorMetric,
-              ["tvpi"]
-            ),
+          return {
+            id: getString(row, ["id", "commitment_code"], ""),
+            investor_id: getString(row, ["investor_id"], selectedInvestorId),
+            fund_name: getString(row, ["fund_name"], activeFundName),
+            class_name: getString(row, ["class_name"], "") || null,
+            commitment_amount: commitmentAmount,
+            called_amount:
+              paidInAmount > 0
+                ? paidInAmount
+                : Math.max(commitmentAmount - uncalledAmount, 0),
+            unfunded_amount: uncalledAmount,
             status:
               getString(
-                investorMetric,
-                ["calculation_status"],
-                "Calculated"
+                row,
+                ["commitment_status", "status"],
+                "Active"
               ) || null,
-            created_at: updatedAt || null,
-          });
-        } else {
-          setLatestCalculationRun(null);
-          setFinancialPosition(null);
-          setCalculationLoadMessage(
-            "No verified investor performance metric is available yet."
+          };
+        });
+        setCommitments(normalizedCommitments);
+
+        const accessToken = session?.access_token ?? "";
+
+        // A7-4: document metadata is now released through the same governed
+        // server pattern as financials and cashflows. Browser code no longer
+        // reads investor_documents directly and receives no storage path/URL.
+        if (!accessToken) {
+          setDocuments([]);
+          setDocumentDownloadAllowed(false);
+          setDocumentListMessage(
+            "Please sign in to load your governed investor document library."
           );
+        } else {
+          const documentParams = new URLSearchParams({
+            fundName: activeFundName,
+          });
+
+          // Internal support users explicitly select an investor. Investor-role
+          // identity is derived server-side only from active entitlement.
+          if (!isInvestorRole && selectedInvestor.investor_code) {
+            documentParams.set(
+              "investorCode",
+              selectedInvestor.investor_code
+            );
+          }
+
+          try {
+            const documentResponse = await fetch(
+              `/api/investor-portal/documents?${documentParams.toString()}`,
+              {
+                method: "GET",
+                headers: { Authorization: `Bearer ${accessToken}` },
+                cache: "no-store",
+              }
+            );
+
+            const documentData =
+              (await documentResponse.json()) as InvestorDocumentsApiResponse;
+
+            if (documentResponse.ok && documentData.available) {
+              setDocuments(documentData.documents ?? []);
+              setDocumentDownloadAllowed(
+                Boolean(
+                  documentData.permissions?.can_download_documents
+                )
+              );
+              setDocumentListMessage("");
+            } else {
+              setDocuments([]);
+              setDocumentDownloadAllowed(false);
+              setDocumentListMessage(
+                documentData.message ||
+                  documentData.error ||
+                  "Investor documents are not available for this investor yet."
+              );
+            }
+          } catch (documentError) {
+            setDocuments([]);
+            setDocumentDownloadAllowed(false);
+            setDocumentListMessage(
+              documentError instanceof Error
+                ? documentError.message
+                : "Investor documents are not available for this investor yet."
+            );
+          }
         }
 
-        const investorCashflows = (
-          (cashflowResult.data ?? []) as DataRow[]
-        )
-          .slice(0, 20)
-          .map(
-            (row) =>
-              ({
-                id: getString(
-                  row,
-                  ["id", "cashflow_code"],
-                  ""
-                ),
-                investor_id:
-                  getString(
-                    row,
-                    ["investor_id"],
-                    selectedInvestorId
-                  ) || null,
-                investor_code:
-                  getString(
-                    row,
-                    ["investor_code"],
-                    ""
-                  ) || null,
-                investor_name:
-                  getString(
-                    row,
-                    ["investor_name"],
-                    selectedInvestor.name
-                  ) || null,
-                fund_name:
-                  getString(
-                    row,
-                    ["fund_name"],
-                    activeFundName
-                  ) || null,
-                cashflow_date:
-                  getString(
-                    row,
-                    ["cashflow_date"],
-                    ""
-                  ) || null,
-                cashflow_type:
-                  getString(
-                    row,
-                    ["cashflow_type"],
-                    "Cashflow"
-                  ) || null,
-                amount: getNumber(
-                  row,
-                  ["amount", "cashflow_amount"]
-                ),
-                direction:
-                  getString(row, ["direction"], "") || null,
-                description:
-                  getString(
-                    row,
-                    ["description", "remarks"],
-                    ""
-                  ) || null,
-              } as InvestorCashflow)
+        if (!accessToken) {
+          setFinancialPosition(null);
+          setFinancialVerification(null);
+          setFinancialAccessMessage(
+            "Please sign in to load your verified financial position."
           );
+        } else {
+          const financialParams = new URLSearchParams({
+            fundName: activeFundName,
+          });
 
-        setCashflows(investorCashflows);
-        setSourceBatch(investorSourceBatch);
+          // Internal support users explicitly select an investor. Investor-role
+          // users never send browser-selected identity to the financial endpoint.
+          if (!isInvestorRole && selectedInvestor.investor_code) {
+            financialParams.set(
+              "investorCode",
+              selectedInvestor.investor_code
+            );
+          }
+
+          try {
+            const financialResponse = await fetch(
+              `/api/investor-portal/financial-position?${financialParams.toString()}`,
+              {
+                method: "GET",
+                headers: { Authorization: `Bearer ${accessToken}` },
+                cache: "no-store",
+              }
+            );
+
+            const financialData =
+              (await financialResponse.json()) as FinancialPositionApiResponse;
+
+            if (
+              financialResponse.ok &&
+              financialData.available &&
+              financialData.financial_position
+            ) {
+              const metric = financialData.financial_position;
+              const paidInCapital = Number(metric.paid_in_capital ?? 0);
+              const netDistributions = Number(
+                metric.net_distributions ?? metric.total_distributions ?? 0
+              );
+
+              setFinancialPosition({
+                id: `${financialData.investor_code || selectedInvestor.investor_code || selectedInvestorId}:verified-financial-position`,
+                investor_id: selectedInvestorId,
+                investor_code:
+                  financialData.investor_code || selectedInvestor.investor_code,
+                investor_name:
+                  financialData.investor_name || selectedInvestor.name,
+                email: selectedInvestor.email,
+                fund_name: financialData.fund_name || activeFundName,
+                class_name:
+                  financialData.class_name || selectedInvestor.investor_type || null,
+                commitment_amount: Number(metric.commitment_amount ?? 0),
+                capital_called_till_date: paidInCapital,
+                uncalled_capital: Number(metric.uncalled_commitment ?? 0),
+                distributions_till_date: netDistributions,
+                setup_fee: 0,
+                management_fee: 0,
+                net_contributed: Math.max(
+                  paidInCapital - netDistributions,
+                  0
+                ),
+                current_nav: Number(metric.allocated_nav ?? 0),
+                investor_irr: Number(metric.net_irr ?? 0),
+                investor_moic: Number(metric.tvpi ?? 0),
+                investor_dpi: Number(metric.dpi ?? 0),
+                investor_rvpi: Number(metric.rvpi ?? 0),
+                investor_tvpi: Number(metric.tvpi ?? 0),
+                status: metric.calculation_status || "Calculated",
+                created_at: financialData.verification?.as_of_date || null,
+              });
+              setFinancialVerification(financialData.verification ?? null);
+              setFinancialAccessMessage("");
+            } else {
+              setFinancialPosition(null);
+              setFinancialVerification(null);
+              setFinancialAccessMessage(
+                financialData.message ||
+                  financialData.error ||
+                  "Verified performance data is not available for this investor yet."
+              );
+            }
+          } catch (financialError) {
+            setFinancialPosition(null);
+            setFinancialVerification(null);
+            setFinancialAccessMessage(
+              financialError instanceof Error
+                ? financialError.message
+                : "Verified performance data is not available for this investor yet."
+            );
+          }
+        }
+
+        if (!accessToken) {
+          setCapitalCalls([]);
+          setDistributionHistory([]);
+          setCashflowSummary(null);
+          setCashflows([]);
+          setCashflowAccessMessage(
+            "Please sign in to load your capital-call and distribution history."
+          );
+        } else {
+          const cashflowParams = new URLSearchParams({
+            fundName: activeFundName,
+          });
+
+          // Internal support users explicitly select an investor. Investor-role
+          // users never send browser-selected identity to the cashflow endpoint.
+          if (!isInvestorRole && selectedInvestor.investor_code) {
+            cashflowParams.set(
+              "investorCode",
+              selectedInvestor.investor_code
+            );
+          }
+
+          try {
+            const cashflowResponse = await fetch(
+              `/api/investor-portal/cashflows?${cashflowParams.toString()}`,
+              {
+                method: "GET",
+                headers: { Authorization: `Bearer ${accessToken}` },
+                cache: "no-store",
+              }
+            );
+
+            const cashflowData =
+              (await cashflowResponse.json()) as InvestorCashflowsApiResponse;
+
+            if (cashflowResponse.ok && cashflowData.available) {
+              const calls = cashflowData.capital_calls ?? [];
+              const distributions = cashflowData.distributions ?? [];
+
+              setCapitalCalls(calls);
+              setDistributionHistory(distributions);
+              setCashflowSummary(cashflowData.summary ?? null);
+              setCashflowAccessMessage("");
+
+              const secureTimeline: InvestorCashflow[] = [
+                ...calls.map((call) => ({
+                  id: `capital-call:${call.capital_call_code}`,
+                  investor_id: selectedInvestorId,
+                  investor_code:
+                    cashflowData.investor_code || selectedInvestor.investor_code,
+                  investor_name:
+                    cashflowData.investor_name || selectedInvestor.name,
+                  fund_name: cashflowData.fund_name || activeFundName,
+                  cashflow_date:
+                    call.receipt_date || call.due_date || call.call_date || null,
+                  cashflow_type: "Capital Call",
+                  amount: Number(call.amount_received ?? call.total_due ?? 0),
+                  direction: "Outflow",
+                  description: `${call.call_name || call.capital_call_code} · ${
+                    call.receipt_status || call.allocation_status || "Recorded"
+                  } · Outstanding ${formatInr(call.outstanding_amount)}`,
+                })),
+                ...distributions.map((distribution) => ({
+                  id: `distribution:${distribution.distribution_code}`,
+                  investor_id: selectedInvestorId,
+                  investor_code:
+                    cashflowData.investor_code || selectedInvestor.investor_code,
+                  investor_name:
+                    cashflowData.investor_name || selectedInvestor.name,
+                  fund_name: cashflowData.fund_name || activeFundName,
+                  cashflow_date:
+                    distribution.payment_date ||
+                    distribution.declaration_date ||
+                    null,
+                  cashflow_type: "Distribution",
+                  amount: Number(distribution.net_distribution ?? 0),
+                  direction: "Inflow",
+                  description: `${
+                    distribution.distribution_name ||
+                    distribution.distribution_code
+                  } · ${distribution.payment_status || "Recorded"}`,
+                })),
+              ].sort((a, b) =>
+                String(b.cashflow_date || "").localeCompare(
+                  String(a.cashflow_date || "")
+                )
+              );
+
+              setCashflows(secureTimeline);
+            } else {
+              setCapitalCalls([]);
+              setDistributionHistory([]);
+              setCashflowSummary(null);
+              setCashflows([]);
+              setCashflowAccessMessage(
+                cashflowData.message ||
+                  cashflowData.error ||
+                  "Capital-call and distribution history is not available for this investor yet."
+              );
+            }
+          } catch (cashflowError) {
+            setCapitalCalls([]);
+            setDistributionHistory([]);
+            setCashflowSummary(null);
+            setCashflows([]);
+            setCashflowAccessMessage(
+              cashflowError instanceof Error
+                ? cashflowError.message
+                : "Capital-call and distribution history is not available for this investor yet."
+            );
+          }
+        }
 
         setDataRoomEngagementEvents([]);
         setDataRoomQuestions([]);
@@ -1192,10 +1740,14 @@ export default function InvestorPortalPage() {
         );
         setCommitments([]);
         setDocuments([]);
+        setDocumentDownloadAllowed(false);
+        setDocumentListMessage("");
         setFinancialPosition(null);
         setCashflows([]);
-        setLatestCalculationRun(null);
-        setCalculatedInvestorMetrics([]);
+        setCapitalCalls([]);
+        setDistributionHistory([]);
+        setCashflowSummary(null);
+        setCashflowAccessMessage("");
       } finally {
         setLoadingInvestorData(false);
       }
@@ -1206,27 +1758,62 @@ export default function InvestorPortalPage() {
     selectedInvestorId,
     activeFundName,
     investors,
+    sourceBatch,
+    isInvestorRole,
+    session?.access_token,
   ]);
 
   const selectedInvestor = investors.find(
     (investor) => investor.id === selectedInvestorId
   );
 
+  const fullFundActive = fundActivationStatus === "Active";
+  const investorDocumentsModuleActive =
+    investorDocumentsModuleStatus === "Active";
+  const investorPortalOperational =
+    fullFundActive || investorDocumentsModuleActive;
+
 
   const calculationSummary = useMemo(() => {
+    const passedControls = calculationReconciliations.filter((row) => {
+      const statusText = getString(
+        row,
+        [
+          "reconciliation_status",
+          "status",
+          "control_status",
+          "result",
+        ],
+        ""
+      )
+        .trim()
+        .toLowerCase();
+
+      const explicitPassFlag =
+        row["is_passed"] === true ||
+        row["passed"] === true ||
+        row["is_reconciled"] === true;
+
+      return explicitPassFlag || statusText.includes("pass");
+    }).length;
+
+    const totalControls = calculationReconciliations.length;
+
     return {
+      version: getString(
+        latestCalculationRun ?? undefined,
+        ["calculation_version"],
+        "-"
+      ),
       asOfDate: getString(
         latestCalculationRun ?? undefined,
         ["as_of_date"],
         ""
       ),
-      calculationRunId: getString(
-        latestCalculationRun ?? undefined,
-        ["calculation_run_id"],
-        ""
-      ),
+      passedControls,
+      totalControls,
     };
-  }, [latestCalculationRun]);
+  }, [latestCalculationRun, calculationReconciliations]);
 
   const portalMetrics = useMemo(() => {
     const totalCommitment = commitments.reduce(
@@ -1484,7 +2071,11 @@ const displayedManagementFee = financialPosition
         getInvestorDocumentGroup(documentRecord)
       )
     )
-  ).filter((group) => group && group !== "Other Documents");
+  ).filter(Boolean);
+
+  if (isInvestorRole) {
+    return ["All documents", ...actualGroups];
+  }
 
   return [
     "All documents",
@@ -1492,7 +2083,7 @@ const displayedManagementFee = financialPosition
     ...actualGroups.filter((group) => !standardGroups.includes(group)),
     "Other Documents",
   ];
-}, [documents]);
+}, [documents, isInvestorRole]);
 
   const investorActivityEvents = useMemo(() => {
     const events: PortalActivityEvent[] = [];
@@ -1590,9 +2181,12 @@ const displayedManagementFee = financialPosition
         href: "#ddq",
       },
       {
-        title: "View cashflow history",
-        value: `${cashflows.length} cashflow item(s)`,
-        priority: cashflows.length > 0 ? "Ready" : "Pending",
+        title: "Review capital calls & distributions",
+        value: `${capitalCalls.length} call(s) · ${distributionHistory.length} distribution(s)`,
+        priority:
+          capitalCalls.length + distributionHistory.length > 0
+            ? "Ready"
+            : "Pending",
         href: "#cashflows",
       },
       {
@@ -1602,7 +2196,13 @@ const displayedManagementFee = financialPosition
         href: "/data-room",
       },
     ];
-  }, [documents, portalMetrics, cashflows, dataRoomDocuments]);
+  }, [
+    documents,
+    portalMetrics,
+    capitalCalls,
+    distributionHistory,
+    dataRoomDocuments,
+  ]);
 
   return (
     <main className="app-page">
@@ -1612,9 +2212,9 @@ const displayedManagementFee = financialPosition
             <p className="eyebrow">VENTIQ Investor Experience</p>
             <h1>Investor Portal</h1>
             <p>
-              One clean investor-facing view for commitments, capital calls,
-              distributions, financial position, cashflows, documents, PDF
-              records, DDQs and data room access.
+              {isInvestorRole
+                ? "Your private VENTIQ account for fund positions, cashflows, documents and governed investor access."
+                : "One clean investor-facing view for commitments, capital calls, distributions, financial position, cashflows, documents, PDF records, DDQs and data room access."}
             </p>
           </div>
 
@@ -1631,13 +2231,39 @@ const displayedManagementFee = financialPosition
             <div>
               <p className="eyebrow">Active Fund Context</p>
               <h2 style={{ marginBottom: 8 }}>{activeFundName}</h2>
-              <p style={{ margin: 0 }}>
-                Activation status: <strong>{fundActivationStatus}</strong>
-                {fundActivatedAt
-                  ? ` · Activated ${formatDateTime(fundActivatedAt)}`
-                  : ""}
-                {fundActivatedBy ? ` by ${fundActivatedBy}` : ""}
-              </p>
+              {isInvestorRole ? (
+                <>
+                  <p style={{ margin: 0 }}>
+                    Private investor access: <strong>Active</strong>
+                  </p>
+                  <p style={{ margin: "6px 0 0" }}>
+                    Your portal is restricted to the fund and investor identities
+                    granted to your signed-in account.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p style={{ margin: 0 }}>
+                    Full fund activation: <strong>{fundActivationStatus}</strong>
+                    {fundActivatedAt
+                      ? ` · Activated ${formatDateTime(fundActivatedAt)}`
+                      : ""}
+                    {fundActivatedBy ? ` by ${fundActivatedBy}` : ""}
+                  </p>
+                  <p style={{ margin: "6px 0 0" }}>
+                    Investor Documents module:{" "}
+                    <strong>{investorDocumentsModuleStatus}</strong>
+                    {investorDocumentsModuleActivatedAt
+                      ? ` · Activated ${formatDateTime(
+                          investorDocumentsModuleActivatedAt
+                        )}`
+                      : ""}
+                    {investorDocumentsModuleActivatedBy
+                      ? ` by ${investorDocumentsModuleActivatedBy}`
+                      : ""}
+                  </p>
+                </>
+              )}
             </div>
 
             <div
@@ -1648,13 +2274,13 @@ const displayedManagementFee = financialPosition
                 gap: 10,
               }}
             >
-              {availableFunds.length > 1 ? (
+              {(!isInvestorRole || availableFunds.length > 1) && (
                 <label style={{ display: "grid", gap: 6, minWidth: 270 }}>
                   <span style={{ fontSize: 12, fontWeight: 800 }}>
-                    My fund
+                    {isInvestorRole ? "My fund" : "Switch active fund"}
                   </span>
                   <select
-                    aria-label="Select investor fund"
+                    aria-label="Select active fund"
                     disabled={!fundContextReady || loading}
                     onChange={(event) => setActiveFundName(event.target.value)}
                     style={{
@@ -1674,19 +2300,38 @@ const displayedManagementFee = financialPosition
                     ))}
                   </select>
                 </label>
-              ) : (
-                <span className="status-pill">
-                  Investor access · Authenticated
-                </span>
+              )}
+
+              {!isInvestorRole && (
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/migration/activation"
+                >
+                  Open Fund Activation
+                </a>
               )}
             </div>
           </div>
         </div>
 
         <div className="sample-data-ribbon">
-          {activeFundName} · {fundActivationStatus} · Connected investor portal
-          reading this fund&apos;s investors, commitments, cashflows, documents
-          and DDQ records
+          {isInvestorRole ? (
+            <>
+              {activeFundName} · Private LP view · Access limited to your entitled
+              investor account, verified financial position and governed documents
+            </>
+          ) : (
+            <>
+              {activeFundName} ·{" "}
+              {fullFundActive
+                ? "Full Fund Active"
+                : investorDocumentsModuleActive
+                  ? "Investor Documents Active · Full OS not activated"
+                  : fundActivationStatus}{" "}
+              · Connected investor portal reading this fund&apos;s governed investors
+              and canonical investor documents
+            </>
+          )}
         </div>
 
         {loading && (
@@ -1710,75 +2355,123 @@ const displayedManagementFee = financialPosition
 
         {!loading &&
           !errorMessage &&
-          fundActivationStatus !== "Active" && (
+          !investorPortalOperational && (
             <div className="preview-card">
               <p className="eyebrow">Activation Required</p>
-              <h2>{activeFundName} is not active across VENTIQ</h2>
+              <h2>Investor Documents Portal is not active for {activeFundName}</h2>
               <div className="explain-box">
-                The Investor Portal is locked because this fund has not completed
-                controlled activation. Complete data validation and maker-checker
-                approval before publishing investor balances, cashflows, notices
-                and documents from the operational data layer.
+                This fund may either complete Full OS activation or activate the
+                governed Investor Documents module independently. Scoped module
+                activation does not mark unrelated portfolio, compliance or
+                accounting workflows as Active.
               </div>
-              <div className="explain-box">
-                Investor access will become available after the fund administrator
-                completes the controlled activation process.
-              </div>
+              {!isInvestorRole && (
+                <div className="action-row">
+                  <a
+                    className="monitor-btn monitor-btn-primary"
+                    href="/document-studio"
+                  >
+                    Open Document Studio
+                  </a>
+                  <a
+                    className="monitor-btn monitor-btn-secondary"
+                    href="/migration/activation"
+                  >
+                    Full Fund Activation
+                  </a>
+                </div>
+              )}
             </div>
           )}
 
         {!loading &&
           !errorMessage &&
-          fundActivationStatus === "Active" && (
+          investorPortalOperational && (
           <>
             <div className="preview-card">
               <div className="section-heading-row">
                 <div>
-                  <p className="eyebrow">Verified Investor Layer</p>
-                  <h2>Your calculated position in {activeFundName}</h2>
+                  <p className="eyebrow">
+                    {isInvestorRole ? "My Governed Investor Account" : "Verified Investor Layer"}
+                  </p>
+                  <h2>
+                    {isInvestorRole
+                      ? `Private investor view for ${activeFundName}`
+                      : `Calculated investor position for ${activeFundName}`}
+                  </h2>
                 </div>
-                <span className="status-pill">
-                  RLS isolated · Investor only
-                </span>
+                {!isInvestorRole && (
+                  <a
+                    className="monitor-btn monitor-btn-secondary"
+                    href="/migration/performance-calculations"
+                  >
+                    Open Calculation Engine
+                  </a>
+                )}
               </div>
 
-              {latestCalculationRun ? (
+              {financialVerification ? (
                 <div className="explain-box">
-                  Verified investor performance as of{" "}
-                  {formatDate(calculationSummary.asOfDate)}. VENTIQ loads only
-                  financial records explicitly entitled to this authenticated
-                  investor login
-                  {sourceBatch ? ` · source batch: ${sourceBatch}` : ""}.
+                  Verified financial position · Calculation Engine v
+                  {financialVerification.calculation_version || "-"} · as of {formatDate(
+                    financialVerification.as_of_date || ""
+                  )} · {financialVerification.controls_passed ?? 0}/
+                  {financialVerification.controls_total ?? 0} reconciliation controls passed.
+                  {isInvestorRole
+                    ? " Your financial position is released only through your signed-in investor entitlement."
+                    : " Fund Admin support view is reading the selected investor through the governed financial endpoint."}
                 </div>
               ) : (
                 <div className="explain-box">
-                  {calculationLoadMessage ||
-                    "No verified investor performance metric is available yet."}
+                  {financialAccessMessage ||
+                    (isInvestorRole
+                      ? "Verified performance data is not available for this fund yet."
+                      : calculationLoadMessage ||
+                        "No completed verified calculation is available for this fund.")}
                 </div>
               )}
             </div>
 
             <div className="preview-card">
-              <h2>Investor Access</h2>
+              <h2>{isInvestorRole ? "My Investor Account" : "Investor Access"}</h2>
 
               <div className="form-card">
-                {investors.length > 1 ? (
+                {isInvestorRole ? (
                   <>
-                    <p className="eyebrow">
-                      Select one of your authorised investor entities
-                    </p>
+                    <p className="eyebrow">Signed-in investor identity</p>
+                    <div className="journal-preview">
+                      <div className="journal-row">
+                        <span>Investor</span>
+                        <strong>{selectedInvestor?.name ?? "Resolving..."}</strong>
+                      </div>
+                      <div className="journal-row">
+                        <span>Investor code</span>
+                        <strong>{selectedInvestor?.investor_code ?? "-"}</strong>
+                      </div>
+                      <div className="journal-row">
+                        <span>Entitlement</span>
+                        <strong>
+                          {investorEntitlements.length > 0
+                            ? "Active · account locked"
+                            : "Resolving"}
+                        </strong>
+                      </div>
+                    </div>
+                    <div className="logic-note">
+                      Investor switching is disabled for LP users. VENTIQ resolves
+                      this account from the signed-in user&apos;s active investor
+                      entitlement and RLS-governed investor record.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="eyebrow">Select investor to view portal records</p>
 
-                    <label>Investor entity</label>
+                    <label>Investor</label>
                     <select
                       value={selectedInvestorId}
                       onChange={(event) => {
-                        const nextInvestorId = event.target.value;
-                        const nextInvestor = investors.find(
-                          (investor) => investor.id === nextInvestorId
-                        );
-
-                        setSelectedInvestorId(nextInvestorId);
-                        setSourceBatch(nextInvestor?.source_batch_id ?? "");
+                        setSelectedInvestorId(event.target.value);
                         setDocumentTypeFilter("All documents");
                       }}
                     >
@@ -1791,24 +2484,14 @@ const displayedManagementFee = financialPosition
                         </option>
                       ))}
                     </select>
-                  </>
-                ) : (
-                  <>
-                    <p className="eyebrow">Authenticated investor entity</p>
-                    <strong>
-                      {selectedInvestor?.investor_code
-                        ? `${selectedInvestor.investor_code} - `
-                        : ""}
-                      {selectedInvestor?.name ?? "Investor"}
-                    </strong>
+
+                    <div className="logic-note">
+                      Fund Admin support view can switch between governed investors.
+                      LP users cannot use this selector and are locked to their own
+                      entitlement.
+                    </div>
                   </>
                 )}
-
-                <div className="logic-note">
-                  Investor master, commitments, performance, cashflows and
-                  published documents are filtered by database-level investor
-                  entitlement before they reach this browser.
-                </div>
               </div>
             </div>
 
@@ -1816,9 +2499,9 @@ const displayedManagementFee = financialPosition
               <h2>Welcome back, {selectedInvestor?.name ?? "Investor"}</h2>
 
               <div className="explain-box">
-                VENTIQ reviewed your commitments, capital called, distributions,
-                current NAV, uploaded documents, stored PDFs, data room activity
-                and DDQ trail. Your latest investor records are available below.
+                VENTIQ brings together your governed investor identity, verified
+                financial position, canonical documents and entitled portal records.
+                Only approved server-released data is shown below.
               </div>
 
               <div className="action-row">
@@ -1839,6 +2522,15 @@ const displayedManagementFee = financialPosition
                 <a className="monitor-btn monitor-btn-secondary" href="/data-room">
                   Open Data Room
                 </a>
+
+                {!isInvestorRole && (
+                  <a
+                    className="monitor-btn monitor-btn-secondary"
+                    href="/fundraising-ai"
+                  >
+                    Open IR Workspace
+                  </a>
+                )}
               </div>
             </div>
 
@@ -1893,8 +2585,17 @@ const displayedManagementFee = financialPosition
                   </div>
 
                   <div className="impact-card">
-                    <h3>{portalMetrics.documentReadinessScore}%</h3>
-                    <p>Portal readiness</p>
+                    {isInvestorRole ? (
+                      <>
+                        <h3>{investorEntitlements.length > 0 ? "Active" : "Pending"}</h3>
+                        <p>Account access</p>
+                      </>
+                    ) : (
+                      <>
+                        <h3>{portalMetrics.documentReadinessScore}%</h3>
+                        <p>Portal readiness</p>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -1943,19 +2644,39 @@ const displayedManagementFee = financialPosition
                       </strong>
                     </div>
 
-                    <div className="journal-row">
-                      <span>Imported investor universe</span>
-                      <strong>{portalMetrics.importedInvestors}</strong>
-                    </div>
+                    {!isInvestorRole && (
+                      <div className="journal-row">
+                        <span>Imported investor universe</span>
+                        <strong>{portalMetrics.importedInvestors}</strong>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 <div className="preview-card">
                   <h2>My Investments</h2>
 
-                  {commitments.length === 0 && (
+                  {commitments.length === 0 && financialPosition && (
+                    <div className="queue-grid">
+                      <div className="queue-item">
+                        <strong>{activeFundName}</strong>
+                        <br />
+                        Commitment: {formatCr(toCr(financialPosition.commitment_amount))}
+                        <br />
+                        Called: {formatCr(toCr(financialPosition.capital_called_till_date))}
+                        <br />
+                        Remaining: {formatCr(toCr(financialPosition.uncalled_capital))}
+                        <br />
+                        Class: {financialPosition.class_name ?? "-"}
+                        <br />
+                        Status: {financialPosition.status ?? "Calculated"}
+                      </div>
+                    </div>
+                  )}
+
+                  {commitments.length === 0 && !financialPosition && (
                     <div className="explain-box">
-                      No commitments found for this investor.
+                      Verified commitment data is not available for this investor yet.
                     </div>
                   )}
 
@@ -1987,15 +2708,18 @@ const displayedManagementFee = financialPosition
                       <h2>Investor Performance Snapshot</h2>
                     </div>
                     <span className="status-pill">
-                      As of {formatDate(calculationSummary.asOfDate)}
+                      {financialVerification
+                        ? `v${financialVerification.calculation_version || "-"} · ${formatDate(
+                            financialVerification.as_of_date || ""
+                          )}`
+                        : "Verified data pending"}
                     </span>
                   </div>
 
                   {!financialPosition && (
                     <div className="explain-box">
-                      No migrated financial position found yet. Publish investor
-                      financial data from the Investor Financial Migration
-                      workspace first.
+                      {financialAccessMessage ||
+                        "Verified performance data is not available for this investor yet."}
                     </div>
                   )}
 
@@ -2004,17 +2728,17 @@ const displayedManagementFee = financialPosition
                       <div className="impact-grid">
                         <div className="impact-card">
                           <h3>{formatPercent(financialPosition.investor_irr)}</h3>
-                          <p>Investor IRR</p>
-                        </div>
-
-                        <div className="impact-card">
-                          <h3>{formatMultiple(financialPosition.investor_rvpi)}</h3>
-                          <p>RVPI</p>
+                          <p>Net IRR</p>
                         </div>
 
                         <div className="impact-card">
                           <h3>{formatMultiple(financialPosition.investor_dpi)}</h3>
                           <p>DPI</p>
+                        </div>
+
+                        <div className="impact-card">
+                          <h3>{formatMultiple(financialPosition.investor_rvpi)}</h3>
+                          <p>RVPI</p>
                         </div>
 
                         <div className="impact-card">
@@ -2025,29 +2749,38 @@ const displayedManagementFee = financialPosition
 
                       <div className="impact-grid">
                         <div className="impact-card">
-                          <h3>{formatCr(portalMetrics.displayedSetupFee)}</h3>
-                          <p>Setup fee</p>
+                          <h3>{formatCr(toCr(financialPosition.commitment_amount))}</h3>
+                          <p>Commitment</p>
                         </div>
 
                         <div className="impact-card">
-                          <h3>{formatCr(portalMetrics.displayedManagementFee)}</h3>
-                          <p>Management fee</p>
+                          <h3>{formatCr(toCr(financialPosition.capital_called_till_date))}</h3>
+                          <p>Paid-in capital</p>
                         </div>
 
                         <div className="impact-card">
-                          <h3>{formatCr(toCr(financialPosition.net_contributed))}</h3>
-                          <p>Net contributed</p>
+                          <h3>{formatCr(toCr(financialPosition.uncalled_capital))}</h3>
+                          <p>Uncalled commitment</p>
                         </div>
 
                         <div className="impact-card">
-                          <h3>{financialPosition.status ?? "Ready"}</h3>
-                          <p>Financial status</p>
+                          <h3>{formatCr(toCr(financialPosition.current_nav))}</h3>
+                          <p>Allocated NAV</p>
                         </div>
+                      </div>
+
+                      <div className="logic-note">
+                        Verified source: Completed Calculation Engine run · {
+                          financialVerification?.controls_passed ?? 0
+                        }/{financialVerification?.controls_total ?? 0} reconciliation controls Pass.
+                        Investor-role access is entitlement-scoped and audited server-side.
                       </div>
                     </>
                   )}
                 </div>
 
+                {!isInvestorRole && (
+                  <>
                 <div className="preview-card">
                   <h2>Investor Document Readiness</h2>
 
@@ -2118,14 +2851,31 @@ const displayedManagementFee = financialPosition
                   )}
                 </div>
 
-                <div className="preview-card" id="documents">
-                  <h2>Investor Document Library</h2>
+                  </>
+                )}
 
-                  <p className="eyebrow">
-                    Capital call notices, distribution notices, SOAs, tax
-                    certificates, reports and stored PDFs available to this
-                    investor
+                <div className="preview-card" id="documents">
+                  <h2>
+                    {isInvestorRole ? "My Documents" : "Investor Document Center"}
+                  </h2>
+
+                  <p className="section-copy">
+                    Governed investor documents released for this account. PDF
+                    access uses short-lived signed URLs; permanent storage paths
+                    are never exposed in the portal.
                   </p>
+
+                  {documentListMessage && (
+                    <div className="explain-box" style={{ marginBottom: "14px" }}>
+                      {documentListMessage}
+                    </div>
+                  )}
+
+                  {documentAccessMessage && (
+                    <div className="explain-box" style={{ marginBottom: "14px" }}>
+                      {documentAccessMessage}
+                    </div>
+                  )}
 
                   <div className="form-card">
                     <label>Document Type</label>
@@ -2143,7 +2893,16 @@ const displayedManagementFee = financialPosition
                     </select>
                   </div>
 <div className="portal-document-kit-grid">
-  {investorDocumentKits.map((kit) => {
+  {investorDocumentKits
+    .filter(
+      (kit) =>
+        !isInvestorRole ||
+        documents.some(
+          (documentRecord) =>
+            getInvestorDocumentGroup(documentRecord) === kit.label
+        )
+    )
+    .map((kit) => {
     const kitDocuments = documents.filter(
       (documentRecord) => getInvestorDocumentGroup(documentRecord) === kit.label
     );
@@ -2167,11 +2926,11 @@ const displayedManagementFee = financialPosition
     );
   })}
 </div>
-                  {documents.length === 0 && (
+                  {documents.length === 0 && !documentListMessage && (
                     <div className="explain-box">
-                      No investor documents found yet. Publish investor PDFs from
-                      PDF Intelligence or generate notices from the Document
-                      Engine first.
+                      {isInvestorRole
+                        ? "No published investor documents are available for your account yet."
+                        : "No governed investor documents are currently available for the selected investor."}
                     </div>
                   )}
 
@@ -2203,11 +2962,11 @@ const displayedManagementFee = financialPosition
                           <tr>
                             <th>Document</th>
                             <th>Type</th>
-                            <th>Fund</th>
-                            <th>Amount</th>
+                            {!isInvestorRole && <th>Fund</th>}
+                            {!isInvestorRole && <th>Amount</th>}
                             <th>Period</th>
-                            <th>Portal</th>
-                            <th>Email</th>
+                            {!isInvestorRole && <th>Portal</th>}
+                            {!isInvestorRole && <th>Email</th>}
                             <th>PDF</th>
                             <th>Date</th>
                             <th>Action</th>
@@ -2228,30 +2987,38 @@ const displayedManagementFee = financialPosition
 
                               <td>{getDocumentType(documentRecord)}</td>
 
-                              <td>{documentRecord.fund_name ?? "-"}</td>
+                              {!isInvestorRole && (
+                                <td>{documentRecord.fund_name ?? "-"}</td>
+                              )}
 
-                              <td>
-                                {documentRecord.amount
-                                  ? formatCr(toCr(documentRecord.amount))
-                                  : "-"}
-                              </td>
+                              {!isInvestorRole && (
+                                <td>
+                                  {documentRecord.amount
+                                    ? formatCr(toCr(documentRecord.amount))
+                                    : "-"}
+                                </td>
+                              )}
 
                               <td>{documentRecord.period_label ?? "-"}</td>
 
-                              <td>
-                                <span className="small-pill">
-                                  {documentRecord.portal_status ??
-                                    documentRecord.migration_status ??
-                                    documentRecord.status ??
-                                    "Published"}
-                                </span>
-                              </td>
+                              {!isInvestorRole && (
+                                <td>
+                                  <span className="small-pill">
+                                    {documentRecord.portal_status ??
+                                      documentRecord.migration_status ??
+                                      documentRecord.status ??
+                                      "Published"}
+                                  </span>
+                                </td>
+                              )}
 
-                              <td>
-                                <span className="small-pill">
-                                  {documentRecord.email_status ?? "not sent"}
-                                </span>
-                              </td>
+                              {!isInvestorRole && (
+                                <td>
+                                  <span className="small-pill">
+                                    {documentRecord.email_status ?? "not sent"}
+                                  </span>
+                                </td>
+                              )}
 
                               <td>
                                 <span className="small-pill">
@@ -2264,33 +3031,58 @@ const displayedManagementFee = financialPosition
                               <td>{formatDate(getDocumentDate(documentRecord))}</td>
 
                               <td>
-                                {getDocumentUrl(documentRecord) ? (
-                                  <a
-                                    href={getDocumentUrl(documentRecord)}
-                                    target="_blank"
-                                    rel="noreferrer"
+                                {hasStoredPdf(documentRecord) ? (
+                                  <div
                                     style={{
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      border:
-                                        "1px solid rgba(74, 222, 128, 0.45)",
-                                      background: "rgba(22, 101, 52, 0.18)",
-                                      color: "#bbf7d0",
-                                      borderRadius: "999px",
-                                      padding: "8px 16px",
-                                      fontSize: "14px",
-                                      fontWeight: 700,
-                                      textDecoration: "none",
-                                      whiteSpace: "nowrap",
+                                      display: "flex",
+                                      gap: "8px",
+                                      flexWrap: "wrap",
+                                      minWidth: "190px",
                                     }}
                                   >
-                                    Open PDF
-                                  </a>
-                                ) : hasStoredPdf(documentRecord) ? (
-                                  <span className="small-pill">
-                                    Stored in vault
-                                  </span>
+                                    <button
+                                      className="monitor-btn monitor-btn-primary"
+                                      disabled={
+                                        documentAccessBusyKey ===
+                                        `${documentRecord.id}:view`
+                                      }
+                                      onClick={() =>
+                                        accessInvestorDocument(documentRecord, "view")
+                                      }
+                                      type="button"
+                                      style={{ minHeight: "38px", padding: "8px 12px" }}
+                                    >
+                                      {documentAccessBusyKey ===
+                                      `${documentRecord.id}:view`
+                                        ? "Opening..."
+                                        : "View PDF"}
+                                    </button>
+
+                                    {documentDownloadAllowed ? (
+                                      <button
+                                        className="monitor-btn monitor-btn-secondary"
+                                        disabled={
+                                          documentAccessBusyKey ===
+                                          `${documentRecord.id}:download`
+                                        }
+                                        onClick={() =>
+                                          accessInvestorDocument(
+                                            documentRecord,
+                                            "download"
+                                          )
+                                        }
+                                        type="button"
+                                        style={{ minHeight: "38px", padding: "8px 12px" }}
+                                      >
+                                        {documentAccessBusyKey ===
+                                        `${documentRecord.id}:download`
+                                          ? "Preparing..."
+                                          : "Download"}
+                                      </button>
+                                    ) : (
+                                      <span className="small-pill">View only</span>
+                                    )}
+                                  </div>
                                 ) : (
                                   <span className="small-pill">Record only</span>
                                 )}
@@ -2301,61 +3093,245 @@ const displayedManagementFee = financialPosition
                       </table>
                     </div>
                   )}
+
+                  {documents.length > 0 && (
+                    <div className="logic-note">
+                      {isInvestorRole
+                        ? `Document identity is locked to your signed-in entitlement. ${
+                            documentDownloadAllowed
+                              ? "View and download permissions are active."
+                              : "View permission is active; download permission is restricted."
+                          }`
+                        : "Fund Admin support view uses the governed Investor Documents endpoint. PDF View/Download continues through the audited secure-access endpoint."}
+                    </div>
+                  )}
                 </div>
 
                 <div className="preview-card" id="cashflows">
-                  <h2>Investor Cashflow Timeline</h2>
+                  <h2>Capital Calls &amp; Distributions</h2>
+                  <p className="section-copy">
+                    Entitlement-scoped investor cashflow history released through
+                    the governed VENTIQ server layer.
+                  </p>
 
-                  {cashflows.length === 0 && (
-                    <div className="explain-box">
-                      No investor cashflows found yet. Publish financial
-                      migration data first.
-                    </div>
+                  {cashflowAccessMessage && (
+                    <div className="explain-box">{cashflowAccessMessage}</div>
                   )}
 
-                  {cashflows.length > 0 && (
-                    <div
-                      style={{
-                        overflowX: "auto",
-                        border: "1px solid rgba(148, 163, 184, 0.22)",
-                        borderRadius: "18px",
-                        marginTop: "18px",
-                      }}
-                    >
-                      <table
-                        className="investor-table"
-                        style={{
-                          minWidth: "900px",
-                          width: "100%",
-                        }}
-                      >
-                        <thead>
-                          <tr>
-                            <th>Date</th>
-                            <th>Type</th>
-                            <th>Direction</th>
-                            <th>Amount</th>
-                            <th>Description</th>
-                          </tr>
-                        </thead>
+                  {!cashflowAccessMessage && (
+                    <>
+                      <div className="impact-grid">
+                        <div className="impact-card">
+                          <h3>{formatInr(cashflowSummary?.total_called)}</h3>
+                          <p>Total called</p>
+                        </div>
 
-                        <tbody>
-                          {cashflows.map((cashflow) => (
-                            <tr key={cashflow.id}>
-                              <td>{formatDate(cashflow.cashflow_date)}</td>
-                              <td>{cashflow.cashflow_type ?? "-"}</td>
-                              <td>
-                                <span className="small-pill">
-                                  {cashflow.direction ?? "-"}
-                                </span>
-                              </td>
-                              <td>{formatCr(toCr(cashflow.amount))}</td>
-                              <td>{cashflow.description ?? "-"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                        <div className="impact-card">
+                          <h3>{formatInr(cashflowSummary?.total_received)}</h3>
+                          <p>Total received</p>
+                        </div>
+
+                        <div className="impact-card">
+                          <h3>{formatInr(cashflowSummary?.total_outstanding)}</h3>
+                          <p>Outstanding</p>
+                        </div>
+
+                        <div className="impact-card">
+                          <h3>{formatInr(cashflowSummary?.total_distributed)}</h3>
+                          <p>Total distributed</p>
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: "24px" }}>
+                        <h3>Capital Calls</h3>
+
+                        {capitalCalls.length === 0 ? (
+                          <div className="explain-box">
+                            No governed capital-call records are available for this
+                            investor yet.
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              overflowX: "auto",
+                              border: "1px solid rgba(148, 163, 184, 0.22)",
+                              borderRadius: "18px",
+                              marginTop: "14px",
+                            }}
+                          >
+                            <table
+                              className="investor-table"
+                              style={{ minWidth: "1100px", width: "100%" }}
+                            >
+                              <thead>
+                                <tr>
+                                  <th>Capital Call</th>
+                                  <th>Call Date</th>
+                                  <th>Due Date</th>
+                                  <th>Called</th>
+                                  <th>Received</th>
+                                  <th>Outstanding</th>
+                                  <th>Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {capitalCalls.map((call) => (
+                                  <tr key={call.capital_call_code}>
+                                    <td>
+                                      <strong>{
+                                        call.call_name || call.capital_call_code
+                                      }</strong>
+                                      <br />
+                                      <span className="table-subtext">
+                                        {call.capital_call_code}
+                                      </span>
+                                    </td>
+                                    <td>{formatDate(call.call_date)}</td>
+                                    <td>{formatDate(call.due_date)}</td>
+                                    <td>{formatInr(call.called_amount)}</td>
+                                    <td>{formatInr(call.amount_received)}</td>
+                                    <td>{formatInr(call.outstanding_amount)}</td>
+                                    <td>
+                                      <span className="small-pill">
+                                        {call.receipt_status ||
+                                          call.allocation_status ||
+                                          "Recorded"}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ marginTop: "30px" }}>
+                        <h3>Distribution History</h3>
+
+                        {distributionHistory.length === 0 ? (
+                          <div className="explain-box">
+                            No governed distribution records are available for this
+                            investor yet.
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              overflowX: "auto",
+                              border: "1px solid rgba(148, 163, 184, 0.22)",
+                              borderRadius: "18px",
+                              marginTop: "14px",
+                            }}
+                          >
+                            <table
+                              className="investor-table"
+                              style={{ minWidth: "1050px", width: "100%" }}
+                            >
+                              <thead>
+                                <tr>
+                                  <th>Distribution</th>
+                                  <th>Payment Date</th>
+                                  <th>Gross</th>
+                                  <th>Return of Capital</th>
+                                  <th>Tax Withheld</th>
+                                  <th>Net Distribution</th>
+                                  <th>Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {distributionHistory.map((distribution) => (
+                                  <tr key={distribution.distribution_code}>
+                                    <td>
+                                      <strong>{
+                                        distribution.distribution_name ||
+                                        distribution.distribution_code
+                                      }</strong>
+                                      <br />
+                                      <span className="table-subtext">
+                                        {distribution.distribution_code}
+                                      </span>
+                                    </td>
+                                    <td>{formatDate(distribution.payment_date)}</td>
+                                    <td>
+                                      {formatInr(
+                                        distribution.gross_distribution
+                                      )}
+                                    </td>
+                                    <td>
+                                      {formatInr(
+                                        distribution.return_of_capital
+                                      )}
+                                    </td>
+                                    <td>
+                                      {formatInr(distribution.tax_withheld)}
+                                    </td>
+                                    <td>
+                                      {formatInr(
+                                        distribution.net_distribution
+                                      )}
+                                    </td>
+                                    <td>
+                                      <span className="small-pill">
+                                        {distribution.payment_status || "Recorded"}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ marginTop: "30px" }}>
+                        <h3>Investor Cashflow Timeline</h3>
+
+                        {cashflows.length === 0 ? (
+                          <div className="explain-box">
+                            No released investor cashflow activity is available yet.
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              overflowX: "auto",
+                              border: "1px solid rgba(148, 163, 184, 0.22)",
+                              borderRadius: "18px",
+                              marginTop: "14px",
+                            }}
+                          >
+                            <table
+                              className="investor-table"
+                              style={{ minWidth: "900px", width: "100%" }}
+                            >
+                              <thead>
+                                <tr>
+                                  <th>Date</th>
+                                  <th>Type</th>
+                                  <th>Direction</th>
+                                  <th>Amount</th>
+                                  <th>Description</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {cashflows.map((cashflow) => (
+                                  <tr key={cashflow.id}>
+                                    <td>{formatDate(cashflow.cashflow_date)}</td>
+                                    <td>{cashflow.cashflow_type ?? "-"}</td>
+                                    <td>
+                                      <span className="small-pill">
+                                        {cashflow.direction ?? "-"}
+                                      </span>
+                                    </td>
+                                    <td>{formatInr(cashflow.amount)}</td>
+                                    <td>{cashflow.description ?? "-"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    </>
                   )}
                 </div>
 
@@ -2411,6 +3387,13 @@ const displayedManagementFee = financialPosition
                   <div className="action-row">
                     <a className="monitor-btn monitor-btn-primary" href="/data-room">
                       Open Investor Data Room
+                    </a>
+
+                    <a
+                      className="monitor-btn monitor-btn-secondary"
+                      href="/fundraising-ai"
+                    >
+                      Open IR Workspace
                     </a>
                   </div>
                 </div>

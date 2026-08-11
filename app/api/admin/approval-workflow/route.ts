@@ -63,6 +63,7 @@ const LINKED_RECORD_TYPES = new Set([
   "Data Request",
   "Covenant Breach",
   "Security Tracker",
+  "Fund Memory Snapshot",
 ]);
 
 const ACTION_TYPES = new Set([
@@ -76,6 +77,7 @@ const ACTION_TYPES = new Set([
   "Capital Call Approval",
   "Distribution Approval",
   "Data Deletion Approval",
+  "Fund Memory Approval",
 ]);
 
 const PRIORITIES = new Set(["Low", "Medium", "High", "Critical"]);
@@ -226,6 +228,15 @@ type CapitalCallApprovalSnapshot = {
   allocationIds: string[];
 };
 
+type FundMemoryApprovalSnapshot = {
+  snapshotId: string;
+  previousApprovalStatus: string;
+  previousApprovedBy: string | null;
+  previousApprovedAt: string | null;
+  previousApprovalNotes: string | null;
+  supersededRows: Array<{ id: string; supersededAt: string | null }>;
+};
+
 function relationName(value: unknown) {
   if (Array.isArray(value)) {
     const first = value[0] as Record<string, unknown> | undefined;
@@ -244,6 +255,75 @@ function isCapitalCallApprovalRecord(approval: Record<string, unknown>) {
     normalizeText(approval.linked_record_type, 100) === "Capital Call" &&
     normalizeText(approval.action_type, 100) === "Capital Call Approval"
   );
+}
+
+function isFundMemoryApprovalRecord(approval: Record<string, unknown>) {
+  return (
+    normalizeText(approval.source_module, 100) === "Document Studio" &&
+    normalizeText(approval.linked_record_type, 100) === "Fund Memory Snapshot" &&
+    normalizeText(approval.action_type, 100) === "Fund Memory Approval"
+  );
+}
+
+async function getFundMemorySnapshotWithAccess(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  snapshotId: string,
+  requiredAccess: "view" | "approve"
+) {
+  const { data: snapshot, error: snapshotError } = await supabase
+    .from("investor_position_snapshots")
+    .select(
+      "id, organisation_id, fund_name, investor_id, investor_code, investor_name, class_name, reporting_date, reporting_period, snapshot_version, reconciliation_status, validation_status, approval_status, approved_by, approved_at, approval_notes, superseded_at"
+    )
+    .eq("id", snapshotId)
+    .eq("organisation_id", user.organisationId)
+    .maybeSingle();
+
+  if (snapshotError) {
+    throw new Error(`Unable to load Fund Memory snapshot: ${snapshotError.message}`);
+  }
+
+  if (!snapshot) {
+    throw new Error("Fund Memory snapshot not found in your organisation.");
+  }
+
+  const fundName = normalizeText(snapshot.fund_name, 240);
+  if (!fundName) {
+    throw new Error("Fund Memory snapshot fund could not be resolved.");
+  }
+
+  let accessQuery = supabase
+    .from("ventiq_user_fund_access")
+    .select("id, can_view, can_approve, status")
+    .eq("organisation_id", user.organisationId)
+    .eq("user_id", user.userId)
+    .eq("fund_name", fundName)
+    .eq("status", "Active");
+
+  accessQuery =
+    requiredAccess === "approve"
+      ? accessQuery.eq("can_approve", true)
+      : accessQuery.eq("can_view", true);
+
+  const { data: access, error: accessError } = await accessQuery.maybeSingle();
+
+  if (accessError) {
+    throw new Error(`Unable to verify Fund Memory fund access: ${accessError.message}`);
+  }
+
+  if (!access) {
+    throw new Error(
+      requiredAccess === "approve"
+        ? "You do not have approval access for this Fund Memory snapshot."
+        : "You do not have access to this Fund Memory snapshot."
+    );
+  }
+
+  return {
+    snapshot: snapshot as Record<string, unknown>,
+    fundName,
+  };
 }
 
 async function getCapitalCallWithAccess(
@@ -388,6 +468,189 @@ async function rollbackCapitalCallApproval(
       .from("capital_call_investors")
       .update({ status: "ready" })
       .in("id", snapshot.allocationIds);
+  }
+}
+
+async function applyFundMemoryApproval(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  snapshotId: string
+): Promise<FundMemoryApprovalSnapshot> {
+  const { snapshot } = await getFundMemorySnapshotWithAccess(
+    supabase,
+    user,
+    snapshotId,
+    "approve"
+  );
+
+  const reconciliationStatus = normalizeText(snapshot.reconciliation_status, 80);
+  const validationStatus = normalizeText(snapshot.validation_status, 80);
+  const approvalStatus = normalizeText(snapshot.approval_status, 80);
+  const supersededAt = normalizeText(snapshot.superseded_at, 100);
+
+  if (reconciliationStatus !== "matched" || validationStatus !== "ready") {
+    throw new Error(
+      "Fund Memory snapshot must be reconciled and validation-ready before final approval."
+    );
+  }
+
+  if (approvalStatus !== "pending_approval") {
+    throw new Error(
+      `Fund Memory snapshot is not awaiting approval (current status: ${approvalStatus || "unknown"}).`
+    );
+  }
+
+  if (supersededAt) {
+    throw new Error("A superseded Fund Memory snapshot cannot be approved.");
+  }
+
+  const organisationId = normalizeText(snapshot.organisation_id, 100);
+  const fundName = normalizeText(snapshot.fund_name, 240);
+  const investorId = normalizeText(snapshot.investor_id, 100);
+  const className = normalizeText(snapshot.class_name, 240);
+  const reportingDate = normalizeText(snapshot.reporting_date, 40);
+
+  let previousQuery = supabase
+    .from("investor_position_snapshots")
+    .select("id, superseded_at")
+    .eq("organisation_id", organisationId)
+    .eq("fund_name", fundName)
+    .eq("investor_id", investorId)
+    .eq("reporting_date", reportingDate)
+    .eq("approval_status", "approved")
+    .is("superseded_at", null)
+    .neq("id", snapshotId);
+
+  previousQuery = className
+    ? previousQuery.eq("class_name", className)
+    : previousQuery.is("class_name", null);
+
+  const { data: previousApproved, error: previousError } = await previousQuery;
+
+  if (previousError) {
+    throw new Error(
+      `Unable to inspect prior approved Fund Memory snapshots: ${previousError.message}`
+    );
+  }
+
+  const supersededRows = (previousApproved || []).map((row: any) => ({
+    id: normalizeText(row.id, 100),
+    supersededAt: row.superseded_at ? String(row.superseded_at) : null,
+  }));
+
+  const now = new Date().toISOString();
+  const priorIds = supersededRows.map((row) => row.id).filter(Boolean);
+
+  if (priorIds.length > 0) {
+    const { error: supersedeError } = await supabase
+      .from("investor_position_snapshots")
+      .update({ superseded_at: now })
+      .in("id", priorIds);
+
+    if (supersedeError) {
+      throw new Error(
+        `Unable to supersede prior Fund Memory snapshot: ${supersedeError.message}`
+      );
+    }
+  }
+
+  const { error: approvalError } = await supabase
+    .from("investor_position_snapshots")
+    .update({
+      approval_status: "approved",
+      approved_by: user.userId,
+      approved_at: now,
+      approval_notes: `Approved through VENTIQ maker-checker workflow by ${user.fullName}.`,
+    })
+    .eq("id", snapshotId)
+    .eq("organisation_id", user.organisationId)
+    .eq("approval_status", "pending_approval")
+    .is("superseded_at", null);
+
+  if (approvalError) {
+    if (priorIds.length > 0) {
+      await supabase
+        .from("investor_position_snapshots")
+        .update({ superseded_at: null })
+        .in("id", priorIds);
+    }
+    throw new Error(`Unable to approve Fund Memory snapshot: ${approvalError.message}`);
+  }
+
+  return {
+    snapshotId,
+    previousApprovalStatus: approvalStatus,
+    previousApprovedBy: snapshot.approved_by ? String(snapshot.approved_by) : null,
+    previousApprovedAt: snapshot.approved_at ? String(snapshot.approved_at) : null,
+    previousApprovalNotes: snapshot.approval_notes ? String(snapshot.approval_notes) : null,
+    supersededRows,
+  };
+}
+
+async function applyFundMemoryRejection(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  snapshotId: string
+): Promise<FundMemoryApprovalSnapshot> {
+  const { snapshot } = await getFundMemorySnapshotWithAccess(
+    supabase,
+    user,
+    snapshotId,
+    "approve"
+  );
+
+  const approvalStatus = normalizeText(snapshot.approval_status, 80);
+  if (approvalStatus !== "pending_approval") {
+    throw new Error(
+      `Fund Memory snapshot is not awaiting approval (current status: ${approvalStatus || "unknown"}).`
+    );
+  }
+
+  const { error } = await supabase
+    .from("investor_position_snapshots")
+    .update({
+      approval_status: "rejected",
+      approved_by: null,
+      approved_at: null,
+      approval_notes: `Rejected through VENTIQ maker-checker workflow by ${user.fullName}.`,
+    })
+    .eq("id", snapshotId)
+    .eq("organisation_id", user.organisationId)
+    .eq("approval_status", "pending_approval");
+
+  if (error) {
+    throw new Error(`Unable to reject Fund Memory snapshot: ${error.message}`);
+  }
+
+  return {
+    snapshotId,
+    previousApprovalStatus: approvalStatus,
+    previousApprovedBy: snapshot.approved_by ? String(snapshot.approved_by) : null,
+    previousApprovedAt: snapshot.approved_at ? String(snapshot.approved_at) : null,
+    previousApprovalNotes: snapshot.approval_notes ? String(snapshot.approval_notes) : null,
+    supersededRows: [],
+  };
+}
+
+async function rollbackFundMemoryDecision(
+  supabase: SupabaseAdmin,
+  state: FundMemoryApprovalSnapshot
+) {
+  await supabase
+    .from("investor_position_snapshots")
+    .update({
+      approval_status: state.previousApprovalStatus,
+      approved_by: state.previousApprovedBy,
+      approved_at: state.previousApprovedAt,
+      approval_notes: state.previousApprovalNotes,
+    })
+    .eq("id", state.snapshotId);
+
+  for (const row of state.supersededRows) {
+    await supabase
+      .from("investor_position_snapshots")
+      .update({ superseded_at: row.supersededAt })
+      .eq("id", row.id);
   }
 }
 
@@ -538,10 +801,11 @@ async function createRequest(
   }
 
   const requestedLinkedRecordId = normalizeText(body.linkedRecordId, 100);
-  const linkedRecordId =
-    actionType === "Capital Call Approval"
-      ? requestedLinkedRecordId
-      : randomUUID();
+  const requiresRealLinkedRecord =
+    actionType === "Capital Call Approval" || actionType === "Fund Memory Approval";
+  const linkedRecordId = requiresRealLinkedRecord
+    ? requestedLinkedRecordId
+    : randomUUID();
 
   if (actionType === "Capital Call Approval") {
     if (sourceModule !== "Capital Call" || linkedRecordType !== "Capital Call") {
@@ -595,6 +859,79 @@ async function createRequest(
     if (existingRequest) {
       return NextResponse.json(
         { error: "This capital call already has an approval request in progress." },
+        { status: 409 }
+      );
+    }
+  }
+
+  if (actionType === "Fund Memory Approval") {
+    if (
+      sourceModule !== "Document Studio" ||
+      linkedRecordType !== "Fund Memory Snapshot"
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Fund Memory approvals must use Document Studio and Fund Memory Snapshot.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!linkedRecordId) {
+      return NextResponse.json(
+        { error: "Fund Memory approval requires the canonical snapshot ID." },
+        { status: 400 }
+      );
+    }
+
+    const { snapshot } = await getFundMemorySnapshotWithAccess(
+      supabase,
+      user,
+      linkedRecordId,
+      "view"
+    );
+
+    const reconciliationStatus = normalizeText(snapshot.reconciliation_status, 80);
+    const validationStatus = normalizeText(snapshot.validation_status, 80);
+    const approvalStatus = normalizeText(snapshot.approval_status, 80);
+    const supersededAt = normalizeText(snapshot.superseded_at, 100);
+
+    if (
+      reconciliationStatus !== "matched" ||
+      validationStatus !== "ready" ||
+      approvalStatus !== "pending_approval" ||
+      supersededAt
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Only a live, reconciled, validation-ready Fund Memory snapshot in pending_approval status can enter the approval workflow.",
+        },
+        { status: 409 }
+      );
+    }
+
+    const { data: existingRequest, error: existingRequestError } = await supabase
+      .from("ventiq_approval_requests")
+      .select("id, approval_status")
+      .eq("organisation_id", user.organisationId)
+      .eq("linked_record_id", linkedRecordId)
+      .eq("linked_record_type", "Fund Memory Snapshot")
+      .eq("action_type", "Fund Memory Approval")
+      .in("approval_status", ["Pending Review", "Pending Approval"])
+      .limit(1)
+      .maybeSingle();
+
+    if (existingRequestError) {
+      throw new Error(
+        `Unable to check existing Fund Memory approval: ${existingRequestError.message}`
+      );
+    }
+
+    if (existingRequest) {
+      return NextResponse.json(
+        { error: "This Fund Memory snapshot already has an approval request in progress." },
         { status: 409 }
       );
     }
@@ -762,6 +1099,23 @@ async function decideRequest(
       );
     }
 
+    if (isFundMemoryApprovalRecord(approval as Record<string, unknown>)) {
+      const fundMemorySnapshotId = normalizeText(approval.linked_record_id, 100);
+      if (!fundMemorySnapshotId) {
+        return NextResponse.json(
+          { error: "Fund Memory approval is missing its linked snapshot ID." },
+          { status: 409 }
+        );
+      }
+
+      await getFundMemorySnapshotWithAccess(
+        supabase,
+        user,
+        fundMemorySnapshotId,
+        "view"
+      );
+    }
+
     const { error: checkerStepError } = await supabase
       .from("ventiq_approval_steps")
       .update({
@@ -869,6 +1223,13 @@ async function decideRequest(
       ? normalizeText(approval.linked_record_id, 100)
       : "";
 
+    const isFundMemoryApproval = isFundMemoryApprovalRecord(
+      approval as Record<string, unknown>
+    );
+    const fundMemorySnapshotId = isFundMemoryApproval
+      ? normalizeText(approval.linked_record_id, 100)
+      : "";
+
     if (isCapitalCallApproval) {
       if (!capitalCallId) {
         return NextResponse.json(
@@ -881,6 +1242,22 @@ async function decideRequest(
         supabase,
         user,
         capitalCallId,
+        "approve"
+      );
+    }
+
+    if (isFundMemoryApproval) {
+      if (!fundMemorySnapshotId) {
+        return NextResponse.json(
+          { error: "Fund Memory approval is missing its linked snapshot ID." },
+          { status: 409 }
+        );
+      }
+
+      await getFundMemorySnapshotWithAccess(
+        supabase,
+        user,
+        fundMemorySnapshotId,
         "approve"
       );
     }
@@ -937,6 +1314,7 @@ async function decideRequest(
     }
 
     let capitalCallSnapshot: CapitalCallApprovalSnapshot | null = null;
+    let fundMemoryDecisionState: FundMemoryApprovalSnapshot | null = null;
 
     try {
       if (isCapitalCallApproval && isApproved) {
@@ -945,6 +1323,20 @@ async function decideRequest(
           user,
           capitalCallId
         );
+      }
+
+      if (isFundMemoryApproval) {
+        fundMemoryDecisionState = isApproved
+          ? await applyFundMemoryApproval(
+              supabase,
+              user,
+              fundMemorySnapshotId
+            )
+          : await applyFundMemoryRejection(
+              supabase,
+              user,
+              fundMemorySnapshotId
+            );
       }
 
       await insertAuditLog(supabase, user, {
@@ -959,6 +1351,10 @@ async function decideRequest(
     } catch (error) {
       if (capitalCallSnapshot) {
         await rollbackCapitalCallApproval(supabase, capitalCallSnapshot);
+      }
+
+      if (fundMemoryDecisionState) {
+        await rollbackFundMemoryDecision(supabase, fundMemoryDecisionState);
       }
 
       await supabase
@@ -991,9 +1387,14 @@ async function decideRequest(
     }
 
     return NextResponse.json({
-      message: isCapitalCallApproval && isApproved
-        ? `Final approval completed by ${user.fullName}. Capital call and eligible LP allocations are now approved.`
-        : `Final approval ${decision.toLowerCase()} by ${user.fullName}.`,
+      message:
+        isCapitalCallApproval && isApproved
+          ? `Final approval completed by ${user.fullName}. Capital call and eligible LP allocations are now approved.`
+          : isFundMemoryApproval && isApproved
+          ? `Final approval completed by ${user.fullName}. Canonical Fund Memory is now investor-statement eligible.`
+          : isFundMemoryApproval && !isApproved
+          ? `Fund Memory snapshot rejected by ${user.fullName}.`
+          : `Final approval ${decision.toLowerCase()} by ${user.fullName}.`,
     });
   }
 

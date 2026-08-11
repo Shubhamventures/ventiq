@@ -377,8 +377,30 @@ export default function DataRoomPage() {
     setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund(DEFAULT_FUND_NAME);
-  const { session, activeRole } = useVentiqAuth();
+  const {
+    session,
+    activeRole,
+    fundAccess,
+    loading: authLoading,
+  } = useVentiqAuth();
   const isInvestorUser = activeRole === "investor";
+
+  const investorAllowedFunds = useMemo(() => {
+    if (!isInvestorUser) return [];
+
+    return Array.from(
+      new Set(
+        fundAccess
+          .filter(
+            (access) =>
+              access.status === "Active" &&
+              Boolean(access.can_view) &&
+              Boolean(access.fund_name?.trim())
+          )
+          .map((access) => access.fund_name.trim())
+      )
+    ).sort();
+  }, [fundAccess, isInvestorUser]);
 
   const [availableFunds, setAvailableFunds] = useState<string[]>([
     DEFAULT_FUND_NAME,
@@ -529,7 +551,35 @@ export default function DataRoomPage() {
   }
 
   async function loadDataRoom() {
-    if (!fundContextReady) return;
+    if (!fundContextReady || authLoading) return;
+
+    if (isInvestorUser) {
+      if (investorAllowedFunds.length === 0) {
+        setSourceBatch(null);
+        setDocuments([]);
+        setInvestors([]);
+        setEngagementEvents([]);
+        setDdqQuestions([]);
+        setErrorMessage(
+          "No active governed fund access is available for this investor account."
+        );
+        setLoading(false);
+        return;
+      }
+
+      const hasCurrentFundAccess = investorAllowedFunds.some(
+        (fundName) =>
+          fundName.trim().toLowerCase() ===
+          activeFundName.trim().toLowerCase()
+      );
+
+      if (!hasCurrentFundAccess) {
+        // The fund-lock effect below will move the page to the investor's
+        // governed fund before any Data Room API request is released.
+        setLoading(true);
+        return;
+      }
+    }
 
     if (!isSupabaseConfigured || !supabase) {
       setErrorMessage(
@@ -611,6 +661,11 @@ export default function DataRoomPage() {
         );
       }
 
+      if (isInvestorUser) {
+        setActivationStatus("Active");
+        setActivationReadiness(100);
+      }
+
       const resolvedBatch = documentResult.sourceBatch ?? null;
       const resolvedDocuments = documentResult.documents ?? [];
 
@@ -663,9 +718,42 @@ export default function DataRoomPage() {
   }
 
   useEffect(() => {
+    if (!isInvestorUser || authLoading) return;
+
+    if (investorAllowedFunds.length === 0) {
+      setAvailableFunds([]);
+      return;
+    }
+
+    setAvailableFunds(investorAllowedFunds);
+
+    const hasCurrentFundAccess = investorAllowedFunds.some(
+      (fundName) =>
+        fundName.trim().toLowerCase() === activeFundName.trim().toLowerCase()
+    );
+
+    if (!hasCurrentFundAccess) {
+      setActiveFundName(investorAllowedFunds[0]);
+    }
+  }, [
+    activeFundName,
+    authLoading,
+    investorAllowedFunds,
+    isInvestorUser,
+    setActiveFundName,
+  ]);
+
+  useEffect(() => {
     loadDataRoom();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFundName, accessToken, fundContextReady]);
+  }, [
+    activeFundName,
+    accessToken,
+    authLoading,
+    fundContextReady,
+    investorAllowedFunds,
+    isInvestorUser,
+  ]);
 
   const metrics = useMemo(() => {
     const coveredFolders = new Set(

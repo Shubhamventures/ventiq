@@ -1,5 +1,7 @@
 "use client";
 
+// A6-3G: canonical preview rehydration + per-fund governed investor persistence.
+
 import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ProtectedWorkspace from "../../components/auth/ProtectedWorkspace";
@@ -123,11 +125,21 @@ type SavedTemplate = {
 
 type PreviewMergeResponse = {
   message?: string;
+  code?: string;
+  error?: string;
   investor?: {
     id?: string;
     investor_code?: string;
     investor_name?: string;
   };
+  fundMemory?: {
+    snapshot_id?: string;
+    reporting_date?: string;
+    reporting_period?: string | null;
+    snapshot_version?: number;
+    eligible?: boolean;
+    blockers?: string[];
+  } | null;
   mergedFields?: Record<string, string | number>;
   tables?: {
     transactions?: {
@@ -138,6 +150,14 @@ type PreviewMergeResponse = {
     }[];
   };
   sourceCounts?: Record<string, number>;
+};
+
+type GovernedInvestorOption = {
+  id: string;
+  investor_code: string;
+  investor_name: string;
+  investor_type: string;
+  email: string;
 };
 
 type BatchDocumentRow = {
@@ -171,6 +191,19 @@ type BatchGenerationResponse = {
   };
   queuedDocuments?: number;
   documents?: BatchDocumentRow[];
+  exceptions?: Array<{
+    investor_id: string;
+    investor_code: string;
+    investor_name: string;
+    code: string;
+    blockers: string[];
+    message: string;
+  }>;
+  eligibilitySummary?: {
+    totalInvestors: number;
+    ready: number;
+    review: number;
+  };
   recentBatches?: Array<{
     id: string;
     batch_name: string | null;
@@ -1117,7 +1150,10 @@ function DocumentStudioWorkspace() {
   const [importDone, setImportDone] = useState(false);
   const [activeTemplateId, setActiveTemplateId] = useState("");
   const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([]);
+  const [governedInvestors, setGovernedInvestors] = useState<GovernedInvestorOption[]>([]);
+  const [selectedGovernedInvestorId, setSelectedGovernedInvestorId] = useState("");
   const [previewMergeData, setPreviewMergeData] = useState<PreviewMergeResponse | null>(null);
+  const [previewHydrating, setPreviewHydrating] = useState(false);
   const [batchResult, setBatchResult] = useState<BatchGenerationResponse | null>(null);
   const [publishResult, setPublishResult] = useState<PublishResponse | null>(null);
   const [pdfGenerationResult, setPdfGenerationResult] = useState<PdfGenerationResponse | null>(null);
@@ -1134,6 +1170,13 @@ function DocumentStudioWorkspace() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedInvestor = investors.find((investor) => investor.id === selectedInvestorId) ?? investors[0];
+  const selectedGovernedInvestor = useMemo(
+    () =>
+      governedInvestors.find(
+        (investor) => investor.id === selectedGovernedInvestorId
+      ) ?? governedInvestors[0] ?? null,
+    [governedInvestors, selectedGovernedInvestorId]
+  );
   const batchDocuments = useMemo(() => {
   return pdfGenerationResult?.documents || batchResult?.documents || [];
 }, [batchResult, pdfGenerationResult]);
@@ -1196,6 +1239,27 @@ const failedBatchDocumentIds = useMemo(() => {
     const key = documentStudioBatchStorageKey(fundName);
     if (batchId) {
       window.localStorage.setItem(key, batchId);
+    } else {
+      window.localStorage.removeItem(key);
+    }
+  }
+
+  function documentStudioInvestorStorageKey(fundName: string) {
+    return `ventiq.documentStudio.previewInvestor.${fundName.trim().toLowerCase()}`;
+  }
+
+  function readRememberedInvestorId(fundName: string) {
+    if (typeof window === "undefined" || !fundName.trim()) return "";
+    return (
+      window.localStorage.getItem(documentStudioInvestorStorageKey(fundName)) || ""
+    );
+  }
+
+  function rememberInvestorId(fundName: string, investorId: string) {
+    if (typeof window === "undefined" || !fundName.trim()) return;
+    const key = documentStudioInvestorStorageKey(fundName);
+    if (investorId) {
+      window.localStorage.setItem(key, investorId);
     } else {
       window.localStorage.removeItem(key);
     }
@@ -1306,6 +1370,7 @@ const failedBatchDocumentIds = useMemo(() => {
     }
 
     loadSavedTemplates();
+    loadGovernedInvestors();
 
     const rememberedBatchId = readRememberedBatchId(activeFundName);
     loadGovernedBatch(rememberedBatchId, false, true);
@@ -1315,6 +1380,39 @@ const failedBatchDocumentIds = useMemo(() => {
     activeFundReady,
     fundAccessReady,
     activeFundAccess,
+  ]);
+
+  useEffect(() => {
+    if (
+      workspaceTab !== "preview" ||
+      previewMergeData?.mergedFields ||
+      !workspaceStorageReady ||
+      !accessToken ||
+      !activeFundReady ||
+      !fundAccessReady ||
+      !activeFundName ||
+      !activeFundAccess ||
+      !selectedGovernedInvestor
+    ) {
+      return;
+    }
+
+    // A6-3G: preview payloads are intentionally not persisted in the browser.
+    // Re-hydrate from the governed server source whenever PDF Preview is restored
+    // after navigation/remount, or opened without an in-memory canonical payload.
+    void previewTemplate();
+  }, [
+    workspaceTab,
+    workspaceStorageReady,
+    accessToken,
+    activeFundName,
+    activeFundReady,
+    fundAccessReady,
+    activeFundAccess,
+    selectedGovernedInvestor?.id,
+    selectedDocumentType,
+    activeTemplateId,
+    previewMergeData?.mergedFields,
   ]);
 
   function authorisedHeaders(includeJson = false) {
@@ -1334,8 +1432,11 @@ const failedBatchDocumentIds = useMemo(() => {
 
     setActiveTemplateId("");
     setSavedTemplates([]);
+    setGovernedInvestors([]);
+    setSelectedGovernedInvestorId("");
     setSelectedBatchDocumentIds([]);
     setPreviewMergeData(null);
+    setPreviewHydrating(false);
     setBatchResult(null);
     setPdfGenerationResult(null);
     setPublishResult(null);
@@ -1344,6 +1445,53 @@ const failedBatchDocumentIds = useMemo(() => {
     setStatusMessage(
       `Document Studio switched to ${normalizedFundName}. Saved records and publishing will remain scoped to this fund.`
     );
+  }
+
+  async function loadGovernedInvestors() {
+    try {
+      const response = await fetch(
+        `/api/document-studio/preview?fund_name=${encodeURIComponent(
+          activeFundName
+        )}`,
+        {
+          cache: "no-store",
+          headers: authorisedHeaders(),
+        }
+      );
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.error || "Unable to load governed Document Studio investors."
+        );
+      }
+
+      const nextInvestors = (result.investors ?? []) as GovernedInvestorOption[];
+      setGovernedInvestors(nextInvestors);
+
+      const rememberedInvestorId = readRememberedInvestorId(activeFundName);
+
+      setSelectedGovernedInvestorId((currentId) => {
+        const nextSelectedId =
+          currentId && nextInvestors.some((investor) => investor.id === currentId)
+            ? currentId
+            : rememberedInvestorId &&
+              nextInvestors.some((investor) => investor.id === rememberedInvestorId)
+            ? rememberedInvestorId
+            : nextInvestors[0]?.id || "";
+
+        rememberInvestorId(activeFundName, nextSelectedId);
+        return nextSelectedId;
+      });
+    } catch (error) {
+      setGovernedInvestors([]);
+      setSelectedGovernedInvestorId("");
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load governed Document Studio investors."
+      );
+    }
   }
 
   async function loadSavedTemplates() {
@@ -1395,6 +1543,7 @@ function toggleBatchDocumentSelection(documentId?: string) {
 }
   function resetRuntimeResults() {
     setPreviewMergeData(null);
+    setPreviewHydrating(false);
     setBatchResult(null);
     setPdfGenerationResult(null);
     setPublishResult(null);
@@ -1947,9 +2096,23 @@ function startDocumentPreset(preset: DocumentPreset) {
   }
 
   async function previewTemplate() {
+    if (!selectedGovernedInvestor) {
+      setPreviewMergeData(null);
+      setPreviewHydrating(false);
+      setStatusMessage(
+        "No governed investor is available for preview in the selected fund."
+      );
+      return;
+    }
+
+    setWorkspaceTab("preview");
+    setPreviewHydrating(true);
+
     try {
       setApiBusy(true);
-      setStatusMessage("Generating investor-wise preview from migrated data...");
+      setStatusMessage(
+        `Checking canonical Fund Memory for ${selectedGovernedInvestor.investor_name || selectedGovernedInvestor.investor_code}...`
+      );
 
       const response = await fetch("/api/document-studio/preview", {
         method: "POST",
@@ -1958,22 +2121,39 @@ function startDocumentPreset(preset: DocumentPreset) {
           fund_name: activeFundName,
           template_id: activeTemplateId || undefined,
           document_type: selectedDocumentType,
-          investor_code: selectedInvestor.code,
-          statement_period: "Q1 FY 2025-26",
-          report_date: "30-Jun-2025",
+          investor_id: selectedGovernedInvestor.id,
         }),
       });
 
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Unable to generate preview.");
+      const result = (await response.json()) as PreviewMergeResponse;
+
+      if (!response.ok) {
+        const blockers = result.fundMemory?.blockers ?? [];
+        const blockerText =
+          blockers.length > 0 ? ` Blockers: ${blockers.join(", ")}.` : "";
+
+        throw new Error(
+          `${result.error || "Unable to generate canonical preview."}${blockerText}`
+        );
+      }
+
       setPreviewMergeData(result);
-      setWorkspaceTab("preview");
-      setStatusMessage(result.message || `Preview generated for ${result.investor?.investor_name || selectedInvestor.name}.`);
+      setStatusMessage(
+        result.message ||
+          `Canonical Fund Memory preview generated for ${
+            result.investor?.investor_name ||
+            selectedGovernedInvestor.investor_name
+          }.`
+      );
     } catch (error) {
       setPreviewMergeData(null);
-      setWorkspaceTab("preview");
-      setStatusMessage(error instanceof Error ? error.message : "Unable to generate investor preview.");
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to generate canonical investor preview."
+      );
     } finally {
+      setPreviewHydrating(false);
       setApiBusy(false);
     }
   }
@@ -2230,6 +2410,55 @@ async function openPrivatePdf(documentId?: string) {
     } catch (error) {
       setPublishResult(null);
       setStatusMessage(error instanceof Error ? error.message : "Unable to publish documents to Investor Portal.");
+    } finally {
+      setApiBusy(false);
+    }
+  }
+
+  async function activateInvestorDocumentsModule() {
+    try {
+      if (!activeFundName) {
+        setStatusMessage("Select an authorised fund before activating Investor Documents.");
+        return;
+      }
+
+      setApiBusy(true);
+      setStatusMessage(
+        "Revalidating governed investor identity, approved Fund Memory and canonical generated PDFs..."
+      );
+
+      const response = await fetch("/api/document-studio/module-activation", {
+        method: "POST",
+        headers: authorisedHeaders(true),
+        body: JSON.stringify({ fund_name: activeFundName }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        const failedCriteria = Array.isArray(result?.readiness?.criteria)
+          ? result.readiness.criteria
+              .filter((criterion: any) => !criterion.passed)
+              .map((criterion: any) => criterion.label)
+              .join(", ")
+          : "";
+
+        throw new Error(
+          failedCriteria
+            ? `${result.error || "Investor Documents activation failed."} Missing: ${failedCriteria}.`
+            : result.error || "Investor Documents activation failed."
+        );
+      }
+
+      setStatusMessage(
+        result.message ||
+          "Investor Documents Portal activated. Full-fund activation remains unchanged."
+      );
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to activate Investor Documents Portal."
+      );
     } finally {
       setApiBusy(false);
     }
@@ -2991,6 +3220,102 @@ async function openPrivatePdf(documentId?: string) {
     );
   }
 
+  function getCanonicalPreviewValue(code: string) {
+    const value = previewMergeData?.mergedFields?.[code];
+
+    if (typeof value === "string") {
+      return value.trim() || "Unavailable";
+    }
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+
+    return "Unavailable";
+  }
+
+  function renderCanonicalContent(content: string) {
+    return content.replace(/\{([^}]+)\}/g, (_match, code: string) =>
+      getCanonicalPreviewValue(code.trim())
+    );
+  }
+
+  function getCanonicalTableRows(tableConfig: TableBlockConfig) {
+    if (
+      tableConfig.repeatSource === "transactions" ||
+      tableConfig.repeatSource === "cashflows"
+    ) {
+      const transactions = previewMergeData?.tables?.transactions ?? [];
+
+      return transactions.map((transaction) => ({
+        transaction_date: transaction.date ?? "Unavailable",
+        cashflow_date: transaction.date ?? "Unavailable",
+        transaction_description: transaction.description ?? "Unavailable",
+        remarks: transaction.description ?? "Unavailable",
+        transaction_type: transaction.type ?? "Unavailable",
+        cashflow_type: transaction.type ?? "Unavailable",
+        transaction_amount: transaction.amount ?? "Unavailable",
+        amount: transaction.amount ?? "Unavailable",
+      }));
+    }
+
+    const merged = previewMergeData?.mergedFields ?? {};
+
+    const capitalAccountRow: Record<string, string | number> = {
+      opening_capital: merged.opening_capital ?? "Unavailable",
+      capital_contribution:
+        merged.period_capital_contributions ?? "Unavailable",
+      income_allocation: merged.period_income_allocation ?? "Unavailable",
+      distribution:
+        merged.period_capital_distributions ??
+        merged.distribution_amount ??
+        "Unavailable",
+      closing_capital: merged.closing_capital ?? "Unavailable",
+      commitment_amount: merged.commitment_amount ?? "Unavailable",
+      capital_called: merged.capital_called ?? "Unavailable",
+      uncalled_capital: merged.uncalled_capital ?? "Unavailable",
+      current_nav: merged.current_nav ?? "Unavailable",
+      units_held: merged.units_held ?? "Unavailable",
+      nav_per_unit: merged.nav_per_unit ?? "Unavailable",
+    };
+
+    if (
+      tableConfig.repeatSource === "capitalAccount" ||
+      tableConfig.repeatSource === "unitMovements"
+    ) {
+      return [capitalAccountRow];
+    }
+
+    return [{} as Record<string, string | number>];
+  }
+
+  function getCanonicalTableValue(
+    row: Record<string, string | number>,
+    fieldKey: string
+  ) {
+    const rowValue = row[fieldKey];
+
+    if (typeof rowValue === "string") {
+      return rowValue.trim() || "Unavailable";
+    }
+
+    if (typeof rowValue === "number" && Number.isFinite(rowValue)) {
+      return String(rowValue);
+    }
+
+    const mergedValue = previewMergeData?.mergedFields?.[fieldKey];
+
+    if (typeof mergedValue === "string") {
+      return mergedValue.trim() || "Unavailable";
+    }
+
+    if (typeof mergedValue === "number" && Number.isFinite(mergedValue)) {
+      return String(mergedValue);
+    }
+
+    return "Unavailable";
+  }
+
   function renderPdfPreviewBlock(block: TemplateBlock) {
   const tableConfig =
     block.tableConfig ||
@@ -3025,7 +3350,7 @@ async function openPrivatePdf(documentId?: string) {
       {block.kind === "letterhead" && (
         <div className="ids-generated-preview-letterhead">
           <div>
-            <h2>{getInvestorValue(selectedInvestor, "fund_name", activeFundName)}</h2>
+            <h2>{getCanonicalPreviewValue("fund_name")}</h2>
             <p>{block.content || "Registered AIF | GIFT City"}</p>
           </div>
           <strong>VENTIQ</strong>
@@ -3036,27 +3361,27 @@ async function openPrivatePdf(documentId?: string) {
         <div className="ids-generated-preview-identity">
           <div>
             <span>Investor Name</span>
-            <strong>{getInvestorValue(selectedInvestor, "investor_name")}</strong>
+            <strong>{getCanonicalPreviewValue("investor_name")}</strong>
           </div>
 
           <div>
             <span>Investor Code</span>
-            <strong>{getInvestorValue(selectedInvestor, "investor_code")}</strong>
+            <strong>{getCanonicalPreviewValue("investor_code")}</strong>
           </div>
 
           <div>
             <span>Investor Type</span>
-            <strong>{getInvestorValue(selectedInvestor, "investor_type")}</strong>
+            <strong>{getCanonicalPreviewValue("investor_type")}</strong>
           </div>
 
           <div>
             <span>Statement Period</span>
-            <strong>{getInvestorValue(selectedInvestor, "statement_period")}</strong>
+            <strong>{getCanonicalPreviewValue("statement_period")}</strong>
           </div>
 
           <div>
             <span>Report Date</span>
-            <strong>{getInvestorValue(selectedInvestor, "report_date")}</strong>
+            <strong>{getCanonicalPreviewValue("report_date")}</strong>
           </div>
         </div>
       )}
@@ -3090,7 +3415,7 @@ async function openPrivatePdf(documentId?: string) {
           </thead>
 
           <tbody>
-            {(tableConfig.repeatRows ? [0, 1, 2] : [0]).map((rowIndex) => (
+            {getCanonicalTableRows(tableConfig).map((row, rowIndex) => (
               <tr key={`preview-${block.id}-row-${rowIndex}`}>
                 {tableConfig.columns.map((column) => (
                   <td
@@ -3103,9 +3428,7 @@ async function openPrivatePdf(documentId?: string) {
                     }
                     key={`preview-${block.id}-${rowIndex}-${column.id}`}
                   >
-                    {pageSettings.showSampleValues
-                      ? getSampleValueForTableField(column.fieldKey)
-                      : `{${column.fieldKey}}`}
+                    {getCanonicalTableValue(row, column.fieldKey)}
                   </td>
                 ))}
               </tr>
@@ -3118,22 +3441,22 @@ async function openPrivatePdf(documentId?: string) {
         <div className="ids-generated-preview-metrics">
           <div>
             <span>DPI</span>
-            <strong>{getInvestorValue(selectedInvestor, "dpi")}</strong>
+            <strong>{getCanonicalPreviewValue("dpi")}</strong>
           </div>
 
           <div>
             <span>TVPI</span>
-            <strong>{getInvestorValue(selectedInvestor, "tvpi")}</strong>
+            <strong>{getCanonicalPreviewValue("tvpi")}</strong>
           </div>
 
           <div>
             <span>IRR</span>
-            <strong>{getInvestorValue(selectedInvestor, "irr")}</strong>
+            <strong>{getCanonicalPreviewValue("irr")}</strong>
           </div>
 
           <div>
             <span>Distribution</span>
-            <strong>{getInvestorValue(selectedInvestor, "distribution_amount")}</strong>
+            <strong>{getCanonicalPreviewValue("distribution_amount")}</strong>
           </div>
         </div>
       )}
@@ -3141,21 +3464,17 @@ async function openPrivatePdf(documentId?: string) {
       {block.kind === "chart" && chartConfig && (
         <div className="ids-generated-preview-chart">
           <h4>{chartConfig.title}</h4>
-
-          <div className="ids-generated-preview-bars">
-            <span style={{ height: "46%" }} />
-            <span style={{ height: "72%" }} />
-            <span style={{ height: "58%" }} />
-            <span style={{ height: "86%" }} />
-          </div>
-
-          <p>{`Series: {${chartConfig.series}}`}</p>
+          <strong>{getCanonicalPreviewValue(chartConfig.series)}</strong>
+          <p>
+            Point-in-time canonical value shown. Historical chart series remain
+            unavailable until governed time-series Fund Memory is connected.
+          </p>
         </div>
       )}
 
       {block.kind === "notes" && (
         <p className="ids-generated-preview-note">
-          {renderContentWithSampleValues(
+          {renderCanonicalContent(
             block.content ||
               "This statement is generated based on the books and records of the Fund as on {report_date}."
           )}
@@ -3165,13 +3484,13 @@ async function openPrivatePdf(documentId?: string) {
       {block.kind === "signature" && (
         <div className="ids-generated-preview-signature">
           <div>
-            <strong>For {getInvestorValue(selectedInvestor, "fund_name", activeFundName)}</strong>
+            <strong>For {getCanonicalPreviewValue("fund_name")}</strong>
             <span>{block.content || "Authorized Signatory"}</span>
           </div>
 
           <div>
             <span>Generated on</span>
-            <strong>{getInvestorValue(selectedInvestor, "generated_on")}</strong>
+            <strong>{getCanonicalPreviewValue("generated_on")}</strong>
           </div>
         </div>
       )}
@@ -3180,6 +3499,54 @@ async function openPrivatePdf(documentId?: string) {
 }
 
 function renderPreview() {
+  if (previewHydrating && !previewMergeData?.mergedFields) {
+    return (
+      <div className="ids-simple-page">
+        <div className="ids-studio-hero">
+          <p className="ids-eyebrow">Canonical Preview</p>
+          <h2>Restoring governed preview...</h2>
+          <p>
+            Re-checking the latest approved Fund Memory for {selectedGovernedInvestor?.investor_name || "the selected investor"}.
+          </p>
+        </div>
+
+        <div className="ids-explain" style={{ marginTop: 22 }}>
+          Financial preview data is refreshed from the governed server source and is not persisted in browser storage.
+        </div>
+      </div>
+    );
+  }
+
+  if (!previewMergeData?.mergedFields) {
+    return (
+      <div className="ids-simple-page">
+        <div className="ids-studio-hero">
+          <p className="ids-eyebrow">Canonical Preview Gate</p>
+          <h2>Investor-facing preview is blocked</h2>
+          <p>
+            {statusMessage ||
+              "VENTIQ requires approved, statement-eligible Fund Memory before rendering investor-facing financial values."}
+          </p>
+        </div>
+
+        <div className="ids-explain" style={{ marginTop: 22 }}>
+          No fallback financial values or sample investor statement will be
+          rendered while the canonical snapshot is missing or ineligible.
+        </div>
+
+        <div className="ids-action-row" style={{ marginTop: 22 }}>
+          <button
+            className="ids-secondary-btn"
+            onClick={() => setWorkspaceTab("builder")}
+            type="button"
+          >
+            Back to Builder
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="ids-preview-layout">
       <div className="ids-preview-toolbar">
@@ -3188,7 +3555,9 @@ function renderPreview() {
           <h2>{selectedDocumentType}</h2>
           <p>
             Previewing {templateName} for{" "}
-            {previewMergeData?.investor?.investor_name || selectedInvestor.name}.
+            {previewMergeData?.investor?.investor_name ||
+              selectedGovernedInvestor?.investor_name ||
+              "governed investor"}.
             This view removes builder-only controls so it is closer to the generated PDF.
           </p>
         </div>
@@ -3248,6 +3617,8 @@ function renderPreview() {
   ).length;
   const queuedCount = batchResult?.queuedDocuments ?? batchDocuments.length;
   const selectedCount = selectedBatchDocumentIds.length;
+  const reviewCount = batchResult?.batch?.review_count ?? 0;
+  const batchExceptions = batchResult?.exceptions ?? [];
   const recentBatches = batchResult?.recentBatches ?? [];
 
   return (
@@ -3324,13 +3695,18 @@ function renderPreview() {
 
       <div className="ids-batch-grid">
         <div>
-          <strong>{batchResult?.batch?.total_investors ?? investors.length}</strong>
+          <strong>{batchResult?.batch?.total_investors ?? governedInvestors.length}</strong>
           <span>Total investors</span>
         </div>
 
         <div>
           <strong>{queuedCount}</strong>
-          <span>Queued documents</span>
+          <span>Ready / queued</span>
+        </div>
+
+        <div>
+          <strong>{reviewCount}</strong>
+          <span>Needs Fund Memory review</span>
         </div>
 
         <div>
@@ -3399,25 +3775,62 @@ function renderPreview() {
       {batchDocuments.length === 0 && (
         <div className="ids-empty-card">
           {batchResult?.batch?.id ? (
-            <>
-              <strong>Batch prepared — no investors found for this fund</strong>
-              <p>
-                The governed batch is valid and contains zero investors. Add or migrate
-                canonical investors for {activeFundName} before generating PDFs.
-              </p>
-            </>
+            reviewCount > 0 ? (
+              <>
+                <strong>Batch prepared — no investor is currently statement eligible</strong>
+                <p>
+                  {reviewCount} governed investor(s) require canonical Fund Memory review
+                  before a PDF can enter the generation queue. VENTIQ will not fall back to
+                  sample or legacy financial values.
+                </p>
+              </>
+            ) : (
+              <>
+                <strong>Batch prepared — no investors found for this fund</strong>
+                <p>
+                  The governed batch is valid and contains zero investors. Add or migrate
+                  canonical investors for {activeFundName} before generating PDFs.
+                </p>
+              </>
+            )
           ) : (
             <>
               <strong>No batch queue loaded</strong>
               <p>
-                Prepare a governed batch queue to load investor-wise documents for the
-                selected fund.
+                Prepare a governed batch queue. Only investors with approved,
+                statement-eligible Fund Memory will enter PDF generation.
               </p>
               <button className="ids-primary-btn" onClick={runBatch} type="button">
                 Prepare Batch Queue
               </button>
             </>
           )}
+        </div>
+      )}
+
+      {batchExceptions.length > 0 && (
+        <div className="ids-batch-exceptions">
+          <div className="ids-batch-exceptions-head">
+            <div>
+              <strong>Fund Memory exceptions</strong>
+              <span>These investors are excluded from the PDF queue until their canonical snapshot becomes statement eligible.</span>
+            </div>
+            <em>{batchExceptions.length} review</em>
+          </div>
+
+          <div className="ids-batch-exception-grid">
+            {batchExceptions.map((exception) => (
+              <div className="ids-batch-exception-card" key={`${exception.investor_id}-${exception.code}`}>
+                <strong>{exception.investor_name || exception.investor_code || "Investor"}</strong>
+                <span>{exception.investor_code || "Investor code unavailable"}</span>
+                <p>{exception.message}</p>
+                <code>{exception.code}</code>
+                {exception.blockers.length > 0 && (
+                  <small>{exception.blockers.join(" · ")}</small>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -3504,6 +3917,15 @@ function renderPreview() {
           </button>
 
           <button
+            className="ids-secondary-btn"
+            disabled={apiBusy || generatedCount === 0}
+            onClick={activateInvestorDocumentsModule}
+            type="button"
+          >
+            Activate Investor Documents
+          </button>
+
+          <button
             className="ids-primary-btn"
             disabled={
               apiBusy || !batchResult?.batch?.id || generatedCount === 0
@@ -3511,7 +3933,7 @@ function renderPreview() {
             onClick={publishQueue}
             type="button"
           >
-            {apiBusy ? "Publishing..." : "Publish to Portal"}
+            {apiBusy ? "Working..." : "Publish to Portal"}
           </button>
 
           <button
@@ -3652,12 +4074,45 @@ function renderPreview() {
 
               <input value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
               <button className="ids-primary-btn" disabled={apiBusy} onClick={saveTemplate} type="button">{apiBusy ? "Working..." : "Save"}</button>
-              <button className="ids-primary-btn" disabled={apiBusy} onClick={previewTemplate} type="button">{apiBusy ? "Working..." : "Preview"}</button>
-              <span>Preview as</span>
-              <select value={selectedInvestorId} onChange={(event) => setSelectedInvestorId(event.target.value)}>
-                {investors.map((investor) => <option key={investor.id} value={investor.id}>{investor.name}</option>)}
+              <button
+                className="ids-primary-btn"
+                disabled={apiBusy || !selectedGovernedInvestor}
+                onClick={previewTemplate}
+                type="button"
+              >
+                {apiBusy ? "Working..." : "Preview"}
+              </button>
+              <span>Preview investor</span>
+              <select
+                disabled={governedInvestors.length === 0}
+                value={selectedGovernedInvestor?.id || ""}
+                onChange={(event) => {
+                  const nextInvestorId = event.target.value;
+                  setSelectedGovernedInvestorId(nextInvestorId);
+                  rememberInvestorId(activeFundName, nextInvestorId);
+                  setPreviewMergeData(null);
+                }}
+              >
+                {governedInvestors.length === 0 ? (
+                  <option value="">No governed investors</option>
+                ) : (
+                  governedInvestors.map((investor) => (
+                    <option key={investor.id} value={investor.id}>
+                      {investor.investor_name || investor.investor_code}
+                      {investor.investor_code
+                        ? ` · ${investor.investor_code}`
+                        : ""}
+                    </option>
+                  ))
+                )}
               </select>
-              <select value={selectedDocumentType} onChange={(event) => setSelectedDocumentType(event.target.value)}>
+              <select
+                value={selectedDocumentType}
+                onChange={(event) => {
+                  setSelectedDocumentType(event.target.value);
+                  setPreviewMergeData(null);
+                }}
+              >
                 {documentTypes.map((type) => <option key={type}>{type}</option>)}
               </select>
               <button onClick={() => startNewTemplate(true)} type="button">New</button>
@@ -4545,6 +5000,84 @@ function renderPreview() {
         .ids-batch-history-bar span { color: #62708a; font-size: 0.84rem; }
         .ids-batch-history-bar select { min-width: 360px; max-width: 56%; padding: 10px 12px; border: 1px solid #d7c49a; border-radius: 12px; background: #fffdf8; color: #0b2148; font-weight: 700; }
         @media (max-width: 900px) { .ids-batch-history-bar { align-items: stretch; flex-direction: column; } .ids-batch-history-bar select { min-width: 0; max-width: none; width: 100%; } }
+        .ids-batch-exceptions {
+          margin-top: 18px;
+          border: 1px solid #e0d4bd;
+          border-radius: 16px;
+          background: #fffaf1;
+          padding: 16px;
+        }
+
+        .ids-batch-exceptions-head {
+          display: flex;
+          justify-content: space-between;
+          gap: 16px;
+          align-items: flex-start;
+          margin-bottom: 12px;
+        }
+
+        .ids-batch-exceptions-head strong,
+        .ids-batch-exceptions-head span {
+          display: block;
+        }
+
+        .ids-batch-exceptions-head span {
+          color: #64748b;
+          margin-top: 4px;
+          font-size: 12px;
+          line-height: 1.45;
+        }
+
+        .ids-batch-exceptions-head em {
+          font-style: normal;
+          font-size: 12px;
+          font-weight: 900;
+          color: #8a4b10;
+          background: #fff0d8;
+          border: 1px solid #e2b878;
+          border-radius: 999px;
+          padding: 6px 10px;
+          white-space: nowrap;
+        }
+
+        .ids-batch-exception-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+          gap: 10px;
+        }
+
+        .ids-batch-exception-card {
+          border: 1px solid #eadfc9;
+          border-radius: 12px;
+          background: white;
+          padding: 12px;
+        }
+
+        .ids-batch-exception-card strong,
+        .ids-batch-exception-card span,
+        .ids-batch-exception-card code,
+        .ids-batch-exception-card small {
+          display: block;
+        }
+
+        .ids-batch-exception-card span,
+        .ids-batch-exception-card p,
+        .ids-batch-exception-card small {
+          color: #64748b;
+          font-size: 12px;
+        }
+
+        .ids-batch-exception-card p {
+          line-height: 1.45;
+        }
+
+        .ids-batch-exception-card code {
+          color: #8a4b10;
+          font-size: 11px;
+          font-weight: 800;
+          margin-bottom: 6px;
+        }
+
         .ids-batch-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);

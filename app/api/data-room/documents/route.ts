@@ -60,7 +60,9 @@ type AuthorisedUser = {
   email: string;
   fullName: string;
   role: string;
+  organisationId: string;
   investorCodes: string[];
+  downloadableInvestorCodes: string[];
   canDownloadDocuments: boolean;
   canUseDataRoom: boolean;
 };
@@ -122,7 +124,9 @@ async function authoriseRequest(
 
   const { data: profile, error: profileError } = await supabase
     .from("ventiq_user_profiles")
-    .select("user_id, email, full_name, default_role, status")
+    .select(
+      "user_id, email, full_name, default_role, active_organisation_id, status"
+    )
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -136,11 +140,12 @@ async function authoriseRequest(
 
   const allowedRoles = mode === "edit" ? EDIT_ROLES : VIEW_ROLES;
   let role = String(profile.default_role || "").trim();
+  let organisationId = String(profile.active_organisation_id || "").trim();
 
-  if (!allowedRoles.has(role)) {
+  if (!allowedRoles.has(role) || !organisationId) {
     const { data: membership, error: membershipError } = await supabase
       .from("ventiq_organisation_members")
-      .select("role")
+      .select("role,organisation_id")
       .eq("user_id", user.id)
       .eq("status", "Active")
       .order("is_primary", { ascending: false })
@@ -153,17 +158,27 @@ async function authoriseRequest(
       );
     }
 
-    role = String(membership?.role || "").trim();
+    if (!allowedRoles.has(role)) {
+      role = String(membership?.role || "").trim();
+    }
+
+    if (!organisationId) {
+      organisationId = String(membership?.organisation_id || "").trim();
+    }
   }
 
   if (!allowedRoles.has(role)) {
     throw new Error("ROLE_NOT_ALLOWED");
   }
 
+  if (!organisationId) {
+    throw new Error("ORGANISATION_REQUIRED");
+  }
+
   if (role !== "fund_admin") {
     const { data: fundAccess, error: fundAccessError } = await supabase
       .from("ventiq_user_fund_access")
-      .select("can_view, can_edit")
+      .select("organisation_id,can_view,can_edit")
       .eq("user_id", user.id)
       .eq("status", "Active")
       .ilike("fund_name", fundName)
@@ -180,6 +195,18 @@ async function authoriseRequest(
       Boolean(fundAccess?.can_view) &&
       (mode === "view" || Boolean(fundAccess?.can_edit));
 
+    const fundOrganisationId = String(
+      fundAccess?.organisation_id || ""
+    ).trim();
+
+    if (
+      fundOrganisationId &&
+      organisationId &&
+      fundOrganisationId !== organisationId
+    ) {
+      throw new Error("FUND_VIEW_ACCESS_REQUIRED");
+    }
+
     if (!hasRequiredAccess) {
       throw new Error(
         mode === "edit"
@@ -190,6 +217,7 @@ async function authoriseRequest(
   }
 
   let investorCodes: string[] = [];
+  let downloadableInvestorCodes: string[] = [];
   let canDownloadDocuments = role !== "investor";
   let canUseDataRoom = role !== "investor";
 
@@ -229,13 +257,21 @@ async function authoriseRequest(
       )
     );
 
-    canDownloadDocuments = activeEntitlements.some(
-      (row: any) =>
-        Boolean(row?.can_view_documents) &&
-        Boolean(row?.can_use_data_room) &&
-        Boolean(row?.can_download_documents)
+    downloadableInvestorCodes = Array.from(
+      new Set(
+        activeEntitlements
+          .filter(
+            (row: any) =>
+              Boolean(row?.can_view_documents) &&
+              Boolean(row?.can_use_data_room) &&
+              Boolean(row?.can_download_documents)
+          )
+          .map((row: any) => normalizeText(row?.investor_code))
+          .filter(Boolean)
+      )
     );
 
+    canDownloadDocuments = downloadableInvestorCodes.length > 0;
     canUseDataRoom = investorCodes.length > 0;
 
     if (!canUseDataRoom) {
@@ -248,7 +284,9 @@ async function authoriseRequest(
     email: String(profile.email || user.email || ""),
     fullName: String(profile.full_name || user.email || "VENTIQ User"),
     role,
+    organisationId,
     investorCodes,
+    downloadableInvestorCodes,
     canDownloadDocuments,
     canUseDataRoom,
   };
@@ -261,23 +299,99 @@ function canInvestorAccessDocument(
 ) {
   if (user.role !== "investor") return true;
   if (!user.canUseDataRoom) return false;
-  if (forDownload && !user.canDownloadDocuments) return false;
 
   const accessLevel = normalizeText(document.access_level).toLowerCase();
   const investorCode = normalizeText(document.investor_code).toLowerCase();
   const entitledCodes = new Set(
     user.investorCodes.map((code) => code.toLowerCase())
   );
+  const downloadableCodes = new Set(
+    user.downloadableInvestorCodes.map((code) => code.toLowerCase())
+  );
 
   if (accessLevel === "all lps" || accessLevel === "all investors") {
-    return true;
+    return !forDownload || user.canDownloadDocuments;
   }
 
   if (accessLevel === "restricted lp access") {
-    return Boolean(investorCode) && entitledCodes.has(investorCode);
+    if (!investorCode || !entitledCodes.has(investorCode)) return false;
+    return !forDownload || downloadableCodes.has(investorCode);
   }
 
   return false;
+}
+
+function sanitizeDocumentForInvestor(
+  document: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    id: normalizeText(document.id),
+    fund_name: normalizeText(document.fund_name),
+    source_batch_id: normalizeText(document.source_batch_id),
+    investor_code: normalizeText(document.investor_code) || null,
+    investor_name: normalizeText(document.investor_name) || null,
+    document_name: normalizeText(document.document_name),
+    file_name: normalizeText(document.file_name),
+    detected_type: normalizeText(document.detected_type),
+    suggested_folder: normalizeText(document.suggested_folder),
+    access_level: normalizeText(document.access_level),
+    file_size:
+      typeof document.file_size === "number"
+        ? document.file_size
+        : Number(document.file_size || 0),
+    mime_type: normalizeText(document.mime_type),
+    document_status: normalizeText(document.document_status),
+    ddq_impact: normalizeText(document.ddq_impact),
+    imported_at: normalizeText(document.imported_at),
+    updated_at: normalizeText(document.updated_at),
+    download_ready: Boolean(normalizeText(document.storage_path)),
+  };
+}
+
+async function assertInvestorDataRoomModuleActive(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  fundName: string
+) {
+  if (user.role !== "investor") return;
+
+  const [moduleResult, fullFundResult] = await Promise.all([
+    supabase
+      .from("ventiq_module_activation_status")
+      .select("status")
+      .eq("organisation_id", user.organisationId)
+      .ilike("fund_name", fundName)
+      .eq("module_key", "investor_data_room_portal")
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("fund_activation_status")
+      .select("status")
+      .ilike("fund_name", fundName)
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (moduleResult.error) {
+    throw new Error(
+      `Unable to verify Investor Data Room activation: ${moduleResult.error.message}`
+    );
+  }
+
+  if (fullFundResult.error) {
+    throw new Error(
+      `Unable to verify full-fund activation: ${fullFundResult.error.message}`
+    );
+  }
+
+  const moduleActive =
+    normalizeText(moduleResult.data?.status).toLowerCase() === "active";
+  const fullFundActive =
+    normalizeText(fullFundResult.data?.status).toLowerCase() === "active";
+
+  if (!moduleActive && !fullFundActive) {
+    throw new Error("INVESTOR_DATA_ROOM_NOT_ACTIVE");
+  }
 }
 
 function getAuthErrorResponse(error: unknown) {
@@ -296,9 +410,11 @@ function getAuthErrorResponse(error: unknown) {
   if (
     message === "PROFILE_NOT_ACTIVE" ||
     message === "ROLE_NOT_ALLOWED" ||
+    message === "ORGANISATION_REQUIRED" ||
     message === "FUND_EDIT_ACCESS_REQUIRED" ||
     message === "FUND_VIEW_ACCESS_REQUIRED" ||
-    message === "INVESTOR_DATA_ROOM_ACCESS_REQUIRED"
+    message === "INVESTOR_DATA_ROOM_ACCESS_REQUIRED" ||
+    message === "INVESTOR_DATA_ROOM_NOT_ACTIVE"
   ) {
     return NextResponse.json(
       {
@@ -545,6 +661,8 @@ export async function GET(request: NextRequest) {
     }
 
     const user = await authoriseRequest(request, supabase, fundName, "view");
+    await assertInvestorDataRoomModuleActive(supabase, user, fundName);
+
     const sourceBatch = await resolveSourceBatch(
       supabase,
       fundName,
@@ -577,8 +695,8 @@ export async function GET(request: NextRequest) {
 
       if (!canInvestorAccessDocument(user, documentRecord, true)) {
         return NextResponse.json(
-          { error: "The requested document is not available to this investor login." },
-          { status: 403 }
+          { error: "The requested data room document was not found." },
+          { status: 404 }
         );
       }
 
@@ -613,7 +731,10 @@ export async function GET(request: NextRequest) {
 
       return NextResponse.json(
         {
-          document: documentRecord,
+          document:
+            user.role === "investor"
+              ? sanitizeDocumentForInvestor(documentRecord)
+              : documentRecord,
           signedUrl: signedData.signedUrl,
           expiresInSeconds: SIGNED_URL_SECONDS,
           sourceBatch,
@@ -681,13 +802,6 @@ export async function GET(request: NextRequest) {
           const id = normalizeText(document.id);
           return rows.findIndex((row) => normalizeText(row.id) === id) === index;
         })
-        .filter((document) =>
-          investorCode
-            ? normalizeText(document.investor_code).toLowerCase() ===
-                investorCode.toLowerCase() ||
-              normalizeText(document.access_level).toLowerCase() === "all lps"
-            : true
-        )
         .filter((document) => canInvestorAccessDocument(user, document))
         .sort((left, right) => {
           const leftTime = Date.parse(normalizeText(left.imported_at)) || 0;
@@ -719,11 +833,16 @@ export async function GET(request: NextRequest) {
         : [];
     }
 
+    const releasedDocuments =
+      user.role === "investor"
+        ? documents.map((document) => sanitizeDocumentForInvestor(document))
+        : documents;
+
     return NextResponse.json(
       {
-        documents,
+        documents: releasedDocuments,
         sourceBatch,
-        count: documents.length,
+        count: releasedDocuments.length,
       },
       { headers: { "Cache-Control": "no-store" } }
     );
