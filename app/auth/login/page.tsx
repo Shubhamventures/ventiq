@@ -1,8 +1,48 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import { useVentiqAuth } from "../../../lib/auth/AuthProvider";
+
+const SAFE_REDIRECT_BASE = "https://ventiq.local";
+
+function sanitizeNextRoute(value: string) {
+  const candidate = value.trim();
+
+  if (
+    !candidate ||
+    !candidate.startsWith("/") ||
+    candidate.startsWith("//")
+  ) {
+    return "";
+  }
+
+  try {
+    const url = new URL(candidate, SAFE_REDIRECT_BASE);
+
+    if (url.origin !== SAFE_REDIRECT_BASE) {
+      return "";
+    }
+
+    if (
+      url.pathname.startsWith("/api") ||
+      url.pathname === "/auth/login" ||
+      url.pathname === "/site-lock"
+    ) {
+      return "";
+    }
+
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return "";
+  }
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -18,29 +58,101 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [nextRoute, setNextRoute] = useState("");
+  const [nextRouteReady, setNextRouteReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [bridging, setBridging] = useState(false);
   const [message, setMessage] = useState("");
 
+  const bridgeTokenRef = useRef("");
+
   useEffect(() => {
-    const next =
+    const requestedNext =
       typeof window !== "undefined"
         ? new URLSearchParams(window.location.search).get("next") ?? ""
         : "";
 
-    setNextRoute(next);
+    setNextRoute(sanitizeNextRoute(requestedNext));
+    setNextRouteReady(true);
   }, []);
 
   useEffect(() => {
-    if (!loading && session) {
-      router.replace(nextRoute || getDefaultRoute());
+    if (
+      !nextRouteReady ||
+      loading ||
+      !session?.access_token ||
+      bridgeTokenRef.current === session.access_token
+    ) {
+      return;
     }
-  }, [getDefaultRoute, loading, nextRoute, router, session]);
+
+    let cancelled = false;
+    bridgeTokenRef.current = session.access_token;
+    setBridging(true);
+    setMessage("Verifying your VENTIQ application access...");
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/auth/perimeter", {
+          method: "POST",
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
+        if (cancelled) return;
+
+        if (response.status === 403) {
+          router.replace("/auth/unauthorized");
+          return;
+        }
+
+        if (!response.ok) {
+          const result = (await response.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+
+          bridgeTokenRef.current = "";
+          setMessage(
+            result?.error ||
+              "Unable to establish secure VENTIQ application access."
+          );
+          setSubmitting(false);
+          setBridging(false);
+          return;
+        }
+
+        router.replace(nextRoute || getDefaultRoute());
+      } catch {
+        if (!cancelled) {
+          bridgeTokenRef.current = "";
+          setMessage(
+            "Unable to establish secure VENTIQ application access."
+          );
+          setSubmitting(false);
+          setBridging(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    getDefaultRoute,
+    loading,
+    nextRoute,
+    nextRouteReady,
+    router,
+    session?.access_token,
+  ]);
 
   const buttonLabel = useMemo(() => {
     if (loading) return "Checking session...";
     if (submitting) return "Signing in...";
+    if (bridging) return "Opening VENTIQ...";
     return "Sign in to VENTIQ";
-  }, [loading, submitting]);
+  }, [bridging, loading, submitting]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -62,7 +174,6 @@ export default function LoginPage() {
     }
 
     setMessage("Signed in. Loading your role and fund access...");
-    router.replace(nextRoute || "/workspace");
   }
 
   return (
@@ -126,7 +237,7 @@ export default function LoginPage() {
           )}
 
           <button
-            disabled={!configured || loading || submitting}
+            disabled={!configured || loading || submitting || bridging}
             type="submit"
           >
             {buttonLabel}
@@ -144,8 +255,16 @@ export default function LoginPage() {
           place-items: center;
           color: #f8fbff;
           background:
-            radial-gradient(circle at 12% 10%, rgba(30, 108, 255, 0.28), transparent 34%),
-            radial-gradient(circle at 88% 16%, rgba(52, 199, 255, 0.14), transparent 30%),
+            radial-gradient(
+              circle at 12% 10%,
+              rgba(30, 108, 255, 0.28),
+              transparent 34%
+            ),
+            radial-gradient(
+              circle at 88% 16%,
+              rgba(52, 199, 255, 0.14),
+              transparent 30%
+            ),
             linear-gradient(145deg, #020814, #07152b 58%, #061126);
         }
 
@@ -177,7 +296,8 @@ export default function LoginPage() {
           letter-spacing: -0.055em;
         }
 
-        .ventiq-login-story > p:not(.ventiq-login-brand):not(.ventiq-login-eyebrow) {
+        .ventiq-login-story
+          > p:not(.ventiq-login-brand):not(.ventiq-login-eyebrow) {
           max-width: 680px;
           margin: 26px 0;
           color: #b9c9df;

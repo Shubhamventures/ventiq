@@ -1,5 +1,6 @@
 import Providers from "./providers";
 import DebtLmsFloatingNav from "./components/DebtLmsFloatingNav";
+import PrivateRouteGate from "./components/PrivateRouteGate";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -51,9 +52,6 @@ export const metadata: Metadata = {
   publisher: "VENTIQ",
   applicationName: "VENTIQ",
 
-  alternates: {
-    canonical: "/",
-  },
 
   openGraph: {
     title: "VENTIQ | AI Stakeholder Dashboards for Private Capital",
@@ -63,6 +61,14 @@ export const metadata: Metadata = {
     siteName: "VENTIQ",
     type: "website",
     locale: "en_IN",
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "VENTIQ — AI Stakeholder Dashboards for Private Capital",
+      },
+    ],
   },
 
   twitter: {
@@ -70,6 +76,7 @@ export const metadata: Metadata = {
     title: "VENTIQ | AI Stakeholder Dashboards for Private Capital",
     description:
       "One fund. Six stakeholders. One source of truth. Role-specific intelligence and workflows powered by connected private-capital data.",
+    images: ["/opengraph-image"],
   },
 
   robots: {
@@ -97,8 +104,10 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <Providers>
-          {children}
-          <DebtLmsFloatingNav />
+          <PrivateRouteGate>
+            {children}
+            <DebtLmsFloatingNav />
+          </PrivateRouteGate>
         </Providers>
       </body>
     </html>

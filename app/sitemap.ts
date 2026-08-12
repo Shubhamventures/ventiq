@@ -1,9 +1,10 @@
-﻿import type { MetadataRoute } from "next";
+import type { MetadataRoute } from "next";
 
 const baseUrl = "https://useventiq.com";
 
 const publicRoutes = [
   { route: "", priority: 1, changeFrequency: "weekly" as const },
+  { route: "/demo", priority: 0.85, changeFrequency: "monthly" as const },
   {
     route: "/product-overview",
     priority: 0.8,

@@ -6,6 +6,7 @@ export default function robots(): MetadataRoute.Robots {
       userAgent: "*",
       allow: [
         "/",
+        "/demo",
         "/product-overview",
         "/security",
         "/faq",
@@ -42,7 +43,6 @@ export default function robots(): MetadataRoute.Robots {
         "/activity-engine",
         "/database-test",
         "/founder/",
-        "/demo",
       ],
     },
     sitemap: "https://useventiq.com/sitemap.xml",

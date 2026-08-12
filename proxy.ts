@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const COOKIE_NAME = "ventiq_site_access";
-const LOCK_PAGE = "/site-lock";
-const LOGIN_API = "/api/site-lock/login";
+const APP_ACCESS_COOKIE = "ventiq_app_access";
 
+// W1G5: public marketing/demo/auth surfaces only.
+// Everything not explicitly public is private by default.
 const PUBLIC_EXACT_PATHS = new Set([
   "/",
+  "/demo",
   "/faq",
   "/security",
   "/privacy",
@@ -15,6 +16,8 @@ const PUBLIC_EXACT_PATHS = new Set([
   "/auth/set-password",
   "/auth/welcome",
   "/auth/unauthorized",
+  "/api/auth/perimeter",
+  "/api/founder/leads",
   "/robots.txt",
   "/sitemap.xml",
   "/favicon.ico",
@@ -22,11 +25,11 @@ const PUBLIC_EXACT_PATHS = new Set([
   "/apple-icon",
   "/opengraph-image",
   "/google158f336352e02741.html",
-  LOCK_PAGE,
-  LOGIN_API,
 ]);
 
 function isStaticPublicAsset(pathname: string) {
+  if (pathname.startsWith("/api/")) return false;
+
   return (
     pathname.startsWith("/_next/") ||
     pathname.startsWith("/public/") ||
@@ -44,36 +47,94 @@ function privateResponse(response: NextResponse) {
   return response;
 }
 
-export function proxy(request: NextRequest) {
+function getAppAccessSecret() {
+  // W1G5: the authenticated application perimeter uses its own
+  // dedicated signing secret with no legacy password-gate fallback.
+  return process.env.VENTIQ_APP_ACCESS_SECRET || "";
+}
+
+async function signPayload(secret: string, payload: string) {
+  const key = await globalThis.crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  const signature = await globalThis.crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(payload)
+  );
+
+  return Array.from(new Uint8Array(signature))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function equalSignature(left: string, right: string) {
+  if (left.length !== right.length) return false;
+
+  let difference = 0;
+
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+
+  return difference === 0;
+}
+
+async function hasValidAppAccess(request: NextRequest) {
+  const secret = getAppAccessSecret();
+  const cookie = request.cookies.get(APP_ACCESS_COOKIE)?.value || "";
+
+  if (!secret || !cookie) return false;
+
+  const parts = cookie.split(".");
+  if (parts.length !== 3) return false;
+
+  const [userId, expiresAtRaw, suppliedSignature] = parts;
+  const expiresAt = Number(expiresAtRaw);
+
+  if (
+    !userId ||
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= Math.floor(Date.now() / 1000) ||
+    !suppliedSignature
+  ) {
+    return false;
+  }
+
+  const payload = `${userId}.${expiresAtRaw}`;
+  const expectedSignature = await signPayload(secret, payload);
+
+  return equalSignature(suppliedSignature, expectedSignature);
+}
+
+export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  // Public marketing pages and authentication entry points are deliberately
-  // reachable without the temporary VENTIQ site-lock cookie.
   if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 
-  // During Architecture Safety & Canonicalisation, keep every operational
-  // workspace and API behind the existing site lock. This is intentionally
-  // temporary: the site lock is not a substitute for application auth/RBAC.
-  const expectedToken = process.env.SITE_LOCK_TOKEN;
-  const cookieToken = request.cookies.get(COOKIE_NAME)?.value;
-
-  if (expectedToken && cookieToken === expectedToken) {
+  if (await hasValidAppAccess(request)) {
     return privateResponse(NextResponse.next());
   }
 
-  if (pathname.startsWith("/api")) {
+  if (pathname.startsWith("/api/")) {
     return privateResponse(
       NextResponse.json(
-        { error: "VENTIQ private application access is required." },
+        { error: "Authenticated VENTIQ application access is required." },
         { status: 401 }
       )
     );
   }
 
   const loginUrl = request.nextUrl.clone();
-  loginUrl.pathname = LOCK_PAGE;
+  loginUrl.pathname = "/auth/login";
+  loginUrl.search = "";
   loginUrl.searchParams.set(
     "next",
     `${request.nextUrl.pathname}${request.nextUrl.search}`
