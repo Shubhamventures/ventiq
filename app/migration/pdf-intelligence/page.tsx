@@ -199,6 +199,25 @@ type ResolutionDraftInput = {
   note: string;
 };
 
+type CanonicalCandidateManifest = {
+  version: string;
+  createdAt: string;
+  snapshotId: string;
+  baseSnapshotId: string;
+  snapshotVersion: number;
+  reportingDate: string;
+  reportingPeriod: string;
+  status: "pending_approval";
+  approvalRequestId: string;
+  approvalStatus: string;
+  approvalStep: string;
+  submittedAt: string;
+  sourceResolutionSidecarPath: string;
+  createdByUserId: string;
+  createdByRole: string;
+  canonicalWrite: "pending_final_approval";
+};
+
 type PdfDocument = {
   id: string;
   batchId: string;
@@ -223,9 +242,15 @@ type PdfDocument = {
   financialCandidates: FinancialCandidateManifest | null;
   reconciliation: FinancialReconciliationManifest | null;
   resolutionDraft: ResolutionDraftManifest | null;
+  canonicalCandidate: CanonicalCandidateManifest | null;
   evidence: EvidenceManifest;
   extractionPending: boolean;
   published: boolean;
+  financialApprovalRequired: boolean;
+  publishEligible: boolean;
+  publishBlockReason: string;
+  approvedSnapshotId: string;
+  publicationApprovalRequestId: string;
   updatedAt: string;
 };
 
@@ -262,6 +287,9 @@ type WorkspaceResult = {
     inconsistencyRows: number;
     resolutionDraftDocuments: number;
     unresolvedResolutionRows: number;
+    canonicalCandidateDocuments: number;
+    approvalSubmittedDocuments: number;
+    publicationBlocked: number;
     published: number;
   };
 };
@@ -396,6 +424,9 @@ export default function PdfIntelligencePage() {
   const [financialExtracting, setFinancialExtracting] = useState(false);
   const [reconciling, setReconciling] = useState(false);
   const [savingResolutionId, setSavingResolutionId] = useState("");
+  const [preparingCanonicalId, setPreparingCanonicalId] = useState("");
+  const [canonicalActionMessage, setCanonicalActionMessage] = useState("");
+  const [canonicalActionError, setCanonicalActionError] = useState(false);
   const [resolutionDrafts, setResolutionDrafts] = useState<
     Record<string, ResolutionDraftInput>
   >({});
@@ -468,6 +499,18 @@ export default function PdfIntelligencePage() {
           Number(document.resolutionDraft?.unresolvedDecisionCount || 0),
         0
       ),
+      canonicalCandidateDocuments: documents.filter(
+        (document) => Boolean(document.canonicalCandidate?.snapshotId)
+      ).length,
+      approvalSubmittedDocuments: documents.filter(
+        (document) => Boolean(document.canonicalCandidate?.approvalRequestId)
+      ).length,
+      publicationBlocked: documents.filter(
+        (document) =>
+          document.status === "Ready" &&
+          !document.published &&
+          !document.publishEligible
+      ).length,
       published: documents.filter((document) => document.published).length,
     };
   }, [documents]);
@@ -493,7 +536,19 @@ export default function PdfIntelligencePage() {
           document.status === "Ready" &&
           document.investorId &&
           document.storagePath &&
-          !document.published
+          !document.published &&
+          document.publishEligible
+      ),
+    [documents]
+  );
+
+  const publicationBlockedDocuments = useMemo(
+    () =>
+      documents.filter(
+        (document) =>
+          document.status === "Ready" &&
+          !document.published &&
+          !document.publishEligible
       ),
     [documents]
   );
@@ -559,10 +614,30 @@ export default function PdfIntelligencePage() {
       body: JSON.stringify(body),
     });
 
-    const result = await response.json();
+    const responseText = await response.text();
+    let result: Record<string, any> = {};
+
+    if (responseText.trim()) {
+      try {
+        result = JSON.parse(responseText) as Record<string, any>;
+      } catch {
+        throw new Error(
+          `PDF Intelligence returned a non-JSON response (HTTP ${response.status}).`
+        );
+      }
+    }
 
     if (!response.ok) {
-      throw new Error(result.error || "PDF Intelligence action failed.");
+      throw new Error(
+        result.error ||
+          `PDF Intelligence action failed (HTTP ${response.status}).`
+      );
+    }
+
+    if (!responseText.trim()) {
+      throw new Error(
+        `PDF Intelligence returned an empty success response (HTTP ${response.status}).`
+      );
     }
 
     if (!options?.quiet && result.message) {
@@ -1295,6 +1370,150 @@ export default function PdfIntelligencePage() {
     }
   }
 
+  async function approvalWorkflowRequest(
+    body: Record<string, unknown>
+  ) {
+    if (!accessToken) {
+      throw new Error("Sign in before using the approval workflow.");
+    }
+
+    const response = await fetch("/api/admin/approval-workflow", {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const responseText = await response.text();
+    let result: Record<string, any> = {};
+
+    if (responseText.trim()) {
+      try {
+        result = JSON.parse(responseText) as Record<string, any>;
+      } catch {
+        throw new Error(
+          `VENTIQ approval workflow returned a non-JSON response (HTTP ${response.status}).`
+        );
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        result.error ||
+          `VENTIQ approval workflow action failed (HTTP ${response.status}).`
+      );
+    }
+
+    if (!responseText.trim()) {
+      throw new Error(
+        `VENTIQ approval workflow returned an empty success response (HTTP ${response.status}).`
+      );
+    }
+
+    return result;
+  }
+
+  async function prepareAndSubmitCanonicalCandidate(
+    document: PdfDocument
+  ) {
+    if (!canManage) {
+      setMessage(
+        "Only an authorised Fund Admin or Maker can prepare the canonical candidate."
+      );
+      return;
+    }
+
+    const resolution = document.resolutionDraft;
+    if (!resolution) {
+      setMessage("Save the Fund Inconsistency Review draft first.");
+      return;
+    }
+
+    if (resolution.unresolvedDecisionCount > 0) {
+      setMessage(
+        `Resolve all inconsistency rows before canonical submission. ${resolution.unresolvedDecisionCount} row(s) remain unresolved.`
+      );
+      return;
+    }
+
+    setPreparingCanonicalId(document.id);
+    setCanonicalActionMessage("");
+    setCanonicalActionError(false);
+
+    try {
+      let candidate = document.canonicalCandidate;
+
+      if (!candidate?.snapshotId) {
+        const prepared = await apiRequest(
+          {
+            action: "prepare_canonical_candidate",
+            fundName: activeFundName,
+            documentId: document.id,
+          },
+          { quiet: true }
+        );
+
+        candidate = prepared.canonicalCandidate as CanonicalCandidateManifest;
+      }
+
+      if (!candidate?.snapshotId) {
+        throw new Error("Canonical candidate snapshot was not created.");
+      }
+
+      if (!candidate.approvalRequestId) {
+        const approvalResult = await approvalWorkflowRequest({
+          action: "create_request",
+          sourceModule: "Document Studio",
+          linkedRecordId: candidate.snapshotId,
+          linkedRecordType: "Fund Memory Snapshot",
+          actionType: "Fund Memory Approval",
+          actionTitle: `PDF reconciliation canonical confirmation · ${
+            document.investorCode || document.investorName
+          } · ${document.periodLabel}`,
+          actionDescription:
+            `Approve immutable Fund Memory snapshot ${candidate.snapshotId} prepared from PDF Intelligence reconciliation and human resolution evidence. Original structured and PDF sources remain preserved.`,
+          businessImpact:
+            "Final approval will make the new reconciled Fund Memory snapshot live and supersede the prior approved snapshot for the same investor/reporting date.",
+          priority: "High",
+        });
+
+        const approval = approvalResult.approval || {};
+
+        await apiRequest(
+          {
+            action: "attach_approval_request",
+            fundName: activeFundName,
+            documentId: document.id,
+            approvalRequestId: approval.id,
+            approvalStatus: approval.approval_status || "Pending Review",
+            approvalStep: approval.current_step || "Checker Review",
+          },
+          { quiet: true }
+        );
+      }
+
+      await loadWorkspace(activeFundName);
+      const successMessage =
+        "A7.7-6A canonical candidate submitted to the existing VENTIQ approval queue. The maker cannot approve their own request.";
+      setCanonicalActionMessage(successMessage);
+      setCanonicalActionError(false);
+      setMessage(successMessage);
+    } catch (error) {
+      const failureMessage =
+        error instanceof Error
+          ? error.message
+          : "Unable to prepare and submit the canonical Fund Memory candidate.";
+      setCanonicalActionMessage(failureMessage);
+      setCanonicalActionError(true);
+      setMessage(failureMessage);
+    } finally {
+      setPreparingCanonicalId("");
+    }
+  }
+
   async function saveReview(document: PdfDocument) {
     if (!canManage) {
       setMessage(
@@ -1346,12 +1565,16 @@ export default function PdfIntelligencePage() {
     }
 
     if (publishableDocuments.length === 0) {
-      setMessage("No unpublished Ready PDFs are available.");
+      setMessage(
+        publicationBlockedDocuments.length > 0
+          ? `${publicationBlockedDocuments.length} Ready financial PDF(s) are blocked until canonical Fund Memory approval is complete.`
+          : "No unpublished Ready PDFs are available."
+      );
       return;
     }
 
     const confirmed = window.confirm(
-      `Publish ${publishableDocuments.length} Ready PDF(s) to Investor Portal?\n\nFiles remain private in Supabase Storage. No permanent signed URL is stored.`
+      `Publish ${publishableDocuments.length} governed PDF(s) to Investor Portal?\n\nFinancial PDFs are included only after final canonical Fund Memory approval. Files remain private in Supabase Storage and no permanent signed URL is stored.`
     );
 
     if (!confirmed) return;
@@ -1494,6 +1717,14 @@ export default function PdfIntelligencePage() {
           <div className="impact-card">
             <h3>{summary.resolutionDraftDocuments}</h3>
             <p>Resolution drafts</p>
+          </div>
+          <div className="impact-card">
+            <h3>{summary.canonicalCandidateDocuments}</h3>
+            <p>Canonical candidates</p>
+          </div>
+          <div className="impact-card">
+            <h3>{summary.approvalSubmittedDocuments}</h3>
+            <p>Approval submitted</p>
           </div>
           <div className="impact-card">
             <h3>{summary.published}</h3>
@@ -2335,6 +2566,177 @@ export default function PdfIntelligencePage() {
         <div className="preview-card">
           <div className="section-heading-row">
             <div>
+              <p className="eyebrow">A7.7-6A · Maker-Checker Canonical Confirmation</p>
+              <h2>Promote only a fully resolved package into the existing approval queue</h2>
+            </div>
+
+            <span className="status-pill">
+              {summary.approvalSubmittedDocuments} submitted
+            </span>
+          </div>
+
+          <div className="explain-box">
+            A fully resolved reconciliation package creates a new immutable Fund
+            Memory snapshot in pending_approval status. If a prior interrupted
+            submission already created the same pending snapshot, VENTIQ reuses
+            that orphan candidate rather than creating another version. The prior approved
+            snapshot remains live. VENTIQ then submits the new snapshot through
+            the existing Maker → Checker Review → Final Approval workflow. The
+            original maker cannot approve their own request.
+          </div>
+
+          {documents.filter((document) => document.resolutionDraft).length ===
+          0 ? (
+            <div className="logic-note">
+              No resolution package is available for canonical confirmation.
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 18 }}>
+              {documents
+                .filter((document) => document.resolutionDraft)
+                .map((document) => {
+                  const resolution = document.resolutionDraft!;
+                  const candidate = document.canonicalCandidate;
+                  const blocked = resolution.unresolvedDecisionCount > 0;
+
+                  return (
+                    <div
+                      className="queue-item"
+                      key={`${document.id}-canonical`}
+                    >
+                      <div className="section-heading-row">
+                        <div>
+                          <strong>{document.fileName}</strong>
+                          <br />
+                          <small>
+                            {document.investorCode} · {document.periodLabel}
+                          </small>
+                        </div>
+
+                        <span className="status-pill">
+                          {candidate?.approvalRequestId
+                            ? candidate.approvalStatus || "Pending Review"
+                            : candidate?.snapshotId
+                              ? "Candidate prepared"
+                              : blocked
+                                ? "Blocked · unresolved rows"
+                                : "Ready for submission"}
+                        </span>
+                      </div>
+
+                      <div className="dashboard-grid">
+                        <div className="dashboard-card">
+                          <strong>
+                            {resolution.resolvedDecisionCount}
+                          </strong>
+                          <p>Resolved decisions</p>
+                        </div>
+                        <div className="dashboard-card">
+                          <strong>
+                            {resolution.unresolvedDecisionCount}
+                          </strong>
+                          <p>Unresolved decisions</p>
+                        </div>
+                        <div className="dashboard-card">
+                          <strong>
+                            {candidate?.snapshotVersion || "—"}
+                          </strong>
+                          <p>Candidate snapshot version</p>
+                        </div>
+                      </div>
+
+                      {blocked && (
+                        <div className="logic-note" style={{ marginTop: 14 }}>
+                          <strong>Canonical submission blocked.</strong>
+                          {" "}
+                          Resolve all inconsistency rows and save the draft again
+                          before preparing a Fund Memory candidate.
+                        </div>
+                      )}
+
+                      {candidate?.snapshotId && (
+                        <div className="logic-note" style={{ marginTop: 14 }}>
+                          <strong>Immutable candidate snapshot</strong>
+                          <br />
+                          ID: {candidate.snapshotId}
+                          <br />
+                          Base snapshot preserved: {candidate.baseSnapshotId}
+                          <br />
+                          Reporting date: {candidate.reportingDate}
+                          <br />
+                          Status: {candidate.status}
+                          <br />
+                          Canonical write: pending final approval
+                        </div>
+                      )}
+
+                      {candidate?.approvalRequestId && (
+                        <div className="logic-note" style={{ marginTop: 14 }}>
+                          <strong>Existing VENTIQ approval workflow</strong>
+                          <br />
+                          Approval request: {candidate.approvalRequestId}
+                          <br />
+                          Submitted status: {candidate.approvalStatus}
+                          <br />
+                          Submitted step: {candidate.approvalStep}
+                          <br />
+                          Maker self-approval is blocked by the approval API.
+                        </div>
+                      )}
+
+                      {canonicalActionMessage && (
+                        <div
+                          className="logic-note"
+                          style={{ marginTop: 14 }}
+                        >
+                          <strong>
+                            {canonicalActionError
+                              ? "Canonical submission error"
+                              : "Canonical submission"}
+                          </strong>
+                          <br />
+                          {canonicalActionMessage}
+                        </div>
+                      )}
+
+                      <div className="action-row" style={{ marginTop: 14 }}>
+                        <button
+                          className="monitor-btn monitor-btn-primary"
+                          disabled={
+                            blocked ||
+                            !canManage ||
+                            preparingCanonicalId === document.id ||
+                            Boolean(candidate?.approvalRequestId)
+                          }
+                          onClick={() =>
+                            prepareAndSubmitCanonicalCandidate(document)
+                          }
+                          type="button"
+                        >
+                          {preparingCanonicalId === document.id
+                            ? "Preparing & Submitting..."
+                            : candidate?.approvalRequestId
+                              ? "Submitted to Approval Queue"
+                              : "Prepare & Submit Canonical Candidate"}
+                        </button>
+
+                        <Link
+                          className="monitor-btn monitor-btn-secondary"
+                          href="/admin/audit-workflow"
+                        >
+                          Open Approval Queue
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+
+        <div className="preview-card">
+          <div className="section-heading-row">
+            <div>
               <p className="eyebrow">Review & Correction Queue</p>
               <h2>Resolve classification exceptions</h2>
             </div>
@@ -2622,20 +3024,35 @@ export default function PdfIntelligencePage() {
           <div className="section-heading-row">
             <div>
               <p className="eyebrow">Governed Portal Publishing</p>
-              <h2>Publish approved classified PDFs</h2>
+              <h2>Publish only canonically cleared investor PDFs</h2>
             </div>
 
             <span className="status-pill">
-              {publishableDocuments.length} Ready / unpublished
+              {publishableDocuments.length} publishable ·{" "}
+              {publicationBlockedDocuments.length} blocked
             </span>
           </div>
 
           <div className="explain-box">
-            A7.7-2 removes permanent signed URLs from this flow. Published records
-            retain only private storage references and continue through the secured
-            Investor Portal document-access API. Publishing requires governed
-            approval access.
+            Financial PDFs such as SOA, Capital Call, Distribution and IRR
+            statements cannot enter Investor Portal until their linked Fund Memory
+            snapshot is matched, ready, finally approved and still live. Other
+            governed PDFs retain the existing approval-access rule. All files remain
+            private in Supabase Storage with no permanent signed URL.
           </div>
+
+          {publicationBlockedDocuments.length > 0 && (
+            <div className="explain-box">
+              <strong>Financial publication gate active.</strong>
+              {publicationBlockedDocuments.slice(0, 5).map((document) => (
+                <div key={`${document.id}-publish-block`}>
+                  {document.fileName}:{" "}
+                  {document.publishBlockReason ||
+                    "Canonical Fund Memory approval is incomplete."}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="action-row">
             <button
@@ -2650,7 +3067,7 @@ export default function PdfIntelligencePage() {
             >
               {publishing
                 ? "Publishing..."
-                : `Publish ${publishableDocuments.length} Ready PDF(s)`}
+                : `Publish ${publishableDocuments.length} governed PDF(s)`}
             </button>
 
             <Link
@@ -2677,36 +3094,36 @@ export default function PdfIntelligencePage() {
         </div>
 
         <div className="preview-card">
-          <p className="eyebrow">Next · A7.7-6</p>
-          <h2>Maker-checker approval & canonical confirmation</h2>
+          <p className="eyebrow">Next · A7.7-7</p>
+          <h2>Investor Portal & Data Room organisation from approved evidence</h2>
 
           <div className="queue-grid">
             <div className="queue-item">
-              <strong>Checker approval</strong>
+              <strong>Approved document organisation</strong>
               <br />
-              Review each Maker resolution against the preserved structured and
-              PDF evidence before approving any promotion.
+              Organise approved historical PDFs by fund, investor, period and
+              document nature without duplicating the source file.
             </div>
 
             <div className="queue-item">
-              <strong>Segregation of duties</strong>
+              <strong>Investor entitlement</strong>
               <br />
-              A Maker cannot self-approve the same resolution package; approval
-              identity and timestamps remain auditable.
+              Publish only approved investor-specific documents through the
+              existing governed Investor Portal access layer.
             </div>
 
             <div className="queue-item">
-              <strong>Canonical confirmation</strong>
+              <strong>Data Room lineage</strong>
               <br />
-              Only checker-approved resolved values can be promoted toward the
-              canonical fund record; unresolved rows remain blocked.
+              Keep source PDF, extracted evidence, reconciliation and approval
+              lineage connected to the Data Room record.
             </div>
 
             <div className="queue-item">
-              <strong>Evidence preservation</strong>
+              <strong>Migration completion controls</strong>
               <br />
-              Structured source, PDF source, reconciliation and resolution
-              history remain attached after canonical confirmation.
+              Surface missing, review and approved historical evidence before
+              stakeholder launch readiness is declared complete.
             </div>
           </div>
         </div>

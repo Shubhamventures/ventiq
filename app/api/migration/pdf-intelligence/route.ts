@@ -21,10 +21,26 @@ const OCR_PREFIX = "A7.7_OCR_JSON:";
 const FINANCIAL_PREFIX = "A7.7_FINANCIAL_JSON:";
 const RECONCILIATION_PREFIX = "A7.7_RECONCILIATION_JSON:";
 const RESOLUTION_PREFIX = "A7.7_RESOLUTION_JSON:";
+const CANONICAL_CANDIDATE_PREFIX = "A7.7_CANONICAL_CANDIDATE_JSON:";
 const MAX_OCR_DOCUMENTS_PER_REQUEST = 2;
 const MAX_RECONCILIATION_DOCUMENTS_PER_REQUEST = 6;
 const MAX_FINANCIAL_DOCUMENTS_PER_REQUEST = 4;
 const MAX_FINANCIAL_TRANSACTION_PREVIEW = 12;
+
+const FINANCIAL_PUBLISH_GATED_TYPES = new Set([
+  "SOA / Account Statement",
+  "Capital Call Notice",
+  "Distribution Notice",
+  "IRR Statement",
+]);
+
+type PublicationGate = {
+  financialApprovalRequired: boolean;
+  publishEligible: boolean;
+  publishBlockReason: string;
+  approvedSnapshotId: string;
+  approvalRequestId: string;
+};
 const MAX_OCR_PAGES_PER_DOCUMENT = 8;
 const OCR_RENDER_WIDTH = 2200;
 const DEFAULT_OCR_MODEL = "gpt-5.6-luna";
@@ -297,6 +313,26 @@ type ResolutionDraftManifest = {
   canonicalWrite: false;
 };
 
+
+type CanonicalCandidateManifest = {
+  version: "A7.7-6A";
+  createdAt: string;
+  snapshotId: string;
+  baseSnapshotId: string;
+  snapshotVersion: number;
+  reportingDate: string;
+  reportingPeriod: string;
+  status: "pending_approval";
+  approvalRequestId: string;
+  approvalStatus: string;
+  approvalStep: string;
+  submittedAt: string;
+  sourceResolutionSidecarPath: string;
+  createdByUserId: string;
+  createdByRole: string;
+  canonicalWrite: "pending_final_approval";
+};
+
 type ClassificationResult = {
   documentType: string;
   signals: string[];
@@ -479,6 +515,32 @@ function getResolutionManifest(
 function withoutResolutionSignal(signals: string[]) {
   return signals.filter(
     (signal) => !signal.startsWith(RESOLUTION_PREFIX)
+  );
+}
+
+
+function getCanonicalCandidateManifest(
+  signals: string[]
+): CanonicalCandidateManifest | null {
+  const encoded = signals.find((signal) =>
+    signal.startsWith(CANONICAL_CANDIDATE_PREFIX)
+  );
+  if (!encoded) return null;
+
+  try {
+    const parsed = JSON.parse(
+      encoded.slice(CANONICAL_CANDIDATE_PREFIX.length)
+    ) as CanonicalCandidateManifest;
+    if (parsed?.version !== "A7.7-6A") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function withoutCanonicalCandidateSignal(signals: string[]) {
+  return signals.filter(
+    (signal) => !signal.startsWith(CANONICAL_CANDIDATE_PREFIX)
   );
 }
 
@@ -2192,6 +2254,563 @@ async function reconcileFinancialCandidates(
   };
 }
 
+
+function decisionForKey(
+  resolution: ResolutionDraftManifest,
+  key: string
+) {
+  return resolution.decisions.find((decision) => decision.key === key) || null;
+}
+
+function resolvedValueForRow(input: {
+  reconciliation: FinancialReconciliationManifest;
+  resolution: ResolutionDraftManifest;
+  key: string;
+  fallback: number | null;
+}) {
+  const row = input.reconciliation.rows.find(
+    (candidate) => candidate.key === input.key
+  );
+
+  if (!row) return input.fallback;
+
+  if (row.status === "MATCHED") {
+    return row.structuredValue ?? row.pdfValue ?? input.fallback;
+  }
+
+  const decision = decisionForKey(input.resolution, input.key);
+
+  if (!decision || decision.choice === "unresolved") {
+    throw new Error(
+      `PDF_CANONICAL_UNRESOLVED_FIELD: ${row.label}`
+    );
+  }
+
+  if (decision.proposedValue === null) {
+    throw new Error(
+      `PDF_CANONICAL_PROPOSED_VALUE_REQUIRED: ${row.label}`
+    );
+  }
+
+  return decision.proposedValue;
+}
+
+// A7.7-6N: financial PDF publication gate + live-schema-safe canonical patch.
+async function prepareCanonicalSnapshot(
+  actor: GovernedFundActor,
+  access: GovernedFundOption,
+  row: PdfDocumentRow,
+  fundName: string
+) {
+  requireManageAccess(access);
+
+  const signals = parseSignals(row.match_signals);
+  const reconciliation = getReconciliationManifest(signals);
+  const resolution = getResolutionManifest(signals);
+  const existingCandidate = getCanonicalCandidateManifest(signals);
+
+  if (!reconciliation) {
+    throw new Error("PDF_RECONCILIATION_REQUIRED");
+  }
+
+  if (!resolution) {
+    throw new Error("PDF_RESOLUTION_DRAFT_REQUIRED");
+  }
+
+  if (existingCandidate?.snapshotId) {
+    return existingCandidate;
+  }
+
+  if (resolution.unresolvedDecisionCount > 0) {
+    throw new Error(
+      `PDF_CANONICAL_UNRESOLVED_ROWS: ${resolution.unresolvedDecisionCount}`
+    );
+  }
+
+  if (
+    resolution.decisionCount !==
+    reconciliation.rows.filter((candidate) => candidate.status !== "MATCHED")
+      .length
+  ) {
+    throw new Error("PDF_CANONICAL_RESOLUTION_PACKAGE_INCOMPLETE");
+  }
+
+  const periodLabel = normalizeText(row.period_label, 120);
+  if (!periodLabel) {
+    throw new Error("PDF_CANONICAL_REPORTING_PERIOD_REQUIRED");
+  }
+
+  const { data: baseSnapshot, error: baseError } = await supabaseAdmin
+    .from("investor_position_snapshots")
+    .select(
+      "id, organisation_id, fund_name, investor_id, investor_code, investor_name, class_name, reporting_date, reporting_period, currency, snapshot_version, commitment_amount, capital_called, uncalled_capital, distributions_to_date, net_contributed, current_nav, source_record_refs, approval_status, superseded_at"
+    )
+    .eq("organisation_id", actor.organisationId)
+    .eq("fund_name", fundName)
+    .eq("investor_id", row.matched_investor_id || "")
+    .eq("reporting_period", periodLabel)
+    .eq("approval_status", "approved")
+    .is("superseded_at", null)
+    .order("snapshot_version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (baseError) {
+    throw new Error(
+      `Unable to load live Fund Memory snapshot: ${baseError.message}`
+    );
+  }
+
+  if (!baseSnapshot) {
+    throw new Error(
+      `PDF_CANONICAL_BASE_SNAPSHOT_REQUIRED: no live approved Fund Memory snapshot exists for ${periodLabel}`
+    );
+  }
+
+  // Supabase can infer GenericStringError for complex server-side selects when
+  // the generated Database typing is narrower than the live schema. VENTIQ's
+  // existing server routes normalize such results into DataRow before access.
+  const baseSnapshotRow = baseSnapshot as unknown as DataRow;
+
+  const reportingDate = normalizeText(baseSnapshotRow.reporting_date, 40);
+  const className = normalizeText(baseSnapshotRow.class_name, 240);
+
+  if (!reportingDate) {
+    throw new Error("PDF_CANONICAL_REPORTING_DATE_REQUIRED");
+  }
+
+  const baseCommitment = normalizeStructuredNumber(
+    baseSnapshotRow.commitment_amount
+  );
+  const baseCalled = normalizeStructuredNumber(baseSnapshotRow.capital_called);
+  const baseUncalled = normalizeStructuredNumber(baseSnapshotRow.uncalled_capital);
+  const baseDistributions = normalizeStructuredNumber(
+    baseSnapshotRow.distributions_to_date
+  );
+  const baseNav = normalizeStructuredNumber(baseSnapshotRow.current_nav);
+
+  const commitmentAmount = resolvedValueForRow({
+    reconciliation,
+    resolution,
+    key: "commitment_amount",
+    fallback: baseCommitment,
+  });
+  const capitalCalled = resolvedValueForRow({
+    reconciliation,
+    resolution,
+    key: "capital_called_to_date",
+    fallback: baseCalled,
+  });
+  const uncalledCapital = resolvedValueForRow({
+    reconciliation,
+    resolution,
+    key: "uncalled_capital",
+    fallback: baseUncalled,
+  });
+  const distributionsToDate = resolvedValueForRow({
+    reconciliation,
+    resolution,
+    key: "distributions_to_date",
+    fallback: baseDistributions,
+  });
+  const currentNav = resolvedValueForRow({
+    reconciliation,
+    resolution,
+    key: "current_nav",
+    fallback: baseNav,
+  });
+
+  if (
+    commitmentAmount === null ||
+    capitalCalled === null ||
+    uncalledCapital === null
+  ) {
+    throw new Error("PDF_CANONICAL_COMMITMENT_FIELDS_REQUIRED");
+  }
+
+  const commitmentDifference =
+    commitmentAmount - (capitalCalled + uncalledCapital);
+
+  if (Math.abs(commitmentDifference) > 0.01) {
+    throw new Error(
+      `PDF_CANONICAL_COMMITMENT_MATH_MISMATCH: difference ${commitmentDifference}`
+    );
+  }
+
+  if (distributionsToDate === null || currentNav === null) {
+    throw new Error(
+      "PDF_CANONICAL_DISTRIBUTION_AND_NAV_EVIDENCE_REQUIRED"
+    );
+  }
+
+  const netContributed = capitalCalled - distributionsToDate;
+  const now = new Date().toISOString();
+
+  const baseRefs = Array.isArray(baseSnapshotRow.source_record_refs)
+    ? baseSnapshotRow.source_record_refs
+    : baseSnapshotRow.source_record_refs
+      ? [baseSnapshotRow.source_record_refs]
+      : [];
+
+  const resolutionLineage = reconciliation.rows.map((candidate) => {
+    const decision =
+      candidate.status === "MATCHED"
+        ? null
+        : decisionForKey(resolution, candidate.key);
+
+    return {
+      field: candidate.key,
+      reconciliation_status: candidate.status,
+      structured_value: candidate.structuredValue,
+      pdf_value: candidate.pdfValue,
+      pdf_page: candidate.pdfSourcePage,
+      structured_source: candidate.structuredSource,
+      decision:
+        candidate.status === "MATCHED"
+          ? "matched"
+          : decision?.choice || "missing",
+      proposed_value:
+        candidate.status === "MATCHED"
+          ? candidate.structuredValue ?? candidate.pdfValue
+          : decision?.proposedValue ?? null,
+      resolution_note: decision?.note || "",
+    };
+  });
+
+  const sourceRecordRefs = [
+    ...baseRefs,
+    {
+      table: "investor_position_snapshots",
+      record_id: String(baseSnapshotRow.id),
+      purpose:
+        "live approved Fund Memory snapshot used as canonical base before PDF reconciliation",
+    },
+    {
+      table: "pdf_intelligence_documents",
+      record_id: row.id,
+      purpose: "private PDF evidence document",
+      storage_bucket: row.storage_bucket,
+      storage_path: row.storage_path,
+      confidence_score: Number(row.confidence_score || 0),
+    },
+    {
+      evidence_type: "pdf_financial_reconciliation",
+      reconciliation_sidecar_path: reconciliation.sidecarPath,
+      resolution_sidecar_path: resolution.sidecarPath,
+      resolution_lineage: resolutionLineage,
+    },
+  ];
+
+  // A7.7-6H: idempotent canonical preparation.
+  //
+  // The controlled Fund Memory builder intentionally moves a complete snapshot
+  // directly to pending_approval. A prior failed A7.7-6F attempt may therefore
+  // have left an unlinked pending snapshot. Reuse only a tightly scoped orphan:
+  // same organisation/fund/investor/date/period, same approved base snapshot,
+  // same maker, still pending, not superseded, and with no approval request.
+  const { data: pendingRowsRaw, error: pendingRowsError } =
+    await supabaseAdmin
+      .from("investor_position_snapshots")
+      .select(
+        "id, snapshot_version, reporting_date, reporting_period, approval_status, source_kind, supersedes_snapshot_id, created_by, superseded_at"
+      )
+      .eq("organisation_id", actor.organisationId)
+      .eq("fund_name", fundName)
+      .eq("investor_id", row.matched_investor_id || "")
+      .eq("reporting_date", reportingDate)
+      .eq("reporting_period", periodLabel)
+      .eq("approval_status", "pending_approval")
+      .eq("supersedes_snapshot_id", String(baseSnapshotRow.id))
+      .eq("created_by", actor.userId)
+      .is("superseded_at", null)
+      .order("snapshot_version", { ascending: false })
+      .limit(5);
+
+  if (pendingRowsError) {
+    throw new Error(
+      `Unable to inspect existing pending Fund Memory candidates: ${pendingRowsError.message}`
+    );
+  }
+
+  const pendingRows = (pendingRowsRaw || []) as unknown as DataRow[];
+  const reusableRows: DataRow[] = [];
+
+  for (const candidate of pendingRows) {
+    const candidateId = normalizeText(candidate.id, 100);
+    if (!candidateId) continue;
+
+    const { data: existingApprovals, error: approvalLookupError } =
+      await supabaseAdmin
+        .from("ventiq_approval_requests")
+        .select("id")
+        .eq("organisation_id", actor.organisationId)
+        .eq("linked_record_id", candidateId)
+        .eq("linked_record_type", "Fund Memory Snapshot")
+        .eq("action_type", "Fund Memory Approval")
+        .limit(1);
+
+    if (approvalLookupError) {
+      throw new Error(
+        `Unable to inspect approval linkage for pending candidate ${candidateId}: ${approvalLookupError.message}`
+      );
+    }
+
+    if (!existingApprovals || existingApprovals.length === 0) {
+      reusableRows.push(candidate);
+    }
+  }
+
+  if (reusableRows.length > 1) {
+    throw new Error(
+      `PDF_CANONICAL_AMBIGUOUS_ORPHAN_CANDIDATES: ${reusableRows.length}`
+    );
+  }
+
+  let builtSnapshotId = normalizeText(reusableRows[0]?.id, 100);
+  let reusedPendingCandidate = Boolean(builtSnapshotId);
+
+  if (!builtSnapshotId) {
+    const { data: builtSnapshotIdRaw, error: buildSnapshotError } =
+      await supabaseAdmin.rpc("ventiq_build_investor_position_snapshot", {
+        p_organisation_id: actor.organisationId,
+        p_fund_name: fundName,
+        p_investor_id: row.matched_investor_id,
+        p_reporting_date: reportingDate,
+        p_reporting_period: periodLabel,
+        p_created_by: actor.userId,
+      });
+
+    if (buildSnapshotError) {
+      throw new Error(
+        `Unable to create governed Fund Memory candidate through the controlled builder: ${buildSnapshotError.message}`
+      );
+    }
+
+    builtSnapshotId = normalizeText(builtSnapshotIdRaw, 100);
+    reusedPendingCandidate = false;
+  }
+
+  if (!builtSnapshotId) {
+    throw new Error(
+      "Controlled Fund Memory builder did not return a snapshot ID."
+    );
+  }
+
+  const candidatePatchAll: DataRow = {
+    commitment_amount: commitmentAmount,
+    capital_called: capitalCalled,
+    uncalled_capital: uncalledCapital,
+    distributions_to_date: distributionsToDate,
+    net_contributed: netContributed,
+    current_nav: currentNav,
+
+    // Dependent performance/capital-roll-forward metrics are intentionally
+    // NULL until recalculated from the finally approved canonical record.
+    units_held: null,
+    nav_per_unit: null,
+    opening_capital: null,
+    period_capital_contributions: null,
+    period_capital_distributions: null,
+    period_income_allocation: null,
+    period_expense_allocation: null,
+    closing_capital: null,
+    investor_dpi: null,
+    investor_tvpi: null,
+    investor_moic: null,
+    investor_irr: null,
+    gross_irr: null,
+    net_irr: null,
+
+    source_kind: "document_intelligence",
+    source_document_id: row.id,
+    source_record_refs: sourceRecordRefs,
+    calculation_version: "pdf-reconciliation-canonical-v1",
+    calculated_at: now,
+    reconciliation_status: "matched",
+    reconciliation_notes:
+      "All PDF reconciliation inconsistencies were resolved by a Fund Admin / Maker draft. Original structured and PDF evidence remain preserved in source_record_refs.",
+    validation_status: "ready",
+    validation_notes:
+      "Commitment math passed; distributions and current NAV are present; source lineage is retained. Dependent performance metrics require deterministic recalculation after approval.",
+    validated_by: actor.userId,
+    validated_at: now,
+    approval_status: "pending_approval",
+    approval_notes:
+      "A7.7-6A canonical candidate prepared from PDF reconciliation and maker resolution evidence; awaiting VENTIQ maker-checker workflow.",
+    supersedes_snapshot_id: String(baseSnapshotRow.id),
+    correction_reason:
+      "PDF Intelligence reconciliation and human resolution package.",
+    created_by: actor.userId,
+  };
+
+  // A7.7-6J: derive the writable metadata surface from the actual live
+  // snapshot row. This prevents optional metadata fields from breaking the
+  // canonical path when the deployed schema is older/narrower than the route.
+  const { data: candidateCurrentRaw, error: candidateCurrentError } =
+    await supabaseAdmin
+      .from("investor_position_snapshots")
+      .select("*")
+      .eq("id", builtSnapshotId)
+      .eq("organisation_id", actor.organisationId)
+      .eq("fund_name", fundName)
+      .eq("investor_id", row.matched_investor_id || "")
+      .eq("approval_status", "pending_approval")
+      .is("superseded_at", null)
+      .single();
+
+  if (candidateCurrentError || !candidateCurrentRaw) {
+    throw new Error(
+      `Unable to inspect governed Fund Memory candidate schema: ${
+        candidateCurrentError?.message || "Candidate row not found"
+      }`
+    );
+  }
+
+  const candidateCurrent =
+    candidateCurrentRaw as unknown as DataRow;
+  const supportedColumns = new Set(Object.keys(candidateCurrent));
+
+  const requiredCandidateColumns = [
+    "commitment_amount",
+    "capital_called",
+    "uncalled_capital",
+    "distributions_to_date",
+    "net_contributed",
+    "current_nav",
+    "source_record_refs",
+    "reconciliation_status",
+    "validation_status",
+    "approval_status",
+    "supersedes_snapshot_id",
+  ];
+
+  const missingRequiredColumns = requiredCandidateColumns.filter(
+    (column) => !supportedColumns.has(column)
+  );
+
+  if (missingRequiredColumns.length > 0) {
+    throw new Error(
+      `PDF_CANONICAL_SCHEMA_REQUIRED_COLUMNS_MISSING: ${missingRequiredColumns.join(
+        ", "
+      )}`
+    );
+  }
+
+  const candidatePatch = Object.fromEntries(
+    Object.entries(candidatePatchAll).filter(([column]) =>
+      supportedColumns.has(column)
+    )
+  ) as DataRow;
+
+  // Confidence is evidence metadata, not a top-level Fund Memory snapshot
+  // column in the deployed schema. It remains preserved in source_record_refs.
+  if ("confidence" in candidatePatch) {
+    delete candidatePatch.confidence;
+  }
+
+  const { data: inserted, error: candidateUpdateError } = await supabaseAdmin
+    .from("investor_position_snapshots")
+    .update(candidatePatch)
+    .eq("id", builtSnapshotId)
+    .eq("organisation_id", actor.organisationId)
+    .eq("fund_name", fundName)
+    .eq("investor_id", row.matched_investor_id || "")
+    .eq("approval_status", "pending_approval")
+    .is("superseded_at", null)
+    .select(
+      "id, snapshot_version, reporting_date, reporting_period, approval_status"
+    )
+    .single();
+
+  if (candidateUpdateError || !inserted) {
+    if (!reusedPendingCandidate) {
+      // The builder created this candidate during the current request. If the
+      // PDF lineage patch fails, remove only that new pending candidate so the
+      // request stays retry-safe. A previously discovered orphan is preserved.
+      await supabaseAdmin
+        .from("investor_position_snapshots")
+        .delete()
+        .eq("id", builtSnapshotId)
+        .eq("organisation_id", actor.organisationId)
+        .eq("approval_status", "pending_approval")
+        .is("superseded_at", null);
+    }
+
+    throw new Error(
+      `Unable to apply resolved PDF evidence to governed Fund Memory candidate: ${
+        candidateUpdateError?.message || "No candidate snapshot returned"
+      }`
+    );
+  }
+
+  const insertedSnapshotRow = inserted as unknown as DataRow;
+
+  const manifest: CanonicalCandidateManifest = {
+    version: "A7.7-6A",
+    createdAt: now,
+    snapshotId: String(insertedSnapshotRow.id),
+    baseSnapshotId: String(baseSnapshotRow.id),
+    snapshotVersion: Number(
+      insertedSnapshotRow.snapshot_version || 0
+    ),
+    reportingDate:
+      normalizeText(insertedSnapshotRow.reporting_date, 40) || reportingDate,
+    reportingPeriod:
+      normalizeText(insertedSnapshotRow.reporting_period, 120) || periodLabel,
+    status: "pending_approval",
+    approvalRequestId: "",
+    approvalStatus: "",
+    approvalStep: "",
+    submittedAt: "",
+    sourceResolutionSidecarPath: resolution.sidecarPath,
+    createdByUserId: actor.userId,
+    createdByRole: access.role,
+    canonicalWrite: "pending_final_approval",
+  };
+
+  const updatedSignals = [
+    ...withoutCanonicalCandidateSignal(signals),
+    `A7.7-6H canonical candidate ${
+      reusedPendingCandidate ? "reused" : "created"
+    }: ${manifest.snapshotId}`,
+    `A7.7-6A canonical candidate snapshot created: ${manifest.snapshotId}`,
+    `A7.7-6A base snapshot preserved: ${manifest.baseSnapshotId}`,
+    `A7.7-6A snapshot version: ${manifest.snapshotVersion}`,
+    `A7.7-6A status: pending_approval`,
+    `A7.7-6A canonical write: pending final approval`,
+    `${CANONICAL_CANDIDATE_PREFIX}${JSON.stringify(manifest)}`,
+  ];
+
+  const { error: documentUpdateError } = await supabaseAdmin
+    .from("pdf_intelligence_documents")
+    .update({
+      match_signals: updatedSignals,
+      updated_at: now,
+    })
+    .eq("id", row.id)
+    .eq("fund_name", fundName);
+
+  if (documentUpdateError) {
+    if (!reusedPendingCandidate) {
+      // Delete only a candidate created during this request. A pre-existing
+      // orphan is evidence that must be repaired, not silently destroyed.
+      await supabaseAdmin
+        .from("investor_position_snapshots")
+        .delete()
+        .eq("id", manifest.snapshotId)
+        .eq("organisation_id", actor.organisationId)
+        .eq("approval_status", "pending_approval")
+        .is("superseded_at", null);
+    }
+
+    throw new Error(
+      `Unable to link canonical candidate to PDF evidence: ${documentUpdateError.message}`
+    );
+  }
+
+  return manifest;
+}
+
 function getOcrModel() {
   return normalizeText(process.env.VENTIQ_OCR_MODEL, 120) || DEFAULT_OCR_MODEL;
 }
@@ -2787,9 +3406,205 @@ async function publishedStoragePaths(fundName: string, storagePaths: string[]) {
   );
 }
 
+function requiresFinancialPublicationApproval(row: PdfDocumentRow) {
+  const signals = parseSignals(row.match_signals);
+
+  return (
+    FINANCIAL_PUBLISH_GATED_TYPES.has(
+      normalizeText(row.document_type, 120)
+    ) ||
+    Boolean(getFinancialManifest(signals)) ||
+    Boolean(getReconciliationManifest(signals)) ||
+    Boolean(getResolutionManifest(signals)) ||
+    Boolean(getCanonicalCandidateManifest(signals))
+  );
+}
+
+async function buildPublicationGates(
+  fundName: string,
+  documents: PdfDocumentRow[]
+) {
+  const gates = new Map<string, PublicationGate>();
+  const gatedRows = documents.filter(requiresFinancialPublicationApproval);
+
+  for (const document of documents) {
+    gates.set(document.id, {
+      financialApprovalRequired: false,
+      publishEligible: true,
+      publishBlockReason: "",
+      approvedSnapshotId: "",
+      approvalRequestId: "",
+    });
+  }
+
+  if (gatedRows.length === 0) return gates;
+
+  const manifestByDocument = new Map<
+    string,
+    CanonicalCandidateManifest | null
+  >();
+
+  const snapshotIds = new Set<string>();
+  const approvalIds = new Set<string>();
+
+  for (const document of gatedRows) {
+    const canonical = getCanonicalCandidateManifest(
+      parseSignals(document.match_signals)
+    );
+
+    manifestByDocument.set(document.id, canonical);
+
+    if (canonical?.snapshotId) snapshotIds.add(canonical.snapshotId);
+    if (canonical?.approvalRequestId) {
+      approvalIds.add(canonical.approvalRequestId);
+    }
+  }
+
+  let snapshotRows: DataRow[] = [];
+  if (snapshotIds.size > 0) {
+    const { data, error } = await supabaseAdmin
+      .from("investor_position_snapshots")
+      .select(
+        "id, fund_name, investor_id, source_kind, source_document_id, approval_status, reconciliation_status, validation_status, superseded_at"
+      )
+      .eq("fund_name", fundName)
+      .in("id", Array.from(snapshotIds));
+
+    if (error) {
+      throw new Error(
+        `Unable to verify financial PDF canonical snapshots: ${error.message}`
+      );
+    }
+
+    snapshotRows = (data ?? []) as unknown as DataRow[];
+  }
+
+  let approvalRows: DataRow[] = [];
+  if (approvalIds.size > 0) {
+    const { data, error } = await supabaseAdmin
+      .from("ventiq_approval_requests")
+      .select(
+        "id, linked_record_id, linked_record_type, action_type, approval_status, current_step"
+      )
+      .in("id", Array.from(approvalIds));
+
+    if (error) {
+      throw new Error(
+        `Unable to verify financial PDF approval requests: ${error.message}`
+      );
+    }
+
+    approvalRows = (data ?? []) as unknown as DataRow[];
+  }
+
+  const snapshotById = new Map(
+    snapshotRows.map((row) => [normalizeText(row.id, 100), row])
+  );
+
+  const approvalById = new Map(
+    approvalRows.map((row) => [normalizeText(row.id, 100), row])
+  );
+
+  for (const document of gatedRows) {
+    const canonical = manifestByDocument.get(document.id) || null;
+
+    const blocked = (reason: string): PublicationGate => ({
+      financialApprovalRequired: true,
+      publishEligible: false,
+      publishBlockReason: reason,
+      approvedSnapshotId: canonical?.snapshotId || "",
+      approvalRequestId: canonical?.approvalRequestId || "",
+    });
+
+    if (!canonical?.snapshotId || !canonical?.approvalRequestId) {
+      gates.set(
+        document.id,
+        blocked(
+          "Canonical financial approval is required before Investor Portal publication."
+        )
+      );
+      continue;
+    }
+
+    const snapshot = snapshotById.get(canonical.snapshotId);
+    if (!snapshot) {
+      gates.set(
+        document.id,
+        blocked("Linked canonical Fund Memory snapshot could not be verified.")
+      );
+      continue;
+    }
+
+    if (
+      normalizeText(snapshot.source_document_id, 100) !== document.id ||
+      normalizeText(snapshot.source_kind, 80) !== "document_intelligence"
+    ) {
+      gates.set(
+        document.id,
+        blocked(
+          "Linked Fund Memory snapshot does not preserve this PDF as its governed document-intelligence source."
+        )
+      );
+      continue;
+    }
+
+    if (
+      normalizeText(snapshot.approval_status, 80) !== "approved" ||
+      normalizeText(snapshot.reconciliation_status, 80) !== "matched" ||
+      normalizeText(snapshot.validation_status, 80) !== "ready" ||
+      Boolean(snapshot.superseded_at)
+    ) {
+      gates.set(
+        document.id,
+        blocked(
+          "Linked Fund Memory snapshot is not the live approved, matched and ready canonical snapshot."
+        )
+      );
+      continue;
+    }
+
+    const approval = approvalById.get(canonical.approvalRequestId);
+    if (!approval) {
+      gates.set(
+        document.id,
+        blocked("Linked Fund Memory approval request could not be verified.")
+      );
+      continue;
+    }
+
+    if (
+      normalizeText(approval.linked_record_id, 100) !== canonical.snapshotId ||
+      normalizeText(approval.linked_record_type, 120) !==
+        "Fund Memory Snapshot" ||
+      normalizeText(approval.action_type, 120) !== "Fund Memory Approval" ||
+      normalizeText(approval.approval_status, 80) !== "Approved" ||
+      normalizeText(approval.current_step, 80) !== "Completed"
+    ) {
+      gates.set(
+        document.id,
+        blocked(
+          "Linked Fund Memory approval workflow has not reached final Approved / Completed status."
+        )
+      );
+      continue;
+    }
+
+    gates.set(document.id, {
+      financialApprovalRequired: true,
+      publishEligible: true,
+      publishBlockReason: "",
+      approvedSnapshotId: canonical.snapshotId,
+      approvalRequestId: canonical.approvalRequestId,
+    });
+  }
+
+  return gates;
+}
+
 function apiDocument(
   row: PdfDocumentRow,
-  publishedPaths: Set<string>
+  publishedPaths: Set<string>,
+  publicationGate: PublicationGate
 ) {
   const signals = parseSignals(row.match_signals);
   const evidence = getEvidenceManifest(signals);
@@ -2797,6 +3612,7 @@ function apiDocument(
   const financialCandidates = getFinancialManifest(signals);
   const reconciliation = getReconciliationManifest(signals);
   const resolutionDraft = getResolutionManifest(signals);
+  const canonicalCandidate = getCanonicalCandidateManifest(signals);
   const period = detectPeriod("", row.period_label || "");
 
   return {
@@ -2823,10 +3639,12 @@ function apiDocument(
         : "Review",
     storageBucket: row.storage_bucket || "",
     storagePath: row.storage_path || "",
-    signals: withoutResolutionSignal(
-      withoutReconciliationSignal(
-        withoutFinancialSignal(
-          withoutOcrSignal(withoutEvidenceSignal(signals))
+    signals: withoutCanonicalCandidateSignal(
+      withoutResolutionSignal(
+        withoutReconciliationSignal(
+          withoutFinancialSignal(
+            withoutOcrSignal(withoutEvidenceSignal(signals))
+          )
         )
       )
     ),
@@ -2835,6 +3653,7 @@ function apiDocument(
     financialCandidates,
     reconciliation,
     resolutionDraft,
+    canonicalCandidate,
     evidence: evidence ?? {
       version: "A7.7-2",
       totalPages: 0,
@@ -2849,6 +3668,11 @@ function apiDocument(
     },
     extractionPending: !evidence,
     published: publishedPaths.has(row.storage_path || ""),
+    financialApprovalRequired: publicationGate.financialApprovalRequired,
+    publishEligible: publicationGate.publishEligible,
+    publishBlockReason: publicationGate.publishBlockReason,
+    approvedSnapshotId: publicationGate.approvedSnapshotId,
+    publicationApprovalRequestId: publicationGate.approvalRequestId,
     updatedAt: row.updated_at || row.created_at || "",
   };
 }
@@ -3653,6 +4477,141 @@ async function handleResolutionDraft(
   });
 }
 
+async function handlePrepareCanonicalCandidate(
+  actor: GovernedFundActor,
+  access: GovernedFundOption,
+  fundName: string,
+  body: Record<string, unknown>
+) {
+  const documentId = normalizeText(body.documentId, 100);
+
+  if (!documentId) {
+    return noStoreJson({ error: "documentId is required." }, 400);
+  }
+
+  const batch = await loadLatestBatch(fundName);
+
+  if (!batch?.id) {
+    return noStoreJson(
+      { error: "No PDF Intelligence batch exists for this fund." },
+      404
+    );
+  }
+
+  const documents = await loadBatchDocuments(String(batch.id), fundName);
+  const document = documents.find((candidate) => candidate.id === documentId);
+
+  if (!document) {
+    return noStoreJson(
+      { error: "PDF document was not found in the latest governed batch." },
+      404
+    );
+  }
+
+  const canonicalCandidate = await prepareCanonicalSnapshot(
+    actor,
+    access,
+    document,
+    fundName
+  );
+
+  return noStoreJson({
+    message:
+      "A7.7-6A canonical Fund Memory candidate prepared. It is not live until the existing VENTIQ maker-checker workflow gives final approval.",
+    documentId,
+    canonicalCandidate,
+  });
+}
+
+async function handleAttachApprovalRequest(
+  actor: GovernedFundActor,
+  access: GovernedFundOption,
+  fundName: string,
+  body: Record<string, unknown>
+) {
+  requireManageAccess(access);
+
+  const documentId = normalizeText(body.documentId, 100);
+  const approvalRequestId = normalizeText(body.approvalRequestId, 100);
+  const approvalStatus = normalizeText(body.approvalStatus, 80);
+  const approvalStep = normalizeText(body.approvalStep, 80);
+
+  if (!documentId || !approvalRequestId) {
+    return noStoreJson(
+      { error: "documentId and approvalRequestId are required." },
+      400
+    );
+  }
+
+  const batch = await loadLatestBatch(fundName);
+
+  if (!batch?.id) {
+    return noStoreJson(
+      { error: "No PDF Intelligence batch exists for this fund." },
+      404
+    );
+  }
+
+  const documents = await loadBatchDocuments(String(batch.id), fundName);
+  const document = documents.find((candidate) => candidate.id === documentId);
+
+  if (!document) {
+    return noStoreJson(
+      { error: "PDF document was not found in the latest governed batch." },
+      404
+    );
+  }
+
+  const signals = parseSignals(document.match_signals);
+  const candidate = getCanonicalCandidateManifest(signals);
+
+  if (!candidate?.snapshotId) {
+    return noStoreJson(
+      { error: "Prepare the canonical candidate before linking approval." },
+      400
+    );
+  }
+
+  const now = new Date().toISOString();
+  const updated: CanonicalCandidateManifest = {
+    ...candidate,
+    approvalRequestId,
+    approvalStatus: approvalStatus || "Pending Review",
+    approvalStep: approvalStep || "Checker Review",
+    submittedAt: now,
+  };
+
+  const updatedSignals = [
+    ...withoutCanonicalCandidateSignal(signals),
+    `A7.7-6A approval request linked: ${approvalRequestId}`,
+    `A7.7-6A approval status: ${updated.approvalStatus}`,
+    `A7.7-6A approval step: ${updated.approvalStep}`,
+    `${CANONICAL_CANDIDATE_PREFIX}${JSON.stringify(updated)}`,
+  ];
+
+  const { error: updateError } = await supabaseAdmin
+    .from("pdf_intelligence_documents")
+    .update({
+      match_signals: updatedSignals,
+      updated_at: now,
+    })
+    .eq("id", documentId)
+    .eq("fund_name", fundName);
+
+  if (updateError) {
+    throw new Error(
+      `Unable to link approval request to PDF candidate: ${updateError.message}`
+    );
+  }
+
+  return noStoreJson({
+    message:
+      "Canonical candidate submitted to the existing VENTIQ maker-checker approval workflow.",
+    documentId,
+    canonicalCandidate: updated,
+  });
+}
+
 async function handleReview(
   actor: GovernedFundActor,
   access: GovernedFundOption,
@@ -3811,6 +4770,36 @@ async function handlePublish(
     );
   }
 
+  const publicationGates = await buildPublicationGates(
+    fundName,
+    readyDocuments
+  );
+
+  const blockedDocuments = readyDocuments
+    .map((document) => ({
+      document,
+      gate: publicationGates.get(document.id),
+    }))
+    .filter(({ gate }) => gate && !gate.publishEligible);
+
+  if (blockedDocuments.length > 0) {
+    return noStoreJson(
+      {
+        error:
+          "Financial PDF publication blocked until canonical Fund Memory approval is complete.",
+        blockedDocuments: blockedDocuments.map(({ document, gate }) => ({
+          id: document.id,
+          fileName: document.original_file_name || "Unknown PDF",
+          documentType: document.document_type || "Other",
+          reason:
+            gate?.publishBlockReason ||
+            "Canonical financial approval is incomplete.",
+        })),
+      },
+      409
+    );
+  }
+
   const storagePaths = readyDocuments
     .map((document) => document.storage_path || "")
     .filter(Boolean);
@@ -3927,6 +4916,8 @@ export async function GET(request: NextRequest) {
           inconsistencyRows: 0,
           resolutionDraftDocuments: 0,
           unresolvedResolutionRows: 0,
+          canonicalCandidateDocuments: 0,
+          approvalSubmittedDocuments: 0,
           published: 0,
         },
       });
@@ -3937,7 +4928,20 @@ export async function GET(request: NextRequest) {
       .map((document) => document.storage_path || "")
       .filter(Boolean);
     const publishedPaths = await publishedStoragePaths(fundName, storagePaths);
-    const apiDocuments = documents.map((row) => apiDocument(row, publishedPaths));
+    const publicationGates = await buildPublicationGates(fundName, documents);
+    const apiDocuments = documents.map((row) =>
+      apiDocument(
+        row,
+        publishedPaths,
+        publicationGates.get(row.id) || {
+          financialApprovalRequired: false,
+          publishEligible: true,
+          publishBlockReason: "",
+          approvedSnapshotId: "",
+          approvalRequestId: "",
+        }
+      )
+    );
 
     return noStoreJson({
       fundName,
@@ -3990,6 +4994,18 @@ export async function GET(request: NextRequest) {
             Number(document.resolutionDraft?.unresolvedDecisionCount || 0),
           0
         ),
+        canonicalCandidateDocuments: apiDocuments.filter(
+          (document) => Boolean(document.canonicalCandidate?.snapshotId)
+        ).length,
+        approvalSubmittedDocuments: apiDocuments.filter(
+          (document) => Boolean(document.canonicalCandidate?.approvalRequestId)
+        ).length,
+        publicationBlocked: apiDocuments.filter(
+          (document) =>
+            document.status === "Ready" &&
+            !document.published &&
+            !document.publishEligible
+        ).length,
         published: apiDocuments.filter((document) => document.published).length,
       },
     });
@@ -4023,19 +5039,19 @@ export async function POST(request: NextRequest) {
     const access = await getFundAccess(actor, fundName);
 
     if (action === "reprocess_latest") {
-      return handleReprocess(actor, access, fundName, body);
+      return await handleReprocess(actor, access, fundName, body);
     }
 
     if (action === "run_ocr") {
-      return handleOcrLatest(actor, access, fundName, body);
+      return await handleOcrLatest(actor, access, fundName, body);
     }
 
     if (action === "extract_financial_candidates") {
-      return handleFinancialExtraction(actor, access, fundName, body);
+      return await handleFinancialExtraction(actor, access, fundName, body);
     }
 
     if (action === "reconcile_financial_candidates") {
-      return handleFinancialReconciliation(
+      return await handleFinancialReconciliation(
         actor,
         access,
         fundName,
@@ -4044,7 +5060,25 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "save_resolution_draft") {
-      return handleResolutionDraft(
+      return await handleResolutionDraft(
+        actor,
+        access,
+        fundName,
+        body
+      );
+    }
+
+    if (action === "prepare_canonical_candidate") {
+      return await handlePrepareCanonicalCandidate(
+        actor,
+        access,
+        fundName,
+        body
+      );
+    }
+
+    if (action === "attach_approval_request") {
+      return await handleAttachApprovalRequest(
         actor,
         access,
         fundName,
@@ -4053,11 +5087,11 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "review") {
-      return handleReview(actor, access, fundName, body);
+      return await handleReview(actor, access, fundName, body);
     }
 
     if (action === "publish") {
-      return handlePublish(actor, access, fundName, body);
+      return await handlePublish(actor, access, fundName, body);
     }
 
     return noStoreJson({ error: "Unsupported PDF Intelligence action." }, 400);
