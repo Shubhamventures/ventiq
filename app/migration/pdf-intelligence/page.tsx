@@ -61,6 +61,58 @@ type OcrManifest = {
   }>;
 };
 
+type FinancialCandidateField = {
+  key: string;
+  label: string;
+  valueType: "money" | "date" | "text";
+  rawValue: string;
+  normalizedValue: number | string | null;
+  currency: string;
+  sourcePage: number;
+  sourceExcerpt: string;
+  extractionMethod: string;
+  confidence: number;
+};
+
+type FinancialCandidateTransaction = {
+  transactionDate: string;
+  transactionNature: "capital_call" | "distribution" | "other";
+  reference: string;
+  amount: number;
+  currency: string;
+  cashflowDirection:
+    | "investor_contribution"
+    | "paid_to_investor"
+    | "unknown";
+  sourcePage: number;
+  sourceExcerpt: string;
+  extractionMethod: string;
+  confidence: number;
+};
+
+type FinancialCandidateCheck = {
+  key: string;
+  label: string;
+  status: "MATCHED" | "CONFLICT" | "NOT_TESTED";
+  summaryValue: number | null;
+  reconstructedValue: number | null;
+  difference: number | null;
+};
+
+type FinancialCandidateManifest = {
+  version: string;
+  extractionStatus: "candidate";
+  generatedAt: string;
+  sidecarBucket: string;
+  sidecarPath: string;
+  fieldCount: number;
+  transactionCount: number;
+  fields: FinancialCandidateField[];
+  transactionPreview: FinancialCandidateTransaction[];
+  checks: FinancialCandidateCheck[];
+  canonicalWrite: false;
+};
+
 type PdfDocument = {
   id: string;
   batchId: string;
@@ -82,6 +134,7 @@ type PdfDocument = {
   signals: string[];
   textPreview: string;
   ocr: OcrManifest | null;
+  financialCandidates: FinancialCandidateManifest | null;
   evidence: EvidenceManifest;
   extractionPending: boolean;
   published: boolean;
@@ -115,6 +168,7 @@ type WorkspaceResult = {
     extractionPending: number;
     ocrRequired: number;
     ocrCompleted: number;
+    financialCandidateDocuments: number;
     published: number;
   };
 };
@@ -142,6 +196,26 @@ const REVIEW_STATUSES: ReviewDraft["status"][] = [
   "Review",
   "Unmatched",
 ];
+
+function formatCandidateValue(field: FinancialCandidateField) {
+  if (field.valueType === "money" && typeof field.normalizedValue === "number") {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: field.currency || "INR",
+      maximumFractionDigits: 2,
+    }).format(field.normalizedValue);
+  }
+
+  return field.normalizedValue ?? field.rawValue;
+}
+
+function formatCandidateAmount(amount: number, currency = "INR") {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
 
 function formatFileSize(size: number) {
   if (size < 1024) return `${size} B`;
@@ -215,6 +289,7 @@ export default function PdfIntelligencePage() {
   const [loadingWorkspace, setLoadingWorkspace] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [ocrProcessing, setOcrProcessing] = useState(false);
+  const [financialExtracting, setFinancialExtracting] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [message, setMessage] = useState("");
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
@@ -255,6 +330,9 @@ export default function PdfIntelligencePage() {
       ).length,
       ocrCompleted: documents.filter(
         (document) => document.evidence.extractionMode === "ocr_completed"
+      ).length,
+      financialCandidateDocuments: documents.filter(
+        (document) => Boolean(document.financialCandidates)
       ).length,
       published: documents.filter((document) => document.published).length,
     };
@@ -740,6 +818,117 @@ export default function PdfIntelligencePage() {
     }
   }
 
+  async function extractStructuredFinancialCandidates() {
+    if (!canManage) {
+      setMessage(
+        "Read-only access: only an authorised Fund Admin or Maker can extract financial candidates."
+      );
+      return;
+    }
+
+    const targetIds = documents
+      .filter((document) => {
+        const supported =
+          document.documentType.includes("SOA") ||
+          document.documentType.includes("Account Statement") ||
+          document.documentType.includes("Capital Call") ||
+          document.documentType.includes("Distribution");
+
+        const textReady =
+          document.evidence.extractionMode === "embedded_text" ||
+          document.evidence.extractionMode === "mixed_text_visual_review" ||
+          document.evidence.extractionMode === "ocr_completed";
+
+        return (
+          supported &&
+          textReady &&
+          Boolean(document.investorId) &&
+          !document.financialCandidates
+        );
+      })
+      .map((document) => document.id);
+
+    if (targetIds.length === 0) {
+      setMessage(
+        "No text-ready investor financial PDFs are available for structured extraction in the latest batch."
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Extract structured financial candidates from ${targetIds.length} PDF(s) in ${activeFundName}?\n\nVENTIQ will create candidate fields and transaction rows with page provenance. No value will be written into Canonical Fund Memory.`
+    );
+
+    if (!confirmed) return;
+
+    setFinancialExtracting(true);
+
+    try {
+      let processedCount = 0;
+      let failedCount = 0;
+      const failureMessages: string[] = [];
+
+      for (let index = 0; index < targetIds.length; index += 4) {
+        const documentIds = targetIds.slice(index, index + 4);
+
+        setMessage(
+          `Extracting structured financial candidates ${Math.min(
+            index + documentIds.length,
+            targetIds.length
+          )}/${targetIds.length}...`
+        );
+
+        const result = await apiRequest(
+          {
+            action: "extract_financial_candidates",
+            fundName: activeFundName,
+            documentIds,
+          },
+          { quiet: true }
+        );
+
+        processedCount += Number(result.processedCount || 0);
+        failedCount += Number(result.failedCount || 0);
+
+        if (Array.isArray(result.failures)) {
+          for (const failure of result.failures) {
+            const fileName =
+              typeof failure?.fileName === "string"
+                ? failure.fileName
+                : "PDF";
+            const failureText =
+              typeof failure?.error === "string"
+                ? failure.error
+                : "Unknown structured extraction error";
+            failureMessages.push(`${fileName}: ${failureText}`);
+          }
+        }
+      }
+
+      await loadWorkspace(activeFundName);
+
+      if (failureMessages.length > 0) {
+        setMessage(
+          `A7.7-3 financial extraction finished. ${processedCount} PDF(s) processed; ${failedCount} failed. ${failureMessages
+            .slice(0, 2)
+            .join(" | ")}`
+        );
+      } else {
+        setMessage(
+          `A7.7-3 financial extraction finished. ${processedCount} PDF(s) processed. Candidate evidence only; no canonical write occurred.`
+        );
+      }
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to extract structured financial candidates."
+      );
+    } finally {
+      setFinancialExtracting(false);
+    }
+  }
+
   async function saveReview(document: PdfDocument) {
     if (!canManage) {
       setMessage(
@@ -921,6 +1110,10 @@ export default function PdfIntelligencePage() {
             <p>OCR completed / review</p>
           </div>
           <div className="impact-card">
+            <h3>{summary.financialCandidateDocuments}</h3>
+            <p>Financial candidate PDFs</p>
+          </div>
+          <div className="impact-card">
             <h3>{summary.published}</h3>
             <p>Portal published</p>
           </div>
@@ -971,6 +1164,7 @@ export default function PdfIntelligencePage() {
                 !canManage ||
                 processing ||
                 ocrProcessing ||
+                financialExtracting ||
                 loadingWorkspace
               }
               onClick={reprocessLatestBatch}
@@ -990,6 +1184,7 @@ export default function PdfIntelligencePage() {
                 !canManage ||
                 processing ||
                 ocrProcessing ||
+                financialExtracting ||
                 loadingWorkspace ||
                 summary.ocrRequired === 0
               }
@@ -999,6 +1194,24 @@ export default function PdfIntelligencePage() {
               {ocrProcessing
                 ? "Running OCR..."
                 : `Run OCR (${summary.ocrRequired})`}
+            </button>
+
+            <button
+              className="monitor-btn monitor-btn-primary"
+              disabled={
+                !batch ||
+                !canManage ||
+                processing ||
+                ocrProcessing ||
+                financialExtracting ||
+                loadingWorkspace
+              }
+              onClick={extractStructuredFinancialCandidates}
+              type="button"
+            >
+              {financialExtracting
+                ? "Extracting candidates..."
+                : "Extract Financial Candidates"}
             </button>
 
             <Link
@@ -1130,6 +1343,173 @@ export default function PdfIntelligencePage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+
+        <div className="preview-card">
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">A7.7-3 · Candidate Financial Evidence</p>
+              <h2>Review structured values before reconciliation</h2>
+            </div>
+
+            <span className="status-pill">
+              {summary.financialCandidateDocuments} candidate PDF(s)
+            </span>
+          </div>
+
+          <div className="explain-box">
+            These values are deterministic candidates extracted from the private
+            PDF text layer. Every field and transaction retains a source page.
+            The full candidate set is retained in private storage. Nothing here
+            writes into Canonical Fund Memory.
+          </div>
+
+          {documents.filter((document) => document.financialCandidates).length ===
+          0 ? (
+            <div className="logic-note">
+              No structured financial candidates exist in the latest batch yet.
+              Use a text-ready SOA, Capital Call Notice or Distribution Notice and
+              click Extract Financial Candidates.
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 18 }}>
+              {documents
+                .filter((document) => document.financialCandidates)
+                .map((document) => {
+                  const candidates = document.financialCandidates!;
+
+                  return (
+                    <div className="queue-item" key={`${document.id}-financial`}>
+                      <div className="section-heading-row">
+                        <div>
+                          <strong>{document.fileName}</strong>
+                          <br />
+                          <small>
+                            {document.investorCode} · {document.periodLabel} ·{" "}
+                            {document.documentType}
+                          </small>
+                        </div>
+
+                        <span className="status-pill">
+                          Candidate only · no canonical write
+                        </span>
+                      </div>
+
+                      <div className="dashboard-grid">
+                        <div className="dashboard-card">
+                          <strong>{candidates.fieldCount}</strong>
+                          <p>Candidate fields</p>
+                        </div>
+                        <div className="dashboard-card">
+                          <strong>{candidates.transactionCount}</strong>
+                          <p>Candidate transactions</p>
+                        </div>
+                        <div className="dashboard-card">
+                          <strong>
+                            {
+                              candidates.checks.filter(
+                                (check) => check.status === "MATCHED"
+                              ).length
+                            }
+                          </strong>
+                          <p>Within-PDF checks matched</p>
+                        </div>
+                      </div>
+
+                      {candidates.fields.length > 0 && (
+                        <div className="table-wrap" style={{ marginTop: 14 }}>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Candidate field</th>
+                                <th>Normalized value</th>
+                                <th>Source page</th>
+                                <th>Confidence</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {candidates.fields.map((field) => (
+                                <tr key={`${document.id}-${field.key}`}>
+                                  <td>
+                                    <strong>{field.label}</strong>
+                                    <br />
+                                    <small>{field.key}</small>
+                                  </td>
+                                  <td>{String(formatCandidateValue(field))}</td>
+                                  <td>Page {field.sourcePage}</td>
+                                  <td>{field.confidence}%</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {candidates.transactionPreview.length > 0 && (
+                        <div className="table-wrap" style={{ marginTop: 14 }}>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Date</th>
+                                <th>Nature</th>
+                                <th>Reference</th>
+                                <th>Amount</th>
+                                <th>Direction</th>
+                                <th>Source page</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {candidates.transactionPreview.map(
+                                (transaction, index) => (
+                                  <tr
+                                    key={`${document.id}-${transaction.reference}-${index}`}
+                                  >
+                                    <td>{transaction.transactionDate}</td>
+                                    <td>{transaction.transactionNature}</td>
+                                    <td>{transaction.reference}</td>
+                                    <td>
+                                      {formatCandidateAmount(
+                                        transaction.amount,
+                                        transaction.currency
+                                      )}
+                                    </td>
+                                    <td>{transaction.cashflowDirection}</td>
+                                    <td>Page {transaction.sourcePage}</td>
+                                  </tr>
+                                )
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: 10,
+                          marginTop: 14,
+                        }}
+                      >
+                        {candidates.checks.map((check) => (
+                          <div
+                            className="logic-note"
+                            key={`${document.id}-${check.key}`}
+                          >
+                            <strong>{check.status}</strong> · {check.label}
+                            {check.difference !== null && (
+                              <>
+                                {" · Difference "}
+                                {formatCandidateAmount(check.difference)}
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           )}
         </div>
@@ -1479,36 +1859,36 @@ export default function PdfIntelligencePage() {
         </div>
 
         <div className="preview-card">
-          <p className="eyebrow">Next · A7.7-3</p>
-          <h2>Structured financial extraction</h2>
+          <p className="eyebrow">Next · A7.7-4</p>
+          <h2>Excel ↔ PDF reconciliation</h2>
 
           <div className="queue-grid">
             <div className="queue-item">
-              <strong>SOA transaction intelligence</strong>
+              <strong>Field-by-field comparison</strong>
               <br />
-              Extract investor cashflow rows with source page provenance so
-              investor-level XIRR can be reconstructed after reconciliation.
+              Compare PDF candidate values with structured Excel / migration
+              evidence for the same investor and reporting period.
             </div>
 
             <div className="queue-item">
-              <strong>Capital call intelligence</strong>
+              <strong>Reconciliation states</strong>
               <br />
-              Extract commitment, call amount, cumulative drawdown, due date and
-              call reference to reconstruct remaining uncalled commitment.
+              Classify each field as MATCHED, CONFLICT, PDF-ONLY or EXCEL-ONLY
+              without discarding either source.
             </div>
 
             <div className="queue-item">
-              <strong>Distribution intelligence</strong>
+              <strong>Human resolution</strong>
               <br />
-              Extract gross / net distribution, tax and payment date as candidate
-              investor cashflows.
+              Let the fund team choose the canonical value, enter a corrected
+              value or keep the conflict unresolved.
             </div>
 
             <div className="queue-item">
-              <strong>Excel ↔ PDF reconciliation</strong>
+              <strong>Governed promotion</strong>
               <br />
-              Candidate values will then be compared field-by-field as MATCHED,
-              CONFLICT, PDF-ONLY or EXCEL-ONLY before canonical confirmation.
+              Only approved reconciliation decisions can later move candidate
+              evidence toward Canonical Fund Memory.
             </div>
           </div>
         </div>

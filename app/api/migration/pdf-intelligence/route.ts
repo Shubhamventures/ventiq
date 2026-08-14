@@ -18,7 +18,10 @@ const MAX_DOCUMENTS_PER_PROCESS_REQUEST = 6;
 const LOW_TEXT_PAGE_THRESHOLD = 24;
 const EVIDENCE_PREFIX = "A7.7_EVIDENCE_JSON:";
 const OCR_PREFIX = "A7.7_OCR_JSON:";
+const FINANCIAL_PREFIX = "A7.7_FINANCIAL_JSON:";
 const MAX_OCR_DOCUMENTS_PER_REQUEST = 2;
+const MAX_FINANCIAL_DOCUMENTS_PER_REQUEST = 4;
+const MAX_FINANCIAL_TRANSACTION_PREVIEW = 12;
 const MAX_OCR_PAGES_PER_DOCUMENT = 8;
 const OCR_RENDER_WIDTH = 2200;
 const DEFAULT_OCR_MODEL = "gpt-5.6-luna";
@@ -103,6 +106,80 @@ type OcrSidecar = {
   model: string;
   completedAt: string;
   pages: OcrPageSidecar[];
+};
+
+
+type FinancialValueType = "money" | "date" | "text";
+
+type FinancialCandidateField = {
+  key: string;
+  label: string;
+  valueType: FinancialValueType;
+  rawValue: string;
+  normalizedValue: number | string | null;
+  currency: string;
+  sourcePage: number;
+  sourceExcerpt: string;
+  extractionMethod: "deterministic_label_match";
+  confidence: number;
+};
+
+type FinancialCandidateTransaction = {
+  transactionDate: string;
+  transactionNature: "capital_call" | "distribution" | "other";
+  reference: string;
+  amount: number;
+  currency: string;
+  cashflowDirection:
+    | "investor_contribution"
+    | "paid_to_investor"
+    | "unknown";
+  sourcePage: number;
+  sourceExcerpt: string;
+  extractionMethod: "deterministic_row_match";
+  confidence: number;
+};
+
+type FinancialCandidateCheck = {
+  key: string;
+  label: string;
+  status: "MATCHED" | "CONFLICT" | "NOT_TESTED";
+  summaryValue: number | null;
+  reconstructedValue: number | null;
+  difference: number | null;
+};
+
+type FinancialCandidateSidecar = {
+  version: "A7.7-3";
+  extractionStatus: "candidate";
+  generatedAt: string;
+  documentId: string;
+  documentType: string;
+  fundName: string;
+  investorId: string;
+  investorCode: string;
+  investorName: string;
+  periodLabel: string;
+  sourceBucket: string;
+  sourcePath: string;
+  canonicalWrite: false;
+  fields: FinancialCandidateField[];
+  transactions: FinancialCandidateTransaction[];
+  checks: FinancialCandidateCheck[];
+};
+
+type FinancialCandidateManifest = {
+  version: "A7.7-3";
+  extractionStatus: "candidate";
+  generatedAt: string;
+  sidecarBucket: string;
+  sidecarPath: string;
+  fieldCount: number;
+  transactionCount: number;
+  fields: FinancialCandidateField[];
+  transactionPreview: FinancialCandidateTransaction[];
+  checks: FinancialCandidateCheck[];
+  canonicalWrite: false;
 };
 
 type ClassificationResult = {
@@ -215,6 +292,27 @@ function getOcrManifest(signals: string[]): OcrManifest | null {
 
 function withoutOcrSignal(signals: string[]) {
   return signals.filter((signal) => !signal.startsWith(OCR_PREFIX));
+}
+
+function getFinancialManifest(
+  signals: string[]
+): FinancialCandidateManifest | null {
+  const encoded = signals.find((signal) => signal.startsWith(FINANCIAL_PREFIX));
+  if (!encoded) return null;
+
+  try {
+    const parsed = JSON.parse(
+      encoded.slice(FINANCIAL_PREFIX.length)
+    ) as FinancialCandidateManifest;
+    if (parsed?.version !== "A7.7-3") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function withoutFinancialSignal(signals: string[]) {
+  return signals.filter((signal) => !signal.startsWith(FINANCIAL_PREFIX));
 }
 
 function getDocumentCategory(documentType: string) {
@@ -805,6 +903,680 @@ async function extractPdfEvidence(buffer: Buffer): Promise<ExtractionResult> {
   }
 }
 
+
+
+function splitEvidencePages(text: string) {
+  const pages: Array<{ pageNumber: number; text: string }> = [];
+  const matches = [
+    ...text.matchAll(
+      /--- PAGE (\d+) ---\s*\n([\s\S]*?)(?=\n\n--- PAGE \d+ ---|$)/g
+    ),
+  ];
+
+  for (const match of matches) {
+    const pageNumber = Number(match[1]);
+    if (!Number.isInteger(pageNumber) || pageNumber <= 0) continue;
+    pages.push({
+      pageNumber,
+      text: String(match[2] || "").trim(),
+    });
+  }
+
+  if (pages.length === 0 && text.trim()) {
+    pages.push({
+      pageNumber: 1,
+      text: text.trim(),
+    });
+  }
+
+  return pages;
+}
+
+function parseMoneyValue(value: string) {
+  const cleaned = value
+    .replace(/(?:INR|Rs\.?|₹|\$)/gi, "")
+    .replace(/,/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+
+  if (!cleaned || !/^-?\d+(?:\.\d+)?$/.test(cleaned)) return null;
+
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseDateValue(value: string) {
+  const raw = value.trim();
+
+  const localMonths: Record<string, number> = {
+    jan: 1,
+    january: 1,
+    feb: 2,
+    february: 2,
+    mar: 3,
+    march: 3,
+    apr: 4,
+    april: 4,
+    may: 5,
+    jun: 6,
+    june: 6,
+    jul: 7,
+    july: 7,
+    aug: 8,
+    august: 8,
+    sep: 9,
+    sept: 9,
+    september: 9,
+    oct: 10,
+    october: 10,
+    nov: 11,
+    november: 11,
+    dec: 12,
+    december: 12,
+  };
+
+  const match = raw.match(
+    /^(\d{1,2})(?:[-/ ]+)([A-Za-z]{3,9})(?:[-/ ]+)(\d{4})$/
+  );
+
+  if (!match) return "";
+
+  const day = Number(match[1]);
+  const month = localMonths[match[2].toLowerCase()];
+  const year = Number(match[3]);
+
+  if (!month || day < 1 || day > 31 || year < 1900) return "";
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(
+    2,
+    "0"
+  )}`;
+}
+
+function compactExcerpt(value: string, maxLength = 300) {
+  return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function findLabelCandidate(
+  pages: Array<{ pageNumber: number; text: string }>,
+  input: {
+    key: string;
+    label: string;
+    aliases: string[];
+    valueType: FinancialValueType;
+    currency?: string;
+  }
+): FinancialCandidateField | null {
+  for (const page of pages) {
+    const lines = page.text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const current = normalizeSearchText(lines[index]);
+      const aliasMatched = input.aliases.some(
+        (alias) => current === normalizeSearchText(alias)
+      );
+
+      if (!aliasMatched) continue;
+
+      const rawValue = lines[index + 1] || "";
+      if (!rawValue) continue;
+
+      let normalizedValue: number | string | null = rawValue;
+
+      if (input.valueType === "money") {
+        normalizedValue = parseMoneyValue(rawValue);
+      } else if (input.valueType === "date") {
+        normalizedValue = parseDateValue(rawValue) || null;
+      }
+
+      if (normalizedValue === null || normalizedValue === "") continue;
+
+      return {
+        key: input.key,
+        label: input.label,
+        valueType: input.valueType,
+        rawValue,
+        normalizedValue,
+        currency: input.currency || "",
+        sourcePage: page.pageNumber,
+        sourceExcerpt: compactExcerpt(`${lines[index]} ${rawValue}`),
+        extractionMethod: "deterministic_label_match",
+        confidence: 100,
+      };
+    }
+  }
+
+  return null;
+}
+
+function findFieldValue(
+  fields: FinancialCandidateField[],
+  key: string
+): number | null {
+  const field = fields.find((candidate) => candidate.key === key);
+  return typeof field?.normalizedValue === "number"
+    ? field.normalizedValue
+    : null;
+}
+
+function buildCheck(input: {
+  key: string;
+  label: string;
+  summaryValue: number | null;
+  reconstructedValue: number | null;
+}): FinancialCandidateCheck {
+  if (input.summaryValue === null || input.reconstructedValue === null) {
+    return {
+      key: input.key,
+      label: input.label,
+      status: "NOT_TESTED",
+      summaryValue: input.summaryValue,
+      reconstructedValue: input.reconstructedValue,
+      difference: null,
+    };
+  }
+
+  const difference = input.reconstructedValue - input.summaryValue;
+
+  return {
+    key: input.key,
+    label: input.label,
+    status: Math.abs(difference) < 0.01 ? "MATCHED" : "CONFLICT",
+    summaryValue: input.summaryValue,
+    reconstructedValue: input.reconstructedValue,
+    difference,
+  };
+}
+
+function extractSoaTransactions(
+  pages: Array<{ pageNumber: number; text: string }>
+) {
+  const transactions: FinancialCandidateTransaction[] = [];
+
+  for (const page of pages) {
+    const regex =
+      /(\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)-\d{4})\s*\n(Capital Call|Distribution)\s*\n([A-Za-z0-9._/-]+)\s*\n(?:INR|Rs\.?|₹|\$)?\s*([\d,]+(?:\.\d+)?)\s*\n([^\n]+)/gi;
+
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(page.text)) !== null) {
+      const amount = parseMoneyValue(match[4]);
+      const transactionDate = parseDateValue(match[1]);
+
+      if (amount === null || !transactionDate) continue;
+
+      const natureText = normalizeSearchText(match[2]);
+      const directionText = normalizeSearchText(match[5]);
+
+      transactions.push({
+        transactionDate,
+        transactionNature: natureText.includes("capital call")
+          ? "capital_call"
+          : natureText.includes("distribution")
+            ? "distribution"
+            : "other",
+        reference: match[3],
+        amount,
+        currency: "INR",
+        cashflowDirection: directionText.includes("contribution")
+          ? "investor_contribution"
+          : directionText.includes("paid to investor")
+            ? "paid_to_investor"
+            : "unknown",
+        sourcePage: page.pageNumber,
+        sourceExcerpt: compactExcerpt(match[0]),
+        extractionMethod: "deterministic_row_match",
+        confidence: 100,
+      });
+    }
+  }
+
+  return transactions;
+}
+
+function extractFinancialCandidatesFromText(input: {
+  documentType: string;
+  text: string;
+}) {
+  const pages = splitEvidencePages(input.text);
+  const fields: FinancialCandidateField[] = [];
+  let transactions: FinancialCandidateTransaction[] = [];
+
+  function addField(config: Parameters<typeof findLabelCandidate>[1]) {
+    const result = findLabelCandidate(pages, config);
+    if (result) fields.push(result);
+  }
+
+  if (
+    input.documentType.includes("SOA") ||
+    input.documentType.includes("Account Statement")
+  ) {
+    addField({
+      key: "reporting_date",
+      label: "Reporting Date",
+      aliases: ["Reporting Date"],
+      valueType: "date",
+    });
+    addField({
+      key: "commitment_amount",
+      label: "Commitment Amount",
+      aliases: ["Commitment Amount", "Commitment"],
+      valueType: "money",
+      currency: "INR",
+    });
+    addField({
+      key: "capital_called_to_date",
+      label: "Capital Called Till Date",
+      aliases: [
+        "Capital Called Till Date",
+        "Capital Called To Date",
+        "Cumulative Capital Called",
+      ],
+      valueType: "money",
+      currency: "INR",
+    });
+    addField({
+      key: "uncalled_capital",
+      label: "Uncalled Capital",
+      aliases: [
+        "Uncalled Capital",
+        "Remaining Commitment",
+        "Remaining Uncalled Commitment",
+      ],
+      valueType: "money",
+      currency: "INR",
+    });
+    addField({
+      key: "distributions_to_date",
+      label: "Distributions Till Date",
+      aliases: [
+        "Distributions Till Date",
+        "Distributions To Date",
+        "Total Distributions",
+      ],
+      valueType: "money",
+      currency: "INR",
+    });
+    addField({
+      key: "current_nav",
+      label: "Current NAV",
+      aliases: ["Current NAV", "Current NAV - test reference only"],
+      valueType: "money",
+      currency: "INR",
+    });
+
+    transactions = extractSoaTransactions(pages);
+  }
+
+  if (input.documentType.includes("Capital Call")) {
+    addField({
+      key: "notice_number",
+      label: "Notice Number",
+      aliases: ["Notice Number", "Call Number", "Capital Call Number"],
+      valueType: "text",
+    });
+    addField({
+      key: "notice_date",
+      label: "Notice Date",
+      aliases: ["Notice Date"],
+      valueType: "date",
+    });
+    addField({
+      key: "due_date",
+      label: "Due Date",
+      aliases: ["Due Date", "Payment Due Date"],
+      valueType: "date",
+    });
+    addField({
+      key: "commitment_amount",
+      label: "Commitment Amount",
+      aliases: ["Commitment Amount", "Commitment"],
+      valueType: "money",
+      currency: "INR",
+    });
+    addField({
+      key: "capital_called_before_notice",
+      label: "Capital Called Before This Notice",
+      aliases: [
+        "Capital Called Before This Notice",
+        "Capital Called Before Notice",
+        "Capital Called Prior To This Notice",
+      ],
+      valueType: "money",
+      currency: "INR",
+    });
+    addField({
+      key: "current_capital_call",
+      label: "Current Capital Call",
+      aliases: ["Current Capital Call", "Current Call", "Call Amount"],
+      valueType: "money",
+      currency: "INR",
+    });
+    addField({
+      key: "cumulative_capital_called",
+      label: "Cumulative Capital Called",
+      aliases: [
+        "Cumulative Capital Called",
+        "Capital Called After This Notice",
+      ],
+      valueType: "money",
+      currency: "INR",
+    });
+    addField({
+      key: "remaining_uncalled_commitment",
+      label: "Remaining Uncalled Commitment",
+      aliases: [
+        "Remaining Uncalled Commitment",
+        "Remaining Commitment",
+        "Uncalled Capital",
+      ],
+      valueType: "money",
+      currency: "INR",
+    });
+  }
+
+  if (input.documentType.includes("Distribution")) {
+    addField({
+      key: "distribution_date",
+      label: "Distribution Date",
+      aliases: ["Distribution Date", "Payment Date"],
+      valueType: "date",
+    });
+    addField({
+      key: "gross_distribution",
+      label: "Gross Distribution",
+      aliases: ["Gross Distribution"],
+      valueType: "money",
+      currency: "INR",
+    });
+    addField({
+      key: "tax_withheld",
+      label: "Tax Withheld",
+      aliases: ["Tax Withheld", "TDS", "Withholding Tax"],
+      valueType: "money",
+      currency: "INR",
+    });
+    addField({
+      key: "net_distribution",
+      label: "Net Distribution",
+      aliases: [
+        "Net Distribution",
+        "Net Distribution Payable",
+        "Net Amount",
+      ],
+      valueType: "money",
+      currency: "INR",
+    });
+    addField({
+      key: "payment_reference",
+      label: "Payment Reference",
+      aliases: ["Payment Reference", "UTR", "Transaction Reference"],
+      valueType: "text",
+    });
+  }
+
+  const capitalCallRows = transactions.filter(
+    (row) => row.transactionNature === "capital_call"
+  );
+  const distributionRows = transactions.filter(
+    (row) => row.transactionNature === "distribution"
+  );
+
+  const capitalCallTotal =
+    capitalCallRows.length > 0
+      ? capitalCallRows.reduce((sum, row) => sum + row.amount, 0)
+      : null;
+
+  const distributionTotal =
+    distributionRows.length > 0
+      ? distributionRows.reduce((sum, row) => sum + row.amount, 0)
+      : null;
+
+  const checks: FinancialCandidateCheck[] = [
+    buildCheck({
+      key: "capital_calls_vs_summary",
+      label: "Transaction capital calls vs summary capital called",
+      summaryValue: findFieldValue(fields, "capital_called_to_date"),
+      reconstructedValue: capitalCallTotal,
+    }),
+    buildCheck({
+      key: "distributions_vs_summary",
+      label: "Transaction distributions vs summary distributions",
+      summaryValue: findFieldValue(fields, "distributions_to_date"),
+      reconstructedValue: distributionTotal,
+    }),
+  ];
+
+  const commitmentAmount = findFieldValue(fields, "commitment_amount");
+  const calledAmount =
+    findFieldValue(fields, "capital_called_to_date") ??
+    findFieldValue(fields, "cumulative_capital_called");
+  const uncalledAmount =
+    findFieldValue(fields, "uncalled_capital") ??
+    findFieldValue(fields, "remaining_uncalled_commitment");
+
+  checks.push(
+    buildCheck({
+      key: "commitment_equation",
+      label: "Commitment equals called plus uncalled",
+      summaryValue: commitmentAmount,
+      reconstructedValue:
+        calledAmount !== null && uncalledAmount !== null
+          ? calledAmount + uncalledAmount
+          : null,
+    })
+  );
+
+  return {
+    fields,
+    transactions,
+    checks,
+  };
+}
+
+async function loadFinancialSourceText(row: PdfDocumentRow) {
+  const storageBucket = normalizeText(row.storage_bucket, 200);
+  const storagePath = normalizeText(row.storage_path, 1000);
+
+  if (!storageBucket || !storagePath) {
+    throw new Error("PDF_STORAGE_REFERENCE_MISSING");
+  }
+
+  const signals = parseSignals(row.match_signals);
+  const evidence = getEvidenceManifest(signals);
+
+  if (!evidence) {
+    throw new Error("PDF_EVIDENCE_MANIFEST_REQUIRED");
+  }
+
+  if (
+    evidence.extractionMode === "ocr_required" ||
+    evidence.extractionMode === "page_limit_review" ||
+    evidence.extractionMode === "pending"
+  ) {
+    throw new Error(
+      `PDF_FINANCIAL_EXTRACTION_NOT_READY: ${evidence.extractionMode}`
+    );
+  }
+
+  const { data: fileBlob, error: downloadError } = await supabaseAdmin.storage
+    .from(storageBucket)
+    .download(storagePath);
+
+  if (downloadError || !fileBlob) {
+    throw new Error(
+      `Unable to download private PDF for financial extraction: ${
+        downloadError?.message || "No file returned"
+      }`
+    );
+  }
+
+  const buffer = Buffer.from(await fileBlob.arrayBuffer());
+  const embedded = await extractPdfEvidence(buffer);
+
+  if (evidence.extractionMode !== "ocr_completed") {
+    return embedded.text;
+  }
+
+  const ocr = getOcrManifest(signals);
+
+  if (!ocr?.sidecarBucket || !ocr.sidecarPath) {
+    throw new Error("PDF_OCR_SIDECAR_REQUIRED");
+  }
+
+  const { data: ocrBlob, error: ocrError } = await supabaseAdmin.storage
+    .from(ocr.sidecarBucket)
+    .download(ocr.sidecarPath);
+
+  if (ocrError || !ocrBlob) {
+    throw new Error(
+      `Unable to download private OCR sidecar: ${
+        ocrError?.message || "No OCR sidecar returned"
+      }`
+    );
+  }
+
+  const parsed = JSON.parse(await ocrBlob.text()) as OcrSidecar;
+
+  const ocrText = parsed.pages
+    .map(
+      (candidate) =>
+        `--- PAGE ${candidate.pageNumber} ---\n${candidate.text}`
+    )
+    .join("\n\n");
+
+  return [embedded.text, ocrText].filter(Boolean).join("\n\n");
+}
+
+async function extractFinancialCandidateSidecar(
+  row: PdfDocumentRow,
+  fundName: string
+) {
+  const documentType = normalizeText(row.document_type, 120);
+
+  if (
+    !documentType.includes("SOA") &&
+    !documentType.includes("Account Statement") &&
+    !documentType.includes("Capital Call") &&
+    !documentType.includes("Distribution")
+  ) {
+    throw new Error(
+      `PDF_FINANCIAL_DOCUMENT_TYPE_NOT_SUPPORTED: ${documentType || "Unknown"}`
+    );
+  }
+
+  if (!row.matched_investor_id) {
+    throw new Error("PDF_FINANCIAL_INVESTOR_MATCH_REQUIRED");
+  }
+
+  const text = await loadFinancialSourceText(row);
+  const result = extractFinancialCandidatesFromText({
+    documentType,
+    text,
+  });
+
+  if (result.fields.length === 0 && result.transactions.length === 0) {
+    throw new Error("PDF_FINANCIAL_NO_CANDIDATES_FOUND");
+  }
+
+  const generatedAt = new Date().toISOString();
+  const storageBucket = normalizeText(row.storage_bucket, 200);
+  const storagePath = normalizeText(row.storage_path, 1000);
+  const sidecarPath = `${storagePath}.ventiq-financial-candidates.json`;
+
+  const sidecar: FinancialCandidateSidecar = {
+    version: "A7.7-3",
+    extractionStatus: "candidate",
+    generatedAt,
+    documentId: row.id,
+    documentType,
+    fundName,
+    investorId: row.matched_investor_id,
+    investorCode: row.investor_code || "",
+    investorName: row.investor_name || "",
+    periodLabel: row.period_label || "",
+    sourceBucket: storageBucket,
+    sourcePath: storagePath,
+    canonicalWrite: false,
+    fields: result.fields,
+    transactions: result.transactions,
+    checks: result.checks,
+  };
+
+  const { error: uploadError } = await supabaseAdmin.storage
+    .from(storageBucket)
+    .upload(
+      sidecarPath,
+      Buffer.from(JSON.stringify(sidecar, null, 2), "utf8"),
+      {
+        contentType: "application/json; charset=utf-8",
+        cacheControl: "0",
+        upsert: true,
+      }
+    );
+
+  if (uploadError) {
+    throw new Error(
+      `Unable to retain private financial candidate sidecar: ${uploadError.message}`
+    );
+  }
+
+  const manifest: FinancialCandidateManifest = {
+    version: "A7.7-3",
+    extractionStatus: "candidate",
+    generatedAt,
+    sidecarBucket: storageBucket,
+    sidecarPath,
+    fieldCount: result.fields.length,
+    transactionCount: result.transactions.length,
+    fields: result.fields.slice(0, 20),
+    transactionPreview: result.transactions.slice(
+      0,
+      MAX_FINANCIAL_TRANSACTION_PREVIEW
+    ),
+    checks: result.checks,
+    canonicalWrite: false,
+  };
+
+  const currentSignals = parseSignals(row.match_signals);
+  const updatedSignals = [
+    ...withoutFinancialSignal(currentSignals),
+    `A7.7-3 structured financial candidates extracted`,
+    `A7.7-3 candidate fields: ${result.fields.length}`,
+    `A7.7-3 candidate transactions: ${result.transactions.length}`,
+    `A7.7-3 private financial sidecar retained: ${sidecarPath}`,
+    `A7.7-3 canonical write: false`,
+    `${FINANCIAL_PREFIX}${JSON.stringify(manifest)}`,
+  ];
+
+  const { error: updateError } = await supabaseAdmin
+    .from("pdf_intelligence_documents")
+    .update({
+      match_signals: updatedSignals,
+      updated_at: generatedAt,
+    })
+    .eq("id", row.id)
+    .eq("fund_name", fundName);
+
+  if (updateError) {
+    throw new Error(
+      `Unable to persist financial candidate metadata: ${updateError.message}`
+    );
+  }
+
+  return {
+    id: row.id,
+    fileName: row.original_file_name || "Unknown PDF",
+    documentType,
+    fieldCount: result.fields.length,
+    transactionCount: result.transactions.length,
+    checks: result.checks,
+    sidecarPath,
+  };
+}
 
 function getOcrModel() {
   return normalizeText(process.env.VENTIQ_OCR_MODEL, 120) || DEFAULT_OCR_MODEL;
@@ -1408,6 +2180,7 @@ function apiDocument(
   const signals = parseSignals(row.match_signals);
   const evidence = getEvidenceManifest(signals);
   const ocr = getOcrManifest(signals);
+  const financialCandidates = getFinancialManifest(signals);
   const period = detectPeriod("", row.period_label || "");
 
   return {
@@ -1434,9 +2207,12 @@ function apiDocument(
         : "Review",
     storageBucket: row.storage_bucket || "",
     storagePath: row.storage_path || "",
-    signals: withoutOcrSignal(withoutEvidenceSignal(signals)),
+    signals: withoutFinancialSignal(
+      withoutOcrSignal(withoutEvidenceSignal(signals))
+    ),
     textPreview: row.extracted_text_preview || "",
     ocr,
+    financialCandidates,
     evidence: evidence ?? {
       version: "A7.7-2",
       totalPages: 0,
@@ -1828,6 +2604,116 @@ async function handleOcrLatest(
   });
 }
 
+async function handleFinancialExtraction(
+  actor: GovernedFundActor,
+  access: GovernedFundOption,
+  fundName: string,
+  body: Record<string, unknown>
+) {
+  requireManageAccess(access);
+
+  const batch = await loadLatestBatch(fundName);
+
+  if (!batch?.id) {
+    return noStoreJson(
+      {
+        error: "No PDF Intelligence batch exists for this fund.",
+      },
+      404
+    );
+  }
+
+  const batchId = String(batch.id);
+  const documents = await loadBatchDocuments(batchId, fundName);
+
+  const requestedIds = Array.isArray(body.documentIds)
+    ? body.documentIds
+        .map((value) => normalizeText(value, 100))
+        .filter(Boolean)
+    : [];
+
+  const candidates = documents.filter((document) => {
+    const signals = parseSignals(document.match_signals);
+    const evidence = getEvidenceManifest(signals);
+    const existingFinancial = getFinancialManifest(signals);
+    const documentType = normalizeText(document.document_type, 120);
+
+    if (!evidence || existingFinancial) return false;
+    if (!document.matched_investor_id) return false;
+
+    if (
+      evidence.extractionMode !== "embedded_text" &&
+      evidence.extractionMode !== "mixed_text_visual_review" &&
+      evidence.extractionMode !== "ocr_completed"
+    ) {
+      return false;
+    }
+
+    const supported =
+      documentType.includes("SOA") ||
+      documentType.includes("Account Statement") ||
+      documentType.includes("Capital Call") ||
+      documentType.includes("Distribution");
+
+    if (!supported) return false;
+
+    return requestedIds.length === 0 || requestedIds.includes(document.id);
+  });
+
+  if (candidates.length === 0) {
+    return noStoreJson({
+      message:
+        "No structured-financial candidate PDFs are available in this request.",
+      batchId,
+      processedCount: 0,
+      failedCount: 0,
+      failures: [],
+    });
+  }
+
+  if (candidates.length > MAX_FINANCIAL_DOCUMENTS_PER_REQUEST) {
+    return noStoreJson(
+      {
+        error: `Extract financial candidates from at most ${MAX_FINANCIAL_DOCUMENTS_PER_REQUEST} PDFs per request.`,
+      },
+      400
+    );
+  }
+
+  const processed: Array<Record<string, unknown>> = [];
+  const failed: Array<{ id: string; fileName: string; error: string }> = [];
+
+  for (const document of candidates) {
+    try {
+      processed.push(
+        await extractFinancialCandidateSidecar(document, fundName)
+      );
+    } catch (error) {
+      failed.push({
+        id: document.id,
+        fileName: document.original_file_name || "Unknown PDF",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Structured financial extraction failed.",
+      });
+    }
+  }
+
+  return noStoreJson({
+    message: `A7.7-3 extracted structured financial candidates from ${processed.length} PDF(s) for ${fundName}.`,
+    batchId,
+    processedCount: processed.length,
+    failedCount: failed.length,
+    processed,
+    failures: failed,
+    actor: {
+      userId: actor.userId,
+      role: access.role,
+    },
+  });
+}
+
 async function handleReview(
   actor: GovernedFundActor,
   access: GovernedFundOption,
@@ -2096,6 +2982,7 @@ export async function GET(request: NextRequest) {
           extractionPending: 0,
           ocrRequired: 0,
           ocrCompleted: 0,
+          financialCandidateDocuments: 0,
           published: 0,
         },
       });
@@ -2130,6 +3017,9 @@ export async function GET(request: NextRequest) {
         ).length,
         ocrCompleted: apiDocuments.filter(
           (document) => document.evidence.extractionMode === "ocr_completed"
+        ).length,
+        financialCandidateDocuments: apiDocuments.filter(
+          (document) => Boolean(document.financialCandidates)
         ).length,
         published: apiDocuments.filter((document) => document.published).length,
       },
@@ -2169,6 +3059,10 @@ export async function POST(request: NextRequest) {
 
     if (action === "run_ocr") {
       return handleOcrLatest(actor, access, fundName, body);
+    }
+
+    if (action === "extract_financial_candidates") {
+      return handleFinancialExtraction(actor, access, fundName, body);
     }
 
     if (action === "review") {
