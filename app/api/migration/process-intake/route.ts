@@ -3083,6 +3083,10 @@ async function processPdfFiles(
     );
   }
 
+  // A7.7-2 deliberately treats Data Intake classification as provisional.
+  // Data Intake knows the file name and fund context but does not inspect the
+  // PDF body. The dedicated PDF Intelligence API must complete server-side
+  // extraction before a document can become Ready.
   let readyFiles = 0;
   let reviewFiles = 0;
   let unmatchedFiles = 0;
@@ -3097,18 +3101,16 @@ async function processPdfFiles(
       const documentType = detectPdfDocumentType(fileName);
       const periodLabel = detectPeriod(fileName);
       const investorMatch = matchInvestorFromFileName(investors, fileName);
-      const confidenceScore = calculatePdfConfidence(
+      const provisionalConfidence = calculatePdfConfidence(
         documentType,
         investorMatch.investorScore,
         periodLabel
       );
-      const status = getPdfStatus(confidenceScore, documentType);
       const matchedInvestor =
         investorMatch.investor as InvestorReference | null;
 
-      if (status === "Ready") readyFiles += 1;
-      if (status === "Review") reviewFiles += 1;
-      if (status === "Unmatched") unmatchedFiles += 1;
+      const status = "Review" as const;
+      reviewFiles += 1;
 
       const documentPayload = {
         batch_id: pdfBatch.id,
@@ -3123,17 +3125,18 @@ async function processPdfFiles(
         email: matchedInvestor?.email || null,
         fund_name: baseContext.fundName,
         period_label: periodLabel,
-        confidence_score: confidenceScore,
+        confidence_score: Math.min(provisionalConfidence, 59),
         status,
         match_signals: [
           ...investorMatch.signals,
-          `Document type: ${documentType}`,
-          `Period: ${periodLabel}`,
-          `Confidence score: ${confidenceScore}`,
-          "Created from canonical migration intake",
+          `Provisional document type from filename: ${documentType}`,
+          `Provisional period from filename: ${periodLabel}`,
+          "A7.7-2: Pending server-side full PDF extraction",
+          "A7.7-2: Filename-only classification cannot become Ready",
+          "Open /migration/pdf-intelligence and process the latest batch",
         ],
         extracted_text_preview:
-          "This PDF was imported from Migration Data Intake. Full text extraction is handled by the PDF Intelligence layer.",
+          "Pending A7.7-2 server-side PDF extraction. No financial values have been created from this document.",
       };
 
       const {
@@ -3167,21 +3170,19 @@ async function processPdfFiles(
         stats.insertedRows = 1;
       }
 
-      if (status !== "Ready") {
-        stats.warningRows = 1;
-        stats.issues.push(
-          makeIssue(
-            context,
-            "pdf_dump",
-            null,
-            null,
-            "Warning",
-            "PDF_REVIEW_REQUIRED",
-            `PDF Intelligence status is ${status}. Review the investor and document classification.`,
-            { rowPayload: documentPayload }
-          )
-        );
-      }
+      stats.warningRows = 1;
+      stats.issues.push(
+        makeIssue(
+          context,
+          "pdf_dump",
+          null,
+          null,
+          "Warning",
+          "PDF_EXTRACTION_REQUIRED",
+          "PDF was registered from Data Intake but still requires A7.7 server-side body extraction before readiness.",
+          { rowPayload: documentPayload }
+        )
+      );
 
       stats.summary.pdfRows = 1;
       const completion = await updateFileCompletion(context, stats);
@@ -3201,9 +3202,11 @@ async function processPdfFiles(
         fileId: file.id,
         fundName: baseContext.fundName,
         datasetKey: "pdf_dump",
-        eventType: "File Processed",
-        eventTitle: `${fileName} processed`,
-        eventStatus: completion.errorCount > 0 ? "Completed With Errors" : "Completed",
+        eventType: "PDF Registered",
+        eventTitle: `${fileName} registered for PDF Intelligence`,
+        eventDescription:
+          "Filename-level metadata was staged. Server-side PDF body extraction remains required before readiness.",
+        eventStatus: "Needs Review",
         actor,
         recordsRead: 1,
         recordsInserted: stats.insertedRows,
@@ -3211,8 +3214,10 @@ async function processPdfFiles(
         recordsRejected: stats.rejectedRows,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "PDF processing failed.";
+      const message =
+        error instanceof Error ? error.message : "PDF processing failed.";
       stats.rejectedRows += 1;
+      unmatchedFiles += 1;
       const completion = await updateFileCompletion(context, stats, message);
 
       aggregate.errorCount += completion.errorCount;

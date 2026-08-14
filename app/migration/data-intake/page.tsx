@@ -1683,7 +1683,9 @@ export default function DataIntakeCommandCenterPage() {
     });
 
     setMessage(
-      `${newFiles.length} file(s) staged. VENTIQ will keep this queue while you navigate between pages. Uploads will run in batches of ${MAX_FILES_PER_UPLOAD_REQUEST}.`
+      batchProcessingStatus === "Completed"
+        ? `${newFiles.length} file(s) staged. The previous migration batch is completed and frozen, so VENTIQ will create a new intake batch when you upload these files.`
+        : `${newFiles.length} file(s) staged. VENTIQ will keep this queue while you navigate between pages. Uploads will run in batches of ${MAX_FILES_PER_UPLOAD_REQUEST}.`
     );
   }
 
@@ -1733,7 +1735,11 @@ export default function DataIntakeCommandCenterPage() {
       )
     );
 
-    let currentBatchId = batchId;
+    // A completed migration batch is immutable. If the user stages new files
+    // after completion, start a fresh intake batch instead of trying to append
+    // to the frozen historical batch.
+    let currentBatchId =
+      batchProcessingStatus === "Completed" ? "" : batchId;
     let processedFileCount = 0;
     let totalUploaded = 0;
     let totalDuplicates = 0;
