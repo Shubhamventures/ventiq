@@ -159,6 +159,46 @@ type FinancialReconciliationManifest = {
   canonicalWrite: false;
 };
 
+
+type ResolutionChoice =
+  | "use_structured"
+  | "use_pdf"
+  | "corrected"
+  | "unresolved";
+
+type ResolutionDecision = {
+  key: string;
+  label: string;
+  reconciliationStatus: ReconciliationStatus;
+  choice: ResolutionChoice;
+  proposedValue: number | null;
+  note: string;
+  structuredValue: number | null;
+  pdfValue: number | null;
+  decidedByUserId: string;
+  decidedByRole: string;
+  decidedAt: string;
+};
+
+type ResolutionDraftManifest = {
+  version: string;
+  generatedAt: string;
+  status: "draft_pending_checker";
+  sidecarBucket: string;
+  sidecarPath: string;
+  decisionCount: number;
+  resolvedDecisionCount: number;
+  unresolvedDecisionCount: number;
+  decisions: ResolutionDecision[];
+  canonicalWrite: false;
+};
+
+type ResolutionDraftInput = {
+  choice: ResolutionChoice;
+  correctedValue: string;
+  note: string;
+};
+
 type PdfDocument = {
   id: string;
   batchId: string;
@@ -182,6 +222,7 @@ type PdfDocument = {
   ocr: OcrManifest | null;
   financialCandidates: FinancialCandidateManifest | null;
   reconciliation: FinancialReconciliationManifest | null;
+  resolutionDraft: ResolutionDraftManifest | null;
   evidence: EvidenceManifest;
   extractionPending: boolean;
   published: boolean;
@@ -218,6 +259,9 @@ type WorkspaceResult = {
     financialCandidateDocuments: number;
     reconciledDocuments: number;
     reconciliationConflicts: number;
+    inconsistencyRows: number;
+    resolutionDraftDocuments: number;
+    unresolvedResolutionRows: number;
     published: number;
   };
 };
@@ -264,6 +308,17 @@ function formatCandidateAmount(amount: number, currency = "INR") {
     currency,
     maximumFractionDigits: 2,
   }).format(amount);
+}
+
+function resolutionKey(documentId: string, fieldKey: string) {
+  return `${documentId}::${fieldKey}`;
+}
+
+function resolutionChoiceLabel(choice: ResolutionChoice) {
+  if (choice === "use_structured") return "Use Structured";
+  if (choice === "use_pdf") return "Use PDF";
+  if (choice === "corrected") return "Enter Corrected Value";
+  return "Keep Unresolved";
 }
 
 function formatFileSize(size: number) {
@@ -340,6 +395,10 @@ export default function PdfIntelligencePage() {
   const [ocrProcessing, setOcrProcessing] = useState(false);
   const [financialExtracting, setFinancialExtracting] = useState(false);
   const [reconciling, setReconciling] = useState(false);
+  const [savingResolutionId, setSavingResolutionId] = useState("");
+  const [resolutionDrafts, setResolutionDrafts] = useState<
+    Record<string, ResolutionDraftInput>
+  >({});
   const [publishing, setPublishing] = useState(false);
   const [message, setMessage] = useState("");
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
@@ -390,6 +449,23 @@ export default function PdfIntelligencePage() {
       reconciliationConflicts: documents.reduce(
         (sum, document) =>
           sum + Number(document.reconciliation?.conflictCount || 0),
+        0
+      ),
+      inconsistencyRows: documents.reduce(
+        (sum, document) =>
+          sum +
+          Number(document.reconciliation?.conflictCount || 0) +
+          Number(document.reconciliation?.pdfOnlyCount || 0) +
+          Number(document.reconciliation?.excelOnlyCount || 0),
+        0
+      ),
+      resolutionDraftDocuments: documents.filter(
+        (document) => Boolean(document.resolutionDraft)
+      ).length,
+      unresolvedResolutionRows: documents.reduce(
+        (sum, document) =>
+          sum +
+          Number(document.resolutionDraft?.unresolvedDecisionCount || 0),
         0
       ),
       published: documents.filter((document) => document.published).length,
@@ -1084,6 +1160,141 @@ export default function PdfIntelligencePage() {
     }
   }
 
+  function getResolutionInput(
+    document: PdfDocument,
+    row: FinancialReconciliationRow
+  ): ResolutionDraftInput {
+    const key = resolutionKey(document.id, row.key);
+    const local = resolutionDrafts[key];
+    if (local) return local;
+
+    const saved = document.resolutionDraft?.decisions.find(
+      (decision) => decision.key === row.key
+    );
+
+    return {
+      choice: saved?.choice || "unresolved",
+      correctedValue:
+        saved?.choice === "corrected" && saved.proposedValue !== null
+          ? String(saved.proposedValue)
+          : "",
+      note: saved?.note || "",
+    };
+  }
+
+  function updateResolutionInput(
+    documentId: string,
+    fieldKey: string,
+    patch: Partial<ResolutionDraftInput>
+  ) {
+    const key = resolutionKey(documentId, fieldKey);
+
+    setResolutionDrafts((current) => ({
+      ...current,
+      [key]: {
+        choice: current[key]?.choice || "unresolved",
+        correctedValue: current[key]?.correctedValue || "",
+        note: current[key]?.note || "",
+        ...patch,
+      },
+    }));
+  }
+
+  async function saveResolutionDraft(document: PdfDocument) {
+    if (!canManage) {
+      setMessage(
+        "Read-only access: only an authorised Fund Admin or Maker can save inconsistency resolutions."
+      );
+      return;
+    }
+
+    const reviewRows =
+      document.reconciliation?.rows.filter(
+        (row) => row.status !== "MATCHED"
+      ) || [];
+
+    if (reviewRows.length === 0) {
+      setMessage("This PDF has no inconsistency rows requiring resolution.");
+      return;
+    }
+
+    const decisions = reviewRows.map((row) => {
+      const draft = getResolutionInput(document, row);
+
+      return {
+        key: row.key,
+        choice: draft.choice,
+        correctedValue:
+          draft.choice === "corrected"
+            ? Number(draft.correctedValue)
+            : null,
+        note: draft.note.trim(),
+      };
+    });
+
+    const invalid = reviewRows.find((row) => {
+      const draft = getResolutionInput(document, row);
+
+      if (draft.choice === "use_structured" && row.structuredValue === null) {
+        return true;
+      }
+
+      if (draft.choice === "use_pdf" && row.pdfValue === null) {
+        return true;
+      }
+
+      if (
+        draft.choice === "corrected" &&
+        (!draft.correctedValue.trim() ||
+          !Number.isFinite(Number(draft.correctedValue)))
+      ) {
+        return true;
+      }
+
+      if (draft.choice !== "unresolved" && !draft.note.trim()) {
+        return true;
+      }
+
+      return false;
+    });
+
+    if (invalid) {
+      setMessage(
+        `${invalid.label}: choose an available source (or enter a corrected numeric value) and add a resolution note.`
+      );
+      return;
+    }
+
+    setSavingResolutionId(document.id);
+
+    try {
+      await apiRequest({
+        action: "save_resolution_draft",
+        fundName: activeFundName,
+        documentId: document.id,
+        decisions,
+      });
+
+      await loadWorkspace(activeFundName);
+
+      setResolutionDrafts((current) => {
+        const next = { ...current };
+        for (const row of reviewRows) {
+          delete next[resolutionKey(document.id, row.key)];
+        }
+        return next;
+      });
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to save inconsistency resolution draft."
+      );
+    } finally {
+      setSavingResolutionId("");
+    }
+  }
+
   async function saveReview(document: PdfDocument) {
     if (!canManage) {
       setMessage(
@@ -1275,6 +1486,14 @@ export default function PdfIntelligencePage() {
           <div className="impact-card">
             <h3>{summary.reconciliationConflicts}</h3>
             <p>Field conflicts</p>
+          </div>
+          <div className="impact-card">
+            <h3>{summary.inconsistencyRows}</h3>
+            <p>Inconsistency rows</p>
+          </div>
+          <div className="impact-card">
+            <h3>{summary.resolutionDraftDocuments}</h3>
+            <p>Resolution drafts</p>
           </div>
           <div className="impact-card">
             <h3>{summary.published}</h3>
@@ -1769,8 +1988,11 @@ export default function PdfIntelligencePage() {
                         </div>
                       </div>
 
-                      <div className="table-wrap" style={{ marginTop: 14 }}>
-                        <table>
+                      <div
+                        className="table-wrap"
+                        style={{ marginTop: 14, overflowX: "auto" }}
+                      >
+                        <table style={{ minWidth: 1120 }}>
                           <thead>
                             <tr>
                               <th>Field</th>
@@ -1841,6 +2063,268 @@ export default function PdfIntelligencePage() {
                           </tbody>
                         </table>
                       </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+
+        <div className="preview-card">
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">A7.7-5A · Fund Inconsistency Review</p>
+              <h2>Choose a draft resolution without changing canonical data</h2>
+            </div>
+
+            <span className="status-pill">
+              {summary.inconsistencyRows} inconsistency row(s)
+            </span>
+          </div>
+
+          <div className="explain-box">
+            Only CONFLICT, PDF-ONLY and EXCEL-ONLY rows require a human
+            decision. A Fund Admin / Maker can propose Use Structured, Use PDF,
+            Enter Corrected Value or Keep Unresolved. The proposal is retained
+            as a private draft for checker review. Original evidence is never
+            overwritten and Canonical Fund Memory is not updated here.
+          </div>
+
+          {documents.filter(
+            (document) =>
+              document.reconciliation &&
+              document.reconciliation.rows.some(
+                (row) => row.status !== "MATCHED"
+              )
+          ).length === 0 ? (
+            <div className="logic-note">
+              No inconsistencies require human resolution in the latest batch.
+              The current reconciled evidence is fully matched.
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 18 }}>
+              {documents
+                .filter(
+                  (document) =>
+                    document.reconciliation &&
+                    document.reconciliation.rows.some(
+                      (row) => row.status !== "MATCHED"
+                    )
+                )
+                .map((document) => {
+                  const reviewRows = document.reconciliation!.rows.filter(
+                    (row) => row.status !== "MATCHED"
+                  );
+
+                  return (
+                    <div
+                      className="queue-item"
+                      key={`${document.id}-resolution`}
+                    >
+                      <div className="section-heading-row">
+                        <div>
+                          <strong>{document.fileName}</strong>
+                          <br />
+                          <small>
+                            {document.investorCode} · {document.periodLabel}
+                          </small>
+                        </div>
+
+                        <span className="status-pill">
+                          {document.resolutionDraft
+                            ? "Draft pending checker"
+                            : "Resolution required"}
+                        </span>
+                      </div>
+
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: 14,
+                          marginTop: 14,
+                        }}
+                      >
+                        {reviewRows.map((row) => {
+                          const draft = getResolutionInput(document, row);
+
+                          return (
+                            <div
+                              className="logic-note"
+                              key={`${document.id}-${row.key}-resolution`}
+                            >
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns:
+                                    "minmax(180px, 1.25fr) minmax(150px, 1fr) minmax(150px, 1fr)",
+                                  gap: 14,
+                                  alignItems: "start",
+                                }}
+                              >
+                                <div>
+                                  <strong>
+                                    {row.status} · {row.label}
+                                  </strong>
+                                  <br />
+                                  <small>
+                                    Difference:{" "}
+                                    {row.difference === null
+                                      ? "—"
+                                      : formatCandidateAmount(
+                                          row.difference,
+                                          row.currency
+                                        )}
+                                  </small>
+                                </div>
+
+                                <div>
+                                  <small>Structured / Excel</small>
+                                  <br />
+                                  <strong>
+                                    {row.structuredValue === null
+                                      ? "Not available"
+                                      : formatCandidateAmount(
+                                          row.structuredValue,
+                                          row.currency
+                                        )}
+                                  </strong>
+                                </div>
+
+                                <div>
+                                  <small>PDF evidence</small>
+                                  <br />
+                                  <strong>
+                                    {row.pdfValue === null
+                                      ? "Not available"
+                                      : formatCandidateAmount(
+                                          row.pdfValue,
+                                          row.currency
+                                        )}
+                                  </strong>
+                                </div>
+                              </div>
+
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns:
+                                    "minmax(210px, 0.7fr) minmax(210px, 0.7fr) minmax(260px, 1.6fr)",
+                                  gap: 12,
+                                  marginTop: 12,
+                                }}
+                              >
+                                <select
+                                  className="portal-select"
+                                  value={draft.choice}
+                                  onChange={(event) =>
+                                    updateResolutionInput(
+                                      document.id,
+                                      row.key,
+                                      {
+                                        choice: event.target
+                                          .value as ResolutionChoice,
+                                      }
+                                    )
+                                  }
+                                >
+                                  <option value="unresolved">
+                                    Keep Unresolved
+                                  </option>
+                                  <option
+                                    disabled={row.structuredValue === null}
+                                    value="use_structured"
+                                  >
+                                    Use Structured
+                                  </option>
+                                  <option
+                                    disabled={row.pdfValue === null}
+                                    value="use_pdf"
+                                  >
+                                    Use PDF
+                                  </option>
+                                  <option value="corrected">
+                                    Enter Corrected Value
+                                  </option>
+                                </select>
+
+                                <input
+                                  className="portal-input"
+                                  disabled={draft.choice !== "corrected"}
+                                  inputMode="decimal"
+                                  onChange={(event) =>
+                                    updateResolutionInput(
+                                      document.id,
+                                      row.key,
+                                      {
+                                        correctedValue:
+                                          event.target.value,
+                                      }
+                                    )
+                                  }
+                                  placeholder="Corrected value"
+                                  value={draft.correctedValue}
+                                />
+
+                                <input
+                                  className="portal-input"
+                                  onChange={(event) =>
+                                    updateResolutionInput(
+                                      document.id,
+                                      row.key,
+                                      { note: event.target.value }
+                                    )
+                                  }
+                                  placeholder={
+                                    draft.choice === "unresolved"
+                                      ? "Optional note while unresolved"
+                                      : "Required resolution rationale"
+                                  }
+                                  value={draft.note}
+                                />
+                              </div>
+
+                              <div style={{ marginTop: 10 }}>
+                                <small>
+                                  Proposed decision:{" "}
+                                  <strong>
+                                    {resolutionChoiceLabel(draft.choice)}
+                                  </strong>
+                                  {" · "}
+                                  Canonical write: disabled
+                                </small>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div style={{ marginTop: 14 }}>
+                        <button
+                          className="monitor-btn monitor-btn-primary"
+                          disabled={
+                            savingResolutionId === document.id ||
+                            !canManage
+                          }
+                          onClick={() => saveResolutionDraft(document)}
+                          type="button"
+                        >
+                          {savingResolutionId === document.id
+                            ? "Saving Draft..."
+                            : "Save Resolution Draft"}
+                        </button>
+                      </div>
+
+                      {document.resolutionDraft && (
+                        <div className="logic-note" style={{ marginTop: 14 }}>
+                          <strong>Draft pending checker</strong>
+                          {" · "}
+                          {document.resolutionDraft.resolvedDecisionCount} resolved
+                          {" · "}
+                          {document.resolutionDraft.unresolvedDecisionCount} unresolved
+                          {" · "}
+                          No canonical write
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -2193,36 +2677,36 @@ export default function PdfIntelligencePage() {
         </div>
 
         <div className="preview-card">
-          <p className="eyebrow">Next · A7.7-5</p>
-          <h2>Fund inconsistency review & human resolution</h2>
+          <p className="eyebrow">Next · A7.7-6</p>
+          <h2>Maker-checker approval & canonical confirmation</h2>
 
           <div className="queue-grid">
             <div className="queue-item">
-              <strong>Field-by-field comparison</strong>
+              <strong>Checker approval</strong>
               <br />
-              Compare PDF candidate values with structured Excel / migration
-              evidence for the same investor and reporting period.
+              Review each Maker resolution against the preserved structured and
+              PDF evidence before approving any promotion.
             </div>
 
             <div className="queue-item">
-              <strong>Reconciliation states</strong>
+              <strong>Segregation of duties</strong>
               <br />
-              Classify each field as MATCHED, CONFLICT, PDF-ONLY or EXCEL-ONLY
-              without discarding either source.
+              A Maker cannot self-approve the same resolution package; approval
+              identity and timestamps remain auditable.
             </div>
 
             <div className="queue-item">
-              <strong>Human resolution</strong>
+              <strong>Canonical confirmation</strong>
               <br />
-              Let the fund team choose the canonical value, enter a corrected
-              value or keep the conflict unresolved.
+              Only checker-approved resolved values can be promoted toward the
+              canonical fund record; unresolved rows remain blocked.
             </div>
 
             <div className="queue-item">
-              <strong>Governed promotion</strong>
+              <strong>Evidence preservation</strong>
               <br />
-              Only approved reconciliation decisions can later move candidate
-              evidence toward Canonical Fund Memory.
+              Structured source, PDF source, reconciliation and resolution
+              history remain attached after canonical confirmation.
             </div>
           </div>
         </div>
