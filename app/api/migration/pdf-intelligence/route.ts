@@ -19,7 +19,9 @@ const LOW_TEXT_PAGE_THRESHOLD = 24;
 const EVIDENCE_PREFIX = "A7.7_EVIDENCE_JSON:";
 const OCR_PREFIX = "A7.7_OCR_JSON:";
 const FINANCIAL_PREFIX = "A7.7_FINANCIAL_JSON:";
+const RECONCILIATION_PREFIX = "A7.7_RECONCILIATION_JSON:";
 const MAX_OCR_DOCUMENTS_PER_REQUEST = 2;
+const MAX_RECONCILIATION_DOCUMENTS_PER_REQUEST = 6;
 const MAX_FINANCIAL_DOCUMENTS_PER_REQUEST = 4;
 const MAX_FINANCIAL_TRANSACTION_PREVIEW = 12;
 const MAX_OCR_PAGES_PER_DOCUMENT = 8;
@@ -182,6 +184,69 @@ type FinancialCandidateManifest = {
   canonicalWrite: false;
 };
 
+
+type ReconciliationStatus =
+  | "MATCHED"
+  | "CONFLICT"
+  | "PDF-ONLY"
+  | "EXCEL-ONLY";
+
+type StructuredEvidenceRef = {
+  table: "fund_commitments" | "investor_position_snapshots";
+  recordId: string;
+  field: string;
+  updatedAt: string;
+  reportingDate: string;
+  approvalStatus: string;
+};
+
+type FinancialReconciliationRow = {
+  key: string;
+  label: string;
+  valueType: "money";
+  currency: string;
+  pdfValue: number | null;
+  pdfSourcePage: number | null;
+  pdfSourceExcerpt: string;
+  structuredValue: number | null;
+  structuredSource: StructuredEvidenceRef | null;
+  status: ReconciliationStatus;
+  difference: number | null;
+  resolutionStatus: "unresolved";
+  canonicalValue: null;
+};
+
+type FinancialReconciliationSidecar = {
+  version: "A7.7-4A";
+  generatedAt: string;
+  reconciliationStatus: "candidate";
+  documentId: string;
+  fundName: string;
+  investorId: string;
+  investorCode: string;
+  investorName: string;
+  periodLabel: string;
+  pdfCandidateSidecarPath: string;
+  sourcePdfPath: string;
+  canonicalWrite: false;
+  rows: FinancialReconciliationRow[];
+};
+
+type FinancialReconciliationManifest = {
+  version: "A7.7-4A";
+  generatedAt: string;
+  reconciliationStatus: "candidate";
+  sidecarBucket: string;
+  sidecarPath: string;
+  rowCount: number;
+  matchedCount: number;
+  conflictCount: number;
+  pdfOnlyCount: number;
+  excelOnlyCount: number;
+  rows: FinancialReconciliationRow[];
+  canonicalWrite: false;
+};
+
 type ClassificationResult = {
   documentType: string;
   signals: string[];
@@ -313,6 +378,32 @@ function getFinancialManifest(
 
 function withoutFinancialSignal(signals: string[]) {
   return signals.filter((signal) => !signal.startsWith(FINANCIAL_PREFIX));
+}
+
+
+function getReconciliationManifest(
+  signals: string[]
+): FinancialReconciliationManifest | null {
+  const encoded = signals.find((signal) =>
+    signal.startsWith(RECONCILIATION_PREFIX)
+  );
+  if (!encoded) return null;
+
+  try {
+    const parsed = JSON.parse(
+      encoded.slice(RECONCILIATION_PREFIX.length)
+    ) as FinancialReconciliationManifest;
+    if (parsed?.version !== "A7.7-4A") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function withoutReconciliationSignal(signals: string[]) {
+  return signals.filter(
+    (signal) => !signal.startsWith(RECONCILIATION_PREFIX)
+  );
 }
 
 function getDocumentCategory(documentType: string) {
@@ -1578,6 +1669,354 @@ async function extractFinancialCandidateSidecar(
   };
 }
 
+
+function financialCandidateNumber(
+  manifest: FinancialCandidateManifest,
+  key: string
+) {
+  const field = manifest.fields.find((candidate) => candidate.key === key);
+
+  return {
+    value:
+      typeof field?.normalizedValue === "number"
+        ? field.normalizedValue
+        : null,
+    sourcePage: field?.sourcePage ?? null,
+    sourceExcerpt: field?.sourceExcerpt || "",
+  };
+}
+
+function buildReconciliationRow(input: {
+  key: string;
+  label: string;
+  pdfValue: number | null;
+  pdfSourcePage: number | null;
+  pdfSourceExcerpt: string;
+  structuredValue: number | null;
+  structuredSource: StructuredEvidenceRef | null;
+}): FinancialReconciliationRow {
+  let status: ReconciliationStatus;
+  let difference: number | null = null;
+
+  if (input.pdfValue !== null && input.structuredValue !== null) {
+    difference = input.pdfValue - input.structuredValue;
+    status = Math.abs(difference) <= 0.01 ? "MATCHED" : "CONFLICT";
+  } else if (input.pdfValue !== null) {
+    status = "PDF-ONLY";
+  } else {
+    status = "EXCEL-ONLY";
+  }
+
+  return {
+    key: input.key,
+    label: input.label,
+    valueType: "money",
+    currency: "INR",
+    pdfValue: input.pdfValue,
+    pdfSourcePage: input.pdfSourcePage,
+    pdfSourceExcerpt: input.pdfSourceExcerpt,
+    structuredValue: input.structuredValue,
+    structuredSource: input.structuredSource,
+    status,
+    difference,
+    resolutionStatus: "unresolved",
+    canonicalValue: null,
+  };
+}
+
+function normalizeStructuredNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function loadStructuredFinancialEvidence(input: {
+  fundName: string;
+  investorId: string;
+  reportingDate: string;
+}) {
+  const { data: commitment, error: commitmentError } = await supabaseAdmin
+    .from("fund_commitments")
+    .select(
+      "id, commitment_amount, capital_called_till_date, uncalled_capital, distributions_till_date, updated_at"
+    )
+    .eq("fund_name", input.fundName)
+    .eq("investor_id", input.investorId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (commitmentError) {
+    throw new Error(
+      `Unable to load structured commitment evidence: ${commitmentError.message}`
+    );
+  }
+
+  let snapshot: DataRow | null = null;
+
+  if (input.reportingDate) {
+    const { data, error } = await supabaseAdmin
+      .from("investor_position_snapshots")
+      .select(
+        "id, reporting_date, reporting_period, current_nav, approval_status, updated_at, snapshot_version"
+      )
+      .eq("fund_name", input.fundName)
+      .eq("investor_id", input.investorId)
+      .eq("reporting_date", input.reportingDate)
+      .order("snapshot_version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(
+        `Unable to load reporting-date investor snapshot: ${error.message}`
+      );
+    }
+
+    snapshot = data as DataRow | null;
+  }
+
+  const commitmentId = normalizeText(commitment?.id, 100);
+  const commitmentUpdatedAt = normalizeText(commitment?.updated_at, 100);
+
+  function commitmentSource(field: string): StructuredEvidenceRef | null {
+    if (!commitmentId) return null;
+
+    return {
+      table: "fund_commitments",
+      recordId: commitmentId,
+      field,
+      updatedAt: commitmentUpdatedAt,
+      reportingDate: "",
+      approvalStatus: "",
+    };
+  }
+
+  const snapshotId = normalizeText(snapshot?.id, 100);
+
+  const snapshotSource: StructuredEvidenceRef | null = snapshotId
+    ? {
+        table: "investor_position_snapshots",
+        recordId: snapshotId,
+        field: "current_nav",
+        updatedAt: normalizeText(snapshot?.updated_at, 100),
+        reportingDate: normalizeText(snapshot?.reporting_date, 100),
+        approvalStatus: normalizeText(snapshot?.approval_status, 80),
+      }
+    : null;
+
+  return {
+    commitment: {
+      commitmentAmount: normalizeStructuredNumber(commitment?.commitment_amount),
+      capitalCalled: normalizeStructuredNumber(
+        commitment?.capital_called_till_date
+      ),
+      uncalledCapital: normalizeStructuredNumber(commitment?.uncalled_capital),
+      distributionsToDate: normalizeStructuredNumber(
+        commitment?.distributions_till_date
+      ),
+      source: commitmentSource,
+    },
+    snapshot: {
+      currentNav: normalizeStructuredNumber(snapshot?.current_nav),
+      source: snapshotSource,
+    },
+  };
+}
+
+async function reconcileFinancialCandidates(
+  row: PdfDocumentRow,
+  fundName: string
+) {
+  const signals = parseSignals(row.match_signals);
+  const financial = getFinancialManifest(signals);
+
+  if (!financial) {
+    throw new Error("PDF_FINANCIAL_CANDIDATES_REQUIRED");
+  }
+
+  if (!row.matched_investor_id) {
+    throw new Error("PDF_RECONCILIATION_INVESTOR_MATCH_REQUIRED");
+  }
+
+  const reportingDateField = financial.fields.find(
+    (candidate) => candidate.key === "reporting_date"
+  );
+
+  const reportingDate =
+    typeof reportingDateField?.normalizedValue === "string"
+      ? reportingDateField.normalizedValue
+      : "";
+
+  const structured = await loadStructuredFinancialEvidence({
+    fundName,
+    investorId: row.matched_investor_id,
+    reportingDate,
+  });
+
+  const commitment = financialCandidateNumber(
+    financial,
+    "commitment_amount"
+  );
+  const capitalCalled = financialCandidateNumber(
+    financial,
+    "capital_called_to_date"
+  );
+  const uncalled = financialCandidateNumber(financial, "uncalled_capital");
+  const distributions = financialCandidateNumber(
+    financial,
+    "distributions_to_date"
+  );
+  const currentNav = financialCandidateNumber(financial, "current_nav");
+
+  const rows: FinancialReconciliationRow[] = [
+    buildReconciliationRow({
+      key: "commitment_amount",
+      label: "Commitment Amount",
+      pdfValue: commitment.value,
+      pdfSourcePage: commitment.sourcePage,
+      pdfSourceExcerpt: commitment.sourceExcerpt,
+      structuredValue: structured.commitment.commitmentAmount,
+      structuredSource:
+        structured.commitment.source("commitment_amount"),
+    }),
+    buildReconciliationRow({
+      key: "capital_called_to_date",
+      label: "Capital Called Till Date",
+      pdfValue: capitalCalled.value,
+      pdfSourcePage: capitalCalled.sourcePage,
+      pdfSourceExcerpt: capitalCalled.sourceExcerpt,
+      structuredValue: structured.commitment.capitalCalled,
+      structuredSource:
+        structured.commitment.source("capital_called_till_date"),
+    }),
+    buildReconciliationRow({
+      key: "uncalled_capital",
+      label: "Uncalled Capital",
+      pdfValue: uncalled.value,
+      pdfSourcePage: uncalled.sourcePage,
+      pdfSourceExcerpt: uncalled.sourceExcerpt,
+      structuredValue: structured.commitment.uncalledCapital,
+      structuredSource:
+        structured.commitment.source("uncalled_capital"),
+    }),
+    buildReconciliationRow({
+      key: "distributions_to_date",
+      label: "Distributions Till Date",
+      pdfValue: distributions.value,
+      pdfSourcePage: distributions.sourcePage,
+      pdfSourceExcerpt: distributions.sourceExcerpt,
+      structuredValue: structured.commitment.distributionsToDate,
+      structuredSource:
+        structured.commitment.source("distributions_till_date"),
+    }),
+    buildReconciliationRow({
+      key: "current_nav",
+      label: "Current NAV",
+      pdfValue: currentNav.value,
+      pdfSourcePage: currentNav.sourcePage,
+      pdfSourceExcerpt: currentNav.sourceExcerpt,
+      structuredValue: structured.snapshot.currentNav,
+      structuredSource: structured.snapshot.source,
+    }),
+  ];
+
+  const generatedAt = new Date().toISOString();
+  const sidecarPath = `${
+    financial.sidecarPath
+  }.ventiq-reconciliation.json`;
+
+  const sidecar: FinancialReconciliationSidecar = {
+    version: "A7.7-4A",
+    generatedAt,
+    reconciliationStatus: "candidate",
+    documentId: row.id,
+    fundName,
+    investorId: row.matched_investor_id,
+    investorCode: row.investor_code || "",
+    investorName: row.investor_name || "",
+    periodLabel: row.period_label || "",
+    pdfCandidateSidecarPath: financial.sidecarPath,
+    sourcePdfPath: row.storage_path || "",
+    canonicalWrite: false,
+    rows,
+  };
+
+  const { error: sidecarError } = await supabaseAdmin.storage
+    .from(financial.sidecarBucket)
+    .upload(
+      sidecarPath,
+      Buffer.from(JSON.stringify(sidecar, null, 2), "utf8"),
+      {
+        contentType: "application/json; charset=utf-8",
+        cacheControl: "0",
+        upsert: true,
+      }
+    );
+
+  if (sidecarError) {
+    throw new Error(
+      `Unable to retain private reconciliation sidecar: ${sidecarError.message}`
+    );
+  }
+
+  const manifest: FinancialReconciliationManifest = {
+    version: "A7.7-4A",
+    generatedAt,
+    reconciliationStatus: "candidate",
+    sidecarBucket: financial.sidecarBucket,
+    sidecarPath,
+    rowCount: rows.length,
+    matchedCount: rows.filter((candidate) => candidate.status === "MATCHED")
+      .length,
+    conflictCount: rows.filter((candidate) => candidate.status === "CONFLICT")
+      .length,
+    pdfOnlyCount: rows.filter((candidate) => candidate.status === "PDF-ONLY")
+      .length,
+    excelOnlyCount: rows.filter(
+      (candidate) => candidate.status === "EXCEL-ONLY"
+    ).length,
+    rows,
+    canonicalWrite: false,
+  };
+
+  const updatedSignals = [
+    ...withoutReconciliationSignal(signals),
+    `A7.7-4A field reconciliation completed`,
+    `A7.7-4A MATCHED: ${manifest.matchedCount}`,
+    `A7.7-4A CONFLICT: ${manifest.conflictCount}`,
+    `A7.7-4A PDF-ONLY: ${manifest.pdfOnlyCount}`,
+    `A7.7-4A EXCEL-ONLY: ${manifest.excelOnlyCount}`,
+    `A7.7-4A canonical write: false`,
+    `${RECONCILIATION_PREFIX}${JSON.stringify(manifest)}`,
+  ];
+
+  const { error: updateError } = await supabaseAdmin
+    .from("pdf_intelligence_documents")
+    .update({
+      match_signals: updatedSignals,
+      updated_at: generatedAt,
+    })
+    .eq("id", row.id)
+    .eq("fund_name", fundName);
+
+  if (updateError) {
+    throw new Error(
+      `Unable to persist reconciliation metadata: ${updateError.message}`
+    );
+  }
+
+  return {
+    id: row.id,
+    fileName: row.original_file_name || "Unknown PDF",
+    rowCount: manifest.rowCount,
+    matchedCount: manifest.matchedCount,
+    conflictCount: manifest.conflictCount,
+    pdfOnlyCount: manifest.pdfOnlyCount,
+    excelOnlyCount: manifest.excelOnlyCount,
+    sidecarPath,
+  };
+}
+
 function getOcrModel() {
   return normalizeText(process.env.VENTIQ_OCR_MODEL, 120) || DEFAULT_OCR_MODEL;
 }
@@ -2181,6 +2620,7 @@ function apiDocument(
   const evidence = getEvidenceManifest(signals);
   const ocr = getOcrManifest(signals);
   const financialCandidates = getFinancialManifest(signals);
+  const reconciliation = getReconciliationManifest(signals);
   const period = detectPeriod("", row.period_label || "");
 
   return {
@@ -2207,12 +2647,15 @@ function apiDocument(
         : "Review",
     storageBucket: row.storage_bucket || "",
     storagePath: row.storage_path || "",
-    signals: withoutFinancialSignal(
-      withoutOcrSignal(withoutEvidenceSignal(signals))
+    signals: withoutReconciliationSignal(
+      withoutFinancialSignal(
+        withoutOcrSignal(withoutEvidenceSignal(signals))
+      )
     ),
     textPreview: row.extracted_text_preview || "",
     ocr,
     financialCandidates,
+    reconciliation,
     evidence: evidence ?? {
       version: "A7.7-2",
       totalPages: 0,
@@ -2714,6 +3157,94 @@ async function handleFinancialExtraction(
   });
 }
 
+async function handleFinancialReconciliation(
+  actor: GovernedFundActor,
+  access: GovernedFundOption,
+  fundName: string,
+  body: Record<string, unknown>
+) {
+  requireManageAccess(access);
+
+  const batch = await loadLatestBatch(fundName);
+
+  if (!batch?.id) {
+    return noStoreJson(
+      { error: "No PDF Intelligence batch exists for this fund." },
+      404
+    );
+  }
+
+  const batchId = String(batch.id);
+  const documents = await loadBatchDocuments(batchId, fundName);
+
+  const requestedIds = Array.isArray(body.documentIds)
+    ? body.documentIds
+        .map((value) => normalizeText(value, 100))
+        .filter(Boolean)
+    : [];
+
+  const candidates = documents.filter((document) => {
+    const signals = parseSignals(document.match_signals);
+    const financial = getFinancialManifest(signals);
+
+    if (!financial || !document.matched_investor_id) return false;
+
+    return requestedIds.length === 0 || requestedIds.includes(document.id);
+  });
+
+  if (candidates.length === 0) {
+    return noStoreJson({
+      message: "No PDF financial candidates are available for reconciliation.",
+      batchId,
+      processedCount: 0,
+      failedCount: 0,
+      failures: [],
+    });
+  }
+
+  if (candidates.length > MAX_RECONCILIATION_DOCUMENTS_PER_REQUEST) {
+    return noStoreJson(
+      {
+        error: `Reconcile at most ${MAX_RECONCILIATION_DOCUMENTS_PER_REQUEST} PDFs per request.`,
+      },
+      400
+    );
+  }
+
+  const processed: Array<Record<string, unknown>> = [];
+  const failed: Array<{ id: string; fileName: string; error: string }> = [];
+
+  for (const document of candidates) {
+    try {
+      processed.push(
+        await reconcileFinancialCandidates(document, fundName)
+      );
+    } catch (error) {
+      failed.push({
+        id: document.id,
+        fileName: document.original_file_name || "Unknown PDF",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Financial reconciliation failed.",
+      });
+    }
+  }
+
+  return noStoreJson({
+    message: `A7.7-4A reconciled ${processed.length} PDF candidate record(s) for ${fundName}.`,
+    batchId,
+    processedCount: processed.length,
+    failedCount: failed.length,
+    processed,
+    failures: failed,
+    actor: {
+      userId: actor.userId,
+      role: access.role,
+    },
+  });
+}
+
 async function handleReview(
   actor: GovernedFundActor,
   access: GovernedFundOption,
@@ -2983,6 +3514,8 @@ export async function GET(request: NextRequest) {
           ocrRequired: 0,
           ocrCompleted: 0,
           financialCandidateDocuments: 0,
+          reconciledDocuments: 0,
+          reconciliationConflicts: 0,
           published: 0,
         },
       });
@@ -3021,6 +3554,14 @@ export async function GET(request: NextRequest) {
         financialCandidateDocuments: apiDocuments.filter(
           (document) => Boolean(document.financialCandidates)
         ).length,
+        reconciledDocuments: apiDocuments.filter(
+          (document) => Boolean(document.reconciliation)
+        ).length,
+        reconciliationConflicts: apiDocuments.reduce(
+          (sum, document) =>
+            sum + Number(document.reconciliation?.conflictCount || 0),
+          0
+        ),
         published: apiDocuments.filter((document) => document.published).length,
       },
     });
@@ -3063,6 +3604,15 @@ export async function POST(request: NextRequest) {
 
     if (action === "extract_financial_candidates") {
       return handleFinancialExtraction(actor, access, fundName, body);
+    }
+
+    if (action === "reconcile_financial_candidates") {
+      return handleFinancialReconciliation(
+        actor,
+        access,
+        fundName,
+        body
+      );
     }
 
     if (action === "review") {

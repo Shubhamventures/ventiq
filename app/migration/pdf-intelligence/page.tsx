@@ -113,6 +113,52 @@ type FinancialCandidateManifest = {
   canonicalWrite: false;
 };
 
+type ReconciliationStatus =
+  | "MATCHED"
+  | "CONFLICT"
+  | "PDF-ONLY"
+  | "EXCEL-ONLY";
+
+type StructuredEvidenceRef = {
+  table: "fund_commitments" | "investor_position_snapshots";
+  recordId: string;
+  field: string;
+  updatedAt: string;
+  reportingDate: string;
+  approvalStatus: string;
+};
+
+type FinancialReconciliationRow = {
+  key: string;
+  label: string;
+  valueType: "money";
+  currency: string;
+  pdfValue: number | null;
+  pdfSourcePage: number | null;
+  pdfSourceExcerpt: string;
+  structuredValue: number | null;
+  structuredSource: StructuredEvidenceRef | null;
+  status: ReconciliationStatus;
+  difference: number | null;
+  resolutionStatus: "unresolved";
+  canonicalValue: null;
+};
+
+type FinancialReconciliationManifest = {
+  version: string;
+  generatedAt: string;
+  reconciliationStatus: "candidate";
+  sidecarBucket: string;
+  sidecarPath: string;
+  rowCount: number;
+  matchedCount: number;
+  conflictCount: number;
+  pdfOnlyCount: number;
+  excelOnlyCount: number;
+  rows: FinancialReconciliationRow[];
+  canonicalWrite: false;
+};
+
 type PdfDocument = {
   id: string;
   batchId: string;
@@ -135,6 +181,7 @@ type PdfDocument = {
   textPreview: string;
   ocr: OcrManifest | null;
   financialCandidates: FinancialCandidateManifest | null;
+  reconciliation: FinancialReconciliationManifest | null;
   evidence: EvidenceManifest;
   extractionPending: boolean;
   published: boolean;
@@ -169,6 +216,8 @@ type WorkspaceResult = {
     ocrRequired: number;
     ocrCompleted: number;
     financialCandidateDocuments: number;
+    reconciledDocuments: number;
+    reconciliationConflicts: number;
     published: number;
   };
 };
@@ -290,6 +339,7 @@ export default function PdfIntelligencePage() {
   const [processing, setProcessing] = useState(false);
   const [ocrProcessing, setOcrProcessing] = useState(false);
   const [financialExtracting, setFinancialExtracting] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [message, setMessage] = useState("");
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
@@ -334,6 +384,14 @@ export default function PdfIntelligencePage() {
       financialCandidateDocuments: documents.filter(
         (document) => Boolean(document.financialCandidates)
       ).length,
+      reconciledDocuments: documents.filter(
+        (document) => Boolean(document.reconciliation)
+      ).length,
+      reconciliationConflicts: documents.reduce(
+        (sum, document) =>
+          sum + Number(document.reconciliation?.conflictCount || 0),
+        0
+      ),
       published: documents.filter((document) => document.published).length,
     };
   }, [documents]);
@@ -929,6 +987,103 @@ export default function PdfIntelligencePage() {
     }
   }
 
+  async function runFieldReconciliation() {
+    if (!canManage) {
+      setMessage(
+        "Read-only access: only an authorised Fund Admin or Maker can run reconciliation."
+      );
+      return;
+    }
+
+    const targetIds = documents
+      .filter(
+        (document) =>
+          Boolean(document.financialCandidates) &&
+          Boolean(document.investorId)
+      )
+      .map((document) => document.id);
+
+    if (targetIds.length === 0) {
+      setMessage(
+        "No structured PDF financial candidates are available for reconciliation."
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Run field-level Structured / Excel ↔ PDF reconciliation for ${targetIds.length} PDF(s) in ${activeFundName}?\n\nVENTIQ will compare candidate PDF values with existing structured evidence and classify each field as MATCHED, CONFLICT, PDF-ONLY or EXCEL-ONLY. No canonical value will be changed.`
+    );
+
+    if (!confirmed) return;
+
+    setReconciling(true);
+
+    try {
+      let processedCount = 0;
+      let failedCount = 0;
+      const failureMessages: string[] = [];
+
+      for (let index = 0; index < targetIds.length; index += 6) {
+        const documentIds = targetIds.slice(index, index + 6);
+
+        setMessage(
+          `Reconciling PDF financial candidates ${Math.min(
+            index + documentIds.length,
+            targetIds.length
+          )}/${targetIds.length}...`
+        );
+
+        const result = await apiRequest(
+          {
+            action: "reconcile_financial_candidates",
+            fundName: activeFundName,
+            documentIds,
+          },
+          { quiet: true }
+        );
+
+        processedCount += Number(result.processedCount || 0);
+        failedCount += Number(result.failedCount || 0);
+
+        if (Array.isArray(result.failures)) {
+          for (const failure of result.failures) {
+            const fileName =
+              typeof failure?.fileName === "string"
+                ? failure.fileName
+                : "PDF";
+            const failureText =
+              typeof failure?.error === "string"
+                ? failure.error
+                : "Unknown reconciliation error";
+            failureMessages.push(`${fileName}: ${failureText}`);
+          }
+        }
+      }
+
+      await loadWorkspace(activeFundName);
+
+      if (failureMessages.length > 0) {
+        setMessage(
+          `A7.7-4A reconciliation finished. ${processedCount} PDF(s) processed; ${failedCount} failed. ${failureMessages
+            .slice(0, 2)
+            .join(" | ")}`
+        );
+      } else {
+        setMessage(
+          `A7.7-4A reconciliation finished. ${processedCount} PDF(s) processed. No canonical value was changed.`
+        );
+      }
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to run PDF financial reconciliation."
+      );
+    } finally {
+      setReconciling(false);
+    }
+  }
+
   async function saveReview(document: PdfDocument) {
     if (!canManage) {
       setMessage(
@@ -1114,6 +1269,14 @@ export default function PdfIntelligencePage() {
             <p>Financial candidate PDFs</p>
           </div>
           <div className="impact-card">
+            <h3>{summary.reconciledDocuments}</h3>
+            <p>Reconciled PDFs</p>
+          </div>
+          <div className="impact-card">
+            <h3>{summary.reconciliationConflicts}</h3>
+            <p>Field conflicts</p>
+          </div>
+          <div className="impact-card">
             <h3>{summary.published}</h3>
             <p>Portal published</p>
           </div>
@@ -1165,6 +1328,7 @@ export default function PdfIntelligencePage() {
                 processing ||
                 ocrProcessing ||
                 financialExtracting ||
+                reconciling ||
                 loadingWorkspace
               }
               onClick={reprocessLatestBatch}
@@ -1212,6 +1376,24 @@ export default function PdfIntelligencePage() {
               {financialExtracting
                 ? "Extracting candidates..."
                 : "Extract Financial Candidates"}
+            </button>
+
+            <button
+              className="monitor-btn monitor-btn-primary"
+              disabled={
+                !batch ||
+                !canManage ||
+                processing ||
+                ocrProcessing ||
+                financialExtracting ||
+                reconciling ||
+                loadingWorkspace ||
+                summary.financialCandidateDocuments === 0
+              }
+              onClick={runFieldReconciliation}
+              type="button"
+            >
+              {reconciling ? "Reconciling..." : "Run Reconciliation"}
             </button>
 
             <Link
@@ -1506,6 +1688,158 @@ export default function PdfIntelligencePage() {
                             )}
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+
+        <div className="preview-card">
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">A7.7-4A · Structured / Excel ↔ PDF</p>
+              <h2>Field-level reconciliation</h2>
+            </div>
+
+            <span className="status-pill">
+              {summary.reconciliationConflicts} conflict(s)
+            </span>
+          </div>
+
+          <div className="explain-box">
+            VENTIQ compares PDF candidate evidence with the existing structured
+            Fund Memory inputs for the same investor. Commitment, called,
+            uncalled and distributions come from fund_commitments. Current NAV
+            is compared only when a reporting-date investor snapshot exists.
+            Every source record remains visible and no canonical value is
+            changed in A7.7-4A.
+          </div>
+
+          {documents.filter((document) => document.reconciliation).length ===
+          0 ? (
+            <div className="logic-note">
+              No field-level reconciliation has been run for the latest batch.
+              Extract PDF financial candidates first, then click Run
+              Reconciliation.
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 18 }}>
+              {documents
+                .filter((document) => document.reconciliation)
+                .map((document) => {
+                  const reconciliation = document.reconciliation!;
+
+                  return (
+                    <div
+                      className="queue-item"
+                      key={`${document.id}-reconciliation`}
+                    >
+                      <div className="section-heading-row">
+                        <div>
+                          <strong>{document.fileName}</strong>
+                          <br />
+                          <small>
+                            {document.investorCode} · {document.periodLabel}
+                          </small>
+                        </div>
+
+                        <span className="status-pill">
+                          Candidate reconciliation · no canonical write
+                        </span>
+                      </div>
+
+                      <div className="dashboard-grid">
+                        <div className="dashboard-card">
+                          <strong>{reconciliation.matchedCount}</strong>
+                          <p>MATCHED</p>
+                        </div>
+                        <div className="dashboard-card">
+                          <strong>{reconciliation.conflictCount}</strong>
+                          <p>CONFLICT</p>
+                        </div>
+                        <div className="dashboard-card">
+                          <strong>{reconciliation.pdfOnlyCount}</strong>
+                          <p>PDF-ONLY</p>
+                        </div>
+                        <div className="dashboard-card">
+                          <strong>{reconciliation.excelOnlyCount}</strong>
+                          <p>EXCEL-ONLY</p>
+                        </div>
+                      </div>
+
+                      <div className="table-wrap" style={{ marginTop: 14 }}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Field</th>
+                              <th>Structured / Excel evidence</th>
+                              <th>PDF evidence</th>
+                              <th>Difference</th>
+                              <th>Status</th>
+                              <th>Provenance</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {reconciliation.rows.map((row) => (
+                              <tr key={`${document.id}-${row.key}`}>
+                                <td>
+                                  <strong>{row.label}</strong>
+                                  <br />
+                                  <small>{row.key}</small>
+                                </td>
+                                <td>
+                                  {row.structuredValue === null
+                                    ? "—"
+                                    : formatCandidateAmount(
+                                        row.structuredValue,
+                                        row.currency
+                                      )}
+                                </td>
+                                <td>
+                                  {row.pdfValue === null
+                                    ? "—"
+                                    : formatCandidateAmount(
+                                        row.pdfValue,
+                                        row.currency
+                                      )}
+                                </td>
+                                <td>
+                                  {row.difference === null
+                                    ? "—"
+                                    : formatCandidateAmount(
+                                        row.difference,
+                                        row.currency
+                                      )}
+                                </td>
+                                <td>
+                                  <strong>{row.status}</strong>
+                                </td>
+                                <td>
+                                  {row.structuredSource ? (
+                                    <>
+                                      {row.structuredSource.table}.
+                                      {row.structuredSource.field}
+                                      <br />
+                                      <small>
+                                        {row.structuredSource.recordId}
+                                      </small>
+                                    </>
+                                  ) : (
+                                    "No structured source"
+                                  )}
+                                  <br />
+                                  <small>
+                                    {row.pdfSourcePage
+                                      ? `PDF page ${row.pdfSourcePage}`
+                                      : "No PDF source"}
+                                  </small>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   );
@@ -1859,8 +2193,8 @@ export default function PdfIntelligencePage() {
         </div>
 
         <div className="preview-card">
-          <p className="eyebrow">Next · A7.7-4</p>
-          <h2>Excel ↔ PDF reconciliation</h2>
+          <p className="eyebrow">Next · A7.7-5</p>
+          <h2>Fund inconsistency review & human resolution</h2>
 
           <div className="queue-grid">
             <div className="queue-item">
