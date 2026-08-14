@@ -31,6 +31,7 @@ type EvidenceManifest = {
     | "embedded_text"
     | "mixed_text_visual_review"
     | "ocr_required"
+    | "ocr_completed"
     | "page_limit_review"
     | "pending";
   ocrRequiredPages: number[];
@@ -42,6 +43,22 @@ type EvidenceManifest = {
   }>;
   quarter: string;
   financialYear: string;
+};
+
+type OcrManifest = {
+  version: string;
+  provider: string;
+  model: string;
+  completedAt: string;
+  sidecarBucket: string;
+  sidecarPath: string;
+  totalCharacters: number;
+  pages: Array<{
+    pageNumber: number;
+    characterCount: number;
+    legibility: "clear" | "partial" | "unreadable";
+    notes: string[];
+  }>;
 };
 
 type PdfDocument = {
@@ -64,6 +81,7 @@ type PdfDocument = {
   storagePath: string;
   signals: string[];
   textPreview: string;
+  ocr: OcrManifest | null;
   evidence: EvidenceManifest;
   extractionPending: boolean;
   published: boolean;
@@ -96,6 +114,7 @@ type WorkspaceResult = {
     unmatched: number;
     extractionPending: number;
     ocrRequired: number;
+    ocrCompleted: number;
     published: number;
   };
 };
@@ -147,6 +166,10 @@ function extractionLabel(document: PdfDocument) {
     return "Mixed / visual review";
   }
 
+  if (document.evidence.extractionMode === "ocr_completed") {
+    return "OCR completed · review required";
+  }
+
   if (document.evidence.extractionMode === "page_limit_review") {
     return "Page-limit review";
   }
@@ -191,6 +214,7 @@ export default function PdfIntelligencePage() {
   const [documents, setDocuments] = useState<PdfDocument[]>([]);
   const [loadingWorkspace, setLoadingWorkspace] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [ocrProcessing, setOcrProcessing] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [message, setMessage] = useState("");
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
@@ -228,6 +252,9 @@ export default function PdfIntelligencePage() {
         .length,
       ocrRequired: documents.filter(
         (document) => document.evidence.extractionMode === "ocr_required"
+      ).length,
+      ocrCompleted: documents.filter(
+        (document) => document.evidence.extractionMode === "ocr_completed"
       ).length,
       published: documents.filter((document) => document.published).length,
     };
@@ -541,7 +568,12 @@ export default function PdfIntelligencePage() {
           ? documents
               .filter((document) => document.extractionPending)
               .map((document) => document.id)
-          : documents.map((document) => document.id);
+          : documents
+              .filter(
+                (document) =>
+                  document.evidence.extractionMode !== "ocr_completed"
+              )
+              .map((document) => document.id);
 
       if (targetIds.length === 0) {
         setMessage("No PDFs are available in the latest batch.");
@@ -611,6 +643,100 @@ export default function PdfIntelligencePage() {
       );
     } finally {
       setProcessing(false);
+    }
+  }
+
+  async function runOcrForScannedPages() {
+    if (!canManage) {
+      setMessage(
+        "Read-only access: only an authorised Fund Admin or Maker can run OCR."
+      );
+      return;
+    }
+
+    const targetIds = documents
+      .filter(
+        (document) =>
+          !document.published &&
+          document.evidence.extractionMode === "ocr_required" &&
+          document.evidence.ocrRequiredPages.length > 0
+      )
+      .map((document) => document.id);
+
+    if (targetIds.length === 0) {
+      setMessage("No OCR-required PDF pages are available in the latest batch.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Run OCR for ${targetIds.length} scanned PDF(s) in ${activeFundName}?\n\nOnly pages already flagged as OCR-required are rendered and sent to the configured OCR provider. OCR results remain in Review and are not written into Canonical Fund Memory.`
+    );
+
+    if (!confirmed) return;
+
+    setOcrProcessing(true);
+
+    try {
+      let processedCount = 0;
+      let failedCount = 0;
+      const failureMessages: string[] = [];
+
+      // One document at a time keeps image payloads, cost and error scope bounded.
+      for (let index = 0; index < targetIds.length; index += 1) {
+        const documentId = targetIds[index];
+
+        setMessage(
+          `Running governed OCR ${index + 1}/${targetIds.length}...`
+        );
+
+        const result = await apiRequest(
+          {
+            action: "run_ocr",
+            fundName: activeFundName,
+            documentIds: [documentId],
+          },
+          { quiet: true }
+        );
+
+        processedCount += Number(result.processedCount || 0);
+        failedCount += Number(result.failedCount || 0);
+
+        if (Array.isArray(result.failures)) {
+          for (const failure of result.failures) {
+            const fileName =
+              typeof failure?.fileName === "string"
+                ? failure.fileName
+                : "PDF";
+            const failureText =
+              typeof failure?.error === "string"
+                ? failure.error
+                : "Unknown OCR error";
+            failureMessages.push(`${fileName}: ${failureText}`);
+          }
+        }
+      }
+
+      await loadWorkspace(activeFundName);
+
+      if (failureMessages.length > 0) {
+        setMessage(
+          `A7.7-2K OCR finished. ${processedCount} PDF(s) processed; ${failedCount} failed. ${failureMessages
+            .slice(0, 2)
+            .join(" | ")}`
+        );
+      } else {
+        setMessage(
+          `A7.7-2K OCR finished. ${processedCount} PDF(s) processed. Results remain in Review until human confirmation.`
+        );
+      }
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to run governed PDF OCR."
+      );
+    } finally {
+      setOcrProcessing(false);
     }
   }
 
@@ -700,12 +826,12 @@ export default function PdfIntelligencePage() {
       <section className="app-shell">
         <div className="app-header">
           <div>
-            <p className="eyebrow">VENTIQ PDF Intelligence · A7.7-2</p>
+            <p className="eyebrow">VENTIQ PDF Intelligence · A7.7-2K</p>
             <h1>Historical PDF Evidence Processing</h1>
             <p>
               Process the active fund&apos;s migration PDFs on the server, preserve
               page-level extraction evidence, classify investor documents and route
-              uncertain or scanned records into controlled review.
+              uncertain or scanned records into controlled review, with page-specific OCR for scans.
             </p>
           </div>
 
@@ -716,7 +842,7 @@ export default function PdfIntelligencePage() {
 
         <div className="sample-data-ribbon">
           Governed active fund · Private PDF storage · Server-side extraction ·
-          Investor / quarter / nature classification
+          Page-specific OCR · Investor / quarter / nature classification
         </div>
 
         <div className="preview-card">
@@ -791,6 +917,10 @@ export default function PdfIntelligencePage() {
             <p>OCR required</p>
           </div>
           <div className="impact-card">
+            <h3>{summary.ocrCompleted}</h3>
+            <p>OCR completed / review</p>
+          </div>
+          <div className="impact-card">
             <h3>{summary.published}</h3>
             <p>Portal published</p>
           </div>
@@ -821,8 +951,9 @@ export default function PdfIntelligencePage() {
             migration batch. This workspace downloads those private files on the
             server, reads the complete document up to the controlled page safety
             limit, records page evidence, detects scanned / low-text documents,
-            classifies nature and period, and matches investors from this fund only.
-            Financial values are not written into Canonical Fund Memory in A7.7-2.
+            and can render only OCR-required pages for governed OCR. OCR evidence
+            is retained privately and stays in Review. Financial values are not
+            written into Canonical Fund Memory in A7.7-2K.
           </div>
 
           <div className="action-row">
@@ -835,7 +966,13 @@ export default function PdfIntelligencePage() {
 
             <button
               className="monitor-btn monitor-btn-primary"
-              disabled={!batch || !canManage || processing || loadingWorkspace}
+              disabled={
+                !batch ||
+                !canManage ||
+                processing ||
+                ocrProcessing ||
+                loadingWorkspace
+              }
               onClick={reprocessLatestBatch}
               type="button"
             >
@@ -844,6 +981,24 @@ export default function PdfIntelligencePage() {
                 : summary.extractionPending > 0
                   ? "Process Latest PDF Batch"
                   : "Reprocess Latest PDF Batch"}
+            </button>
+
+            <button
+              className="monitor-btn monitor-btn-primary"
+              disabled={
+                !batch ||
+                !canManage ||
+                processing ||
+                ocrProcessing ||
+                loadingWorkspace ||
+                summary.ocrRequired === 0
+              }
+              onClick={runOcrForScannedPages}
+              type="button"
+            >
+              {ocrProcessing
+                ? "Running OCR..."
+                : `Run OCR (${summary.ocrRequired})`}
             </button>
 
             <Link
@@ -954,6 +1109,19 @@ export default function PdfIntelligencePage() {
                             </small>
                           </>
                         )}
+                        {document.ocr && (
+                          <>
+                            <br />
+                            <small>
+                              OCR page(s):{" "}
+                              {document.ocr.pages
+                                .map((page) => page.pageNumber)
+                                .join(", ")}
+                              {" · "}
+                              {document.ocr.model}
+                            </small>
+                          </>
+                        )}
                       </td>
                       <td>{document.confidenceScore}%</td>
                       <td>{statusTone(document.status)}</td>
@@ -979,8 +1147,8 @@ export default function PdfIntelligencePage() {
           <div className="explain-box">
             Low-confidence, unmatched, scanned and period-missing PDFs stay out of
             auto-ready status. Correct the investor, nature and period here. OCR
-            candidate pages remain visible as evidence signals for the next OCR
-            provider pass.
+            candidate pages can be processed with governed OCR. OCR-completed
+            documents still remain in Review until a human confirms the evidence.
           </div>
 
           {reviewQueue.length === 0 ? (
@@ -1011,6 +1179,40 @@ export default function PdfIntelligencePage() {
                       <div className="logic-note">
                         OCR / visual review candidate page(s):{" "}
                         {document.evidence.ocrRequiredPages.join(", ")}
+                      </div>
+                    )}
+
+
+                    {document.ocr && (
+                      <div className="logic-note">
+                        <strong>
+                          OCR completed · human confirmation required
+                        </strong>
+                        <br />
+                        Page(s):{" "}
+                        {document.ocr.pages
+                          .map((page) => page.pageNumber)
+                          .join(", ")}
+                        {" · "}
+                        Model: {document.ocr.model}
+                        {" · "}
+                        Private sidecar retained
+                        {document.textPreview && (
+                          <details style={{ marginTop: 10 }}>
+                            <summary>Review extracted OCR text</summary>
+                            <pre
+                              style={{
+                                marginTop: 10,
+                                maxHeight: 280,
+                                overflow: "auto",
+                                whiteSpace: "pre-wrap",
+                                wordBreak: "break-word",
+                              }}
+                            >
+                              {document.textPreview}
+                            </pre>
+                          </details>
+                        )}
                       </div>
                     )}
 
