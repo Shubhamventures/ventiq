@@ -13,6 +13,28 @@ type PerformanceCalculationResponse = {
   error?: string;
 };
 
+type ComplianceWorkflowActor = {
+  userId: string;
+  email: string;
+  fullName: string;
+  role: string;
+};
+
+type ComplianceWorkflowCapabilities = {
+  canView: boolean;
+  canAct: boolean;
+};
+
+type ComplianceWorkflowResponse = {
+  actor?: ComplianceWorkflowActor | null;
+  capabilities?: ComplianceWorkflowCapabilities;
+  auditLogs?: DataRow[];
+  updatedItem?: DataRow | null;
+  message?: string;
+  changed?: boolean;
+  error?: string;
+};
+
 type ComplianceActivityEvent = {
   id: string;
   time: string;
@@ -181,6 +203,154 @@ export default function ComplianceAIPage() {
 
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+
+  // A8-2B: governed Compliance Operating Workspace action state.
+  const [workflowActor, setWorkflowActor] =
+    useState<ComplianceWorkflowActor | null>(null);
+  const [workflowCapabilities, setWorkflowCapabilities] =
+    useState<ComplianceWorkflowCapabilities>({ canView: false, canAct: false });
+  const [workflowAuditLogs, setWorkflowAuditLogs] = useState<DataRow[]>([]);
+  const [selectedComplianceId, setSelectedComplianceId] = useState("");
+  const [ownerDraft, setOwnerDraft] = useState("");
+  const [reviewNote, setReviewNote] = useState("");
+  const [workflowSaving, setWorkflowSaving] = useState(false);
+  const [workflowMessage, setWorkflowMessage] = useState("");
+
+  async function loadComplianceWorkflow(sourceBatch: string, accessToken: string) {
+    try {
+      const response = await fetch(
+        `/api/compliance/workflow?fundName=${encodeURIComponent(
+          activeFundName
+        )}&sourceBatchId=${encodeURIComponent(sourceBatch)}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: "no-store",
+        }
+      );
+      const payload = (await response.json().catch(() => ({}))) as
+        ComplianceWorkflowResponse;
+
+      if (!response.ok) {
+        setWorkflowActor(null);
+        setWorkflowCapabilities({ canView: false, canAct: false });
+        setWorkflowAuditLogs([]);
+        setWorkflowMessage(
+          payload.error || "Compliance actions are temporarily unavailable."
+        );
+        return;
+      }
+
+      setWorkflowActor(payload.actor ?? null);
+      setWorkflowCapabilities(
+        payload.capabilities ?? { canView: true, canAct: false }
+      );
+      setWorkflowAuditLogs(payload.auditLogs ?? []);
+    } catch (error) {
+      setWorkflowActor(null);
+      setWorkflowCapabilities({ canView: false, canAct: false });
+      setWorkflowAuditLogs([]);
+      setWorkflowMessage(
+        error instanceof Error
+          ? error.message
+          : "Compliance actions are temporarily unavailable."
+      );
+    }
+  }
+
+  async function submitComplianceAction(
+    action: "start_review" | "assign_owner" | "request_evidence" | "add_review_note"
+  ) {
+    const selectedItem = complianceItems.find(
+      (row) => getId(row) === selectedComplianceId
+    );
+
+    if (!selectedItem) {
+      setWorkflowMessage("Select a compliance item before taking action.");
+      return;
+    }
+
+    if (!workflowCapabilities.canAct) {
+      setWorkflowMessage(
+        "Read-only access: Compliance Team or Fund Admin edit access is required."
+      );
+      return;
+    }
+
+    const sourceBatchIds = latestCalculationRun?.source_batch_ids;
+    const sourceBatch = Array.isArray(sourceBatchIds)
+      ? String(sourceBatchIds[0] ?? "")
+      : "";
+    const accessToken = session?.access_token ?? "";
+
+    if (!sourceBatch || !accessToken) {
+      setWorkflowMessage(
+        "Verified source-batch context and an authenticated session are required."
+      );
+      return;
+    }
+
+    if (action === "assign_owner" && !ownerDraft.trim()) {
+      setWorkflowMessage("Enter an owner before assigning this compliance item.");
+      return;
+    }
+
+    if (action === "add_review_note" && !reviewNote.trim()) {
+      setWorkflowMessage("Enter a review note before saving it.");
+      return;
+    }
+
+    setWorkflowSaving(true);
+    setWorkflowMessage("");
+
+    try {
+      const response = await fetch("/api/compliance/workflow", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action,
+          fundName: activeFundName,
+          sourceBatchId: sourceBatch,
+          complianceItemId: getId(selectedItem),
+          owner: ownerDraft.trim(),
+          note: reviewNote.trim(),
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as
+        ComplianceWorkflowResponse;
+
+      if (!response.ok) {
+        throw new Error(
+          payload.error || "Unable to update the compliance workflow."
+        );
+      }
+
+      setWorkflowMessage(
+        payload.message || "Compliance workflow action recorded."
+      );
+
+      if (action === "assign_owner") {
+        setOwnerDraft("");
+      }
+
+      if (action === "request_evidence" || action === "add_review_note") {
+        setReviewNote("");
+      }
+
+      await loadComplianceWorkspace();
+    } catch (error) {
+      setWorkflowMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to update the compliance workflow."
+      );
+    } finally {
+      setWorkflowSaving(false);
+    }
+  }
 
   async function loadComplianceWorkspace() {
     if (!isFundContextReady) return;
@@ -469,6 +639,10 @@ export default function ComplianceAIPage() {
             }
           : null
       );
+
+      // A8-2B: workflow capability/audit retrieval is server governed and
+      // intentionally separate from the existing browser read model.
+      await loadComplianceWorkflow(sourceBatch, accessToken);
     } catch (error) {
       const message =
         error instanceof Error
@@ -704,6 +878,45 @@ export default function ComplianceAIPage() {
       .slice(0, 8);
   }, [complianceItems]);
 
+  const actionableComplianceItems = useMemo(() => {
+    return complianceItems.filter(isOpenComplianceStatus).sort((a, b) => {
+      const aRisk = getString(a, ["risk_level"], "").toLowerCase() === "high" ? 0 : 1;
+      const bRisk = getString(b, ["risk_level"], "").toLowerCase() === "high" ? 0 : 1;
+
+      if (aRisk !== bRisk) return aRisk - bRisk;
+
+      const aDue = Date.parse(getString(a, ["due_date"], ""));
+      const bDue = Date.parse(getString(b, ["due_date"], ""));
+      return (Number.isFinite(aDue) ? aDue : Number.MAX_SAFE_INTEGER) -
+        (Number.isFinite(bDue) ? bDue : Number.MAX_SAFE_INTEGER);
+    });
+  }, [complianceItems]);
+
+  const selectedComplianceItem = useMemo(
+    () =>
+      complianceItems.find((row) => getId(row) === selectedComplianceId) ??
+      null,
+    [complianceItems, selectedComplianceId]
+  );
+
+  useEffect(() => {
+    if (
+      selectedComplianceId &&
+      complianceItems.some((row) => getId(row) === selectedComplianceId)
+    ) {
+      return;
+    }
+
+    setSelectedComplianceId(getId(actionableComplianceItems[0]));
+  }, [actionableComplianceItems, complianceItems, selectedComplianceId]);
+
+  useEffect(() => {
+    setSelectedComplianceId("");
+    setOwnerDraft("");
+    setReviewNote("");
+    setWorkflowMessage("");
+  }, [activeFundName]);
+
   const complianceActivityEvents = useMemo(() => {
     const events: ComplianceActivityEvent[] = [];
 
@@ -777,13 +990,34 @@ export default function ComplianceAIPage() {
       });
     });
 
+    workflowAuditLogs.slice(0, 12).forEach((row) => {
+      events.push({
+        id: `governed-compliance-${getId(row)}`,
+        time: getString(row, ["created_at"], ""),
+        module: "Compliance Operating Workspace",
+        title: getString(row, ["event_title"], "Compliance action recorded"),
+        description: getString(
+          row,
+          ["event_description"],
+          "Governed compliance workflow action recorded."
+        ),
+        status: getString(row, ["event_type", "event_status"], "audit"),
+      });
+    });
+
     return events.sort((a, b) => {
       const aTime = new Date(a.time || 0).getTime();
       const bTime = new Date(b.time || 0).getTime();
 
       return bTime - aTime;
     });
-  }, [latestComplianceBatch, latestPdfBatch, complianceItems, regulatoryMatches]);
+  }, [
+    latestComplianceBatch,
+    latestPdfBatch,
+    complianceItems,
+    regulatoryMatches,
+    workflowAuditLogs,
+  ]);
 
   const complianceActions = useMemo(() => {
     return [
@@ -833,10 +1067,10 @@ export default function ComplianceAIPage() {
         <div className="app-header">
           <div>
             <p className="eyebrow">VENTIQ AI Operating System</p>
-            <h1>Compliance Officer Workspace</h1>
+            <h1>Compliance Operating Workspace</h1>
             <p>
-              Live compliance control tower connected to migrated regulatory,
-              tax, audit, valuation, trustee, PDF evidence and fund data.
+              Live compliance control tower where verified obligations become
+              governed owner actions, evidence requests and auditable reviews.
             </p>
           </div>
 
@@ -1114,6 +1348,216 @@ export default function ComplianceAIPage() {
               </div>
             </div>
 
+            <div className="preview-card compliance-action-workspace">
+              <div className="section-heading-row">
+                <div>
+                  <p className="eyebrow">A8-2 · Governed Operating Layer</p>
+                  <h2>Compliance Action Queue</h2>
+                </div>
+                <span className="status-pill">
+                  {workflowActor
+                    ? `${workflowActor.fullName} · ${workflowActor.role}`
+                    : "Workflow access loading"}
+                </span>
+              </div>
+
+              <div className="logic-note">
+                Actions below update only the latest verified source-batch compliance
+                item through the server. Every mutation writes to the enterprise audit
+                log. Filed / Approved / Closed records cannot be changed here.
+              </div>
+
+              {workflowMessage && (
+                <div className="explain-box compliance-workflow-message">
+                  {workflowMessage}
+                </div>
+              )}
+
+              {actionableComplianceItems.length === 0 ? (
+                <div className="explain-box">
+                  No open compliance items are available for operational action.
+                </div>
+              ) : (
+                <div className="compliance-operating-grid">
+                  <div className="compliance-action-list">
+                    {actionableComplianceItems.slice(0, 12).map((row) => {
+                      const rowId = getId(row);
+                      const selected = rowId === selectedComplianceId;
+
+                      return (
+                        <button
+                          className={`compliance-action-item${
+                            selected ? " compliance-action-item-selected" : ""
+                          }`}
+                          key={`action-${rowId}`}
+                          onClick={() => {
+                            setSelectedComplianceId(rowId);
+                            setOwnerDraft(getString(row, ["owner"], ""));
+                            setReviewNote("");
+                            setWorkflowMessage("");
+                          }}
+                          type="button"
+                        >
+                          <span>
+                            {getRiskEmoji(
+                              getString(row, ["risk_level"], "Medium")
+                            )}{" "}
+                            <strong>
+                              {getString(
+                                row,
+                                ["document_name"],
+                                "Compliance item"
+                              )}
+                            </strong>
+                          </span>
+                          <small>
+                            {getString(row, ["authority"], "Authority")} ·{" "}
+                            {getDueLabel(row["due_date"])}
+                          </small>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="compliance-action-panel">
+                    {selectedComplianceItem ? (
+                      <>
+                        <div>
+                          <p className="eyebrow">Selected obligation</p>
+                          <h3>
+                            {getString(
+                              selectedComplianceItem,
+                              ["document_name"],
+                              "Compliance item"
+                            )}
+                          </h3>
+                          <p>
+                            {getString(
+                              selectedComplianceItem,
+                              ["authority"],
+                              "Authority not provided"
+                            )}{" "}
+                            · {getString(
+                              selectedComplianceItem,
+                              ["category"],
+                              "Category not provided"
+                            )}
+                          </p>
+                        </div>
+
+                        <div className="compliance-action-facts">
+                          <span>
+                            Status: {getString(
+                              selectedComplianceItem,
+                              ["filing_status"],
+                              "Review"
+                            )}
+                          </span>
+                          <span>
+                            Risk: {getString(
+                              selectedComplianceItem,
+                              ["risk_level"],
+                              "Medium"
+                            )}
+                          </span>
+                          <span>{getDueLabel(selectedComplianceItem["due_date"])}</span>
+                          <span>
+                            Evidence: {Boolean(
+                              selectedComplianceItem["evidence_available"]
+                            )
+                              ? "Available"
+                              : "Missing"}
+                          </span>
+                        </div>
+
+                        <div className="action-row">
+                          <button
+                            className="monitor-btn monitor-btn-primary"
+                            disabled={workflowSaving || !workflowCapabilities.canAct}
+                            onClick={() => void submitComplianceAction("start_review")}
+                            type="button"
+                          >
+                            Start Review
+                          </button>
+                          <button
+                            className="monitor-btn monitor-btn-secondary"
+                            disabled={workflowSaving || !workflowCapabilities.canAct}
+                            onClick={() =>
+                              void submitComplianceAction("request_evidence")
+                            }
+                            type="button"
+                          >
+                            Request Evidence
+                          </button>
+                        </div>
+
+                        <div className="compliance-form-grid">
+                          <label>
+                            <span>Owner</span>
+                            <input
+                              onChange={(event) => setOwnerDraft(event.target.value)}
+                              placeholder={getString(
+                                selectedComplianceItem,
+                                ["owner"],
+                                "Assign owner"
+                              )}
+                              value={ownerDraft}
+                            />
+                          </label>
+                          <button
+                            className="monitor-btn monitor-btn-secondary"
+                            disabled={workflowSaving || !workflowCapabilities.canAct}
+                            onClick={() => void submitComplianceAction("assign_owner")}
+                            type="button"
+                          >
+                            Assign Owner
+                          </button>
+                        </div>
+
+                        <label className="compliance-review-note">
+                          <span>Review / evidence note</span>
+                          <textarea
+                            onChange={(event) => setReviewNote(event.target.value)}
+                            placeholder="Record the review conclusion, evidence requested, or follow-up required."
+                            rows={4}
+                            value={reviewNote}
+                          />
+                        </label>
+
+                        <div className="action-row">
+                          <button
+                            className="monitor-btn monitor-btn-secondary"
+                            disabled={workflowSaving || !workflowCapabilities.canAct}
+                            onClick={() =>
+                              void submitComplianceAction("add_review_note")
+                            }
+                            type="button"
+                          >
+                            {workflowSaving ? "Recording..." : "Add Governed Note"}
+                          </button>
+                          <a
+                            className="monitor-btn monitor-btn-secondary"
+                            href="/admin/audit-workflow"
+                          >
+                            Open Approval Queue
+                          </a>
+                        </div>
+
+                        {!workflowCapabilities.canAct && (
+                          <div className="explain-box">
+                            Read-only mode. Compliance Team or Fund Admin edit access
+                            is required for operational actions.
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="explain-box">Select an obligation to act.</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="preview-card">
               <h2>Compliance Priority Radar</h2>
 
@@ -1259,13 +1703,12 @@ export default function ComplianceAIPage() {
             </div>
 
             <div className="preview-card">
-              <h2>Live Compliance Activity Feed</h2>
+              <h2>Governed Compliance Activity Feed</h2>
 
               {complianceActivityEvents.length === 0 && (
                 <div className="explain-box">
-                  No compliance activity found yet. Publish compliance data,
-                  process PDF evidence or approve regulatory items to activate
-                  the compliance activity trail.
+                  No compliance activity found yet. Operational actions, PDF
+                  evidence processing and regulatory reviews will appear here.
                 </div>
               )}
 
@@ -1313,8 +1756,8 @@ export default function ComplianceAIPage() {
                 <div className="queue-item">Evidence Availability Checked</div>
                 <div className="queue-item">PDF Evidence Reviewed</div>
                 <div className="queue-item">Due Dates Tracked</div>
-                <div className="queue-item">Owner Accountability Assigned</div>
-                <div className="queue-item">High-Risk Items Escalated</div>
+                <div className="queue-item">Owner Accountability Actioned</div>
+                <div className="queue-item">Evidence / Review Actions Audited</div>
                 <div className="queue-item">Tax / Audit / SEBI Items Mapped</div>
                 <div className="queue-item">Finance Workspace Updated</div>
                 <div className="queue-item">Managing Partner View Updated</div>
@@ -1378,6 +1821,117 @@ export default function ComplianceAIPage() {
           border-color: rgba(59, 130, 246, 0.45);
         }
 
+        .compliance-action-workspace {
+          display: grid;
+          gap: 18px;
+        }
+
+        .compliance-workflow-message {
+          margin: 0;
+        }
+
+        .compliance-operating-grid {
+          display: grid;
+          grid-template-columns: minmax(260px, 0.75fr) minmax(0, 1.25fr);
+          gap: 18px;
+          align-items: start;
+        }
+
+        .compliance-action-list {
+          display: grid;
+          gap: 10px;
+          max-height: 540px;
+          overflow: auto;
+          padding-right: 4px;
+        }
+
+        .compliance-action-item {
+          width: 100%;
+          display: grid;
+          gap: 6px;
+          text-align: left;
+          border: 1px solid rgba(148, 163, 184, 0.24);
+          border-radius: 14px;
+          padding: 13px 14px;
+          background: rgba(15, 23, 42, 0.45);
+          color: inherit;
+          font: inherit;
+          cursor: pointer;
+        }
+
+        .compliance-action-item:hover,
+        .compliance-action-item-selected {
+          border-color: rgba(59, 130, 246, 0.65);
+          background: rgba(30, 64, 175, 0.16);
+        }
+
+        .compliance-action-item small {
+          color: rgba(226, 232, 240, 0.72);
+          line-height: 1.45;
+        }
+
+        .compliance-action-panel {
+          display: grid;
+          gap: 16px;
+          border: 1px solid rgba(148, 163, 184, 0.24);
+          border-radius: 16px;
+          padding: 18px;
+          background: rgba(15, 23, 42, 0.36);
+        }
+
+        .compliance-action-panel h3 {
+          margin: 2px 0 6px;
+        }
+
+        .compliance-action-panel p {
+          margin: 0;
+        }
+
+        .compliance-action-facts {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .compliance-action-facts span {
+          border: 1px solid rgba(148, 163, 184, 0.24);
+          border-radius: 999px;
+          padding: 6px 10px;
+          font-size: 0.78rem;
+        }
+
+        .compliance-form-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 10px;
+          align-items: end;
+        }
+
+        .compliance-form-grid label,
+        .compliance-review-note {
+          display: grid;
+          gap: 7px;
+          font-size: 0.82rem;
+          font-weight: 800;
+        }
+
+        .compliance-form-grid input,
+        .compliance-review-note textarea {
+          width: 100%;
+          border: 1px solid rgba(148, 163, 184, 0.35);
+          border-radius: 12px;
+          padding: 11px 12px;
+          background: rgba(15, 23, 42, 0.72);
+          color: inherit;
+          font: inherit;
+          box-sizing: border-box;
+        }
+
+        .compliance-review-note textarea {
+          resize: vertical;
+          min-height: 96px;
+        }
+
         @media (max-width: 860px) {
           .compliance-fund-context {
             grid-template-columns: 1fr;
@@ -1389,6 +1943,18 @@ export default function ComplianceAIPage() {
 
           .compliance-fund-switcher select {
             min-height: 48px;
+          }
+
+          .compliance-operating-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .compliance-action-list {
+            max-height: 360px;
+          }
+
+          .compliance-form-grid {
+            grid-template-columns: 1fr;
           }
         }
       `}</style>
