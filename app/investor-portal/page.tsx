@@ -1,9 +1,12 @@
 "use client";
 
+// A7.7-7B2: current-baseline governed Fund → Investor → FY → Quarter → Nature archive.
+
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
 import { useVentiqAuth } from "../../lib/auth/AuthProvider";
+import type { GovernedDocumentHierarchy } from "../../lib/documentHierarchy";
 
 type Investor = {
   id: string;
@@ -69,6 +72,7 @@ type InvestorDocument = {
   created_at?: string | null;
   download_ready?: boolean;
   canonical?: boolean;
+  hierarchy?: GovernedDocumentHierarchy;
 };
 
 type InvestorDocumentsApiResponse = {
@@ -2085,6 +2089,52 @@ const displayedManagementFee = financialPosition
   ];
 }, [documents, isInvestorRole]);
 
+  const governedDocumentHierarchy = useMemo(() => {
+    const hierarchyRows = documents
+      .filter((documentRecord) => Boolean(documentRecord.hierarchy))
+      .map((documentRecord) => ({
+        document: documentRecord,
+        hierarchy: documentRecord.hierarchy as GovernedDocumentHierarchy,
+      }));
+
+    const financialYears = Array.from(
+      new Set(hierarchyRows.map((row) => row.hierarchy.financialYear))
+    ).sort((left, right) => right.localeCompare(left));
+
+    return financialYears.map((financialYear) => {
+      const yearRows = hierarchyRows.filter(
+        (row) => row.hierarchy.financialYear === financialYear
+      );
+
+      const quarters = Array.from(
+        new Set(yearRows.map((row) => row.hierarchy.quarter))
+      ).sort((left, right) => left.localeCompare(right));
+
+      return {
+        financialYear,
+        quarters: quarters.map((quarter) => {
+          const quarterRows = yearRows.filter(
+            (row) => row.hierarchy.quarter === quarter
+          );
+
+          const natures = Array.from(
+            new Set(quarterRows.map((row) => row.hierarchy.nature))
+          ).sort((left, right) => left.localeCompare(right));
+
+          return {
+            quarter,
+            natures: natures.map((nature) => ({
+              nature,
+              documents: quarterRows
+                .filter((row) => row.hierarchy.nature === nature)
+                .map((row) => row.document),
+            })),
+          };
+        }),
+      };
+    });
+  }, [documents]);
+
   const investorActivityEvents = useMemo(() => {
     const events: PortalActivityEvent[] = [];
 
@@ -2874,6 +2924,92 @@ const displayedManagementFee = financialPosition
                   {documentAccessMessage && (
                     <div className="explain-box" style={{ marginBottom: "14px" }}>
                       {documentAccessMessage}
+                    </div>
+                  )}
+
+                  <div className="explain-box" style={{ marginBottom: "14px" }}>
+                    <strong>A7.7-7 · Governed document hierarchy</strong>
+                    <br />
+                    Documents are organised virtually as Fund → Investor → FY →
+                    Quarter → Nature. The underlying private files are not moved or
+                    duplicated, and all document access continues through the
+                    existing governed server endpoints.
+                  </div>
+
+                  {governedDocumentHierarchy.length > 0 && (
+                    <div
+                      style={{
+                        display: "grid",
+                        gap: 14,
+                        marginBottom: 18,
+                      }}
+                    >
+                      <div className="journal-preview">
+                        <div className="journal-row">
+                          <span>Fund</span>
+                          <strong>{activeFundName}</strong>
+                        </div>
+                        <div className="journal-row">
+                          <span>Investor</span>
+                          <strong>
+                            {selectedInvestor?.investor_code || "-"} ·{" "}
+                            {selectedInvestor?.name || "Investor"}
+                          </strong>
+                        </div>
+                        <div className="journal-row">
+                          <span>Archive path</span>
+                          <strong>
+                            Fund → Investor → FY → Quarter → Nature
+                          </strong>
+                        </div>
+                      </div>
+
+                      {governedDocumentHierarchy.map((yearGroup) => (
+                        <div
+                          className="form-card"
+                          key={yearGroup.financialYear}
+                        >
+                          <div className="section-heading-row">
+                            <div>
+                              <p className="eyebrow">Financial Year</p>
+                              <h3>{yearGroup.financialYear}</h3>
+                            </div>
+                            <span className="small-pill">
+                              {yearGroup.quarters.reduce(
+                                (count, quarter) =>
+                                  count +
+                                  quarter.natures.reduce(
+                                    (natureCount, nature) =>
+                                      natureCount + nature.documents.length,
+                                    0
+                                  ),
+                                0
+                              )}{" "}
+                              document(s)
+                            </span>
+                          </div>
+
+                          <div className="queue-grid">
+                            {yearGroup.quarters.map((quarterGroup) => (
+                              <div
+                                className="queue-item"
+                                key={`${yearGroup.financialYear}-${quarterGroup.quarter}`}
+                              >
+                                <strong>{quarterGroup.quarter}</strong>
+                                <br />
+                                <span>
+                                  {quarterGroup.natures
+                                    .map(
+                                      (nature) =>
+                                        `${nature.nature} (${nature.documents.length})`
+                                    )
+                                    .join(" · ")}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
 

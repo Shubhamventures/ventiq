@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { resolveGovernedDocumentHierarchy } from "../../../../lib/documentHierarchy";
 
 export const runtime = "nodejs";
+
+// A7.7-7B2: attach governed document hierarchy only after investor entitlement filtering.
 export const dynamic = "force-dynamic";
 
 const MODULE_KEY = "investor_documents_portal";
@@ -445,6 +448,17 @@ export async function GET(request: NextRequest) {
         created_at: normalizeText(row.created_at, 100) || null,
         download_ready: Boolean(storageBucket && storagePath),
         canonical,
+        hierarchy: resolveGovernedDocumentHierarchy({
+          fundName,
+          investorCode: row.investor_code,
+          investorName:
+            row.investor_name || investorRecord.investor_name,
+          periodLabel,
+          documentType: row.document_type,
+          documentCategory: row.document_category,
+          documentName: row.document_name,
+          fileName: row.file_name,
+        }),
       };
     });
 

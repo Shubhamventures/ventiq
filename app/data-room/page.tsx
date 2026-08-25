@@ -1,9 +1,12 @@
 "use client";
 
+// A7.7-7B2: current-baseline governed Fund → Investor → FY → Quarter → Nature archive.
+
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
 import { useVentiqAuth } from "../../lib/auth/AuthProvider";
+import type { GovernedDocumentHierarchy } from "../../lib/documentHierarchy";
 
 const DEFAULT_FUND_NAME = "VENTIQ Growth Fund II";
 
@@ -36,6 +39,7 @@ type DataRoomDocument = {
   created_by_email: string | null;
   imported_at: string;
   updated_at: string;
+  hierarchy?: GovernedDocumentHierarchy | null;
 };
 
 type SourceBatch = {
@@ -833,6 +837,82 @@ export default function DataRoomPage() {
     });
   }, [documents, folderFilter, accessFilter, searchText]);
 
+  const governedHierarchy = useMemo(() => {
+    const grouped = new Map<
+      string,
+      {
+        investorCode: string;
+        investorName: string;
+        years: Map<
+          string,
+          Map<string, Map<string, DataRoomDocument[]>>
+        >;
+      }
+    >();
+
+    documents.forEach((document) => {
+      const hierarchy = document.hierarchy;
+      if (!hierarchy) return;
+
+      const investorKey = `${hierarchy.investorCode}::${hierarchy.investorName}`;
+
+      if (!grouped.has(investorKey)) {
+        grouped.set(investorKey, {
+          investorCode: hierarchy.investorCode,
+          investorName: hierarchy.investorName,
+          years: new Map(),
+        });
+      }
+
+      const investorGroup = grouped.get(investorKey)!;
+
+      if (!investorGroup.years.has(hierarchy.financialYear)) {
+        investorGroup.years.set(hierarchy.financialYear, new Map());
+      }
+
+      const yearGroup = investorGroup.years.get(
+        hierarchy.financialYear
+      )!;
+
+      if (!yearGroup.has(hierarchy.quarter)) {
+        yearGroup.set(hierarchy.quarter, new Map());
+      }
+
+      const quarterGroup = yearGroup.get(hierarchy.quarter)!;
+
+      if (!quarterGroup.has(hierarchy.nature)) {
+        quarterGroup.set(hierarchy.nature, []);
+      }
+
+      quarterGroup.get(hierarchy.nature)!.push(document);
+    });
+
+    return Array.from(grouped.values())
+      .sort((left, right) =>
+        left.investorCode.localeCompare(right.investorCode)
+      )
+      .map((investorGroup) => ({
+        investorCode: investorGroup.investorCode,
+        investorName: investorGroup.investorName,
+        years: Array.from(investorGroup.years.entries())
+          .sort(([left], [right]) => right.localeCompare(left))
+          .map(([financialYear, quarters]) => ({
+            financialYear,
+            quarters: Array.from(quarters.entries())
+              .sort(([left], [right]) => left.localeCompare(right))
+              .map(([quarter, natures]) => ({
+                quarter,
+                natures: Array.from(natures.entries())
+                  .sort(([left], [right]) => left.localeCompare(right))
+                  .map(([nature, natureDocuments]) => ({
+                    nature,
+                    documents: natureDocuments,
+                  })),
+              })),
+          })),
+      }));
+  }, [documents]);
+
   const investorMap = useMemo(() => {
     return new Map(
       investors.map((investor) => [
@@ -1398,6 +1478,72 @@ export default function DataRoomPage() {
                     No documents are currently shared with this investor
                     account. Internal-only and other-investor documents remain
                     unavailable.
+                  </div>
+                )}
+
+                {governedHierarchy.length > 0 && (
+                  <div
+                    style={{
+                      display: "grid",
+                      gap: 14,
+                      marginTop: 16,
+                      marginBottom: 18,
+                    }}
+                  >
+                    <div className="explain-box">
+                      <strong>A7.7-7 · Governed document hierarchy</strong>
+                      <br />
+                      Fund → Investor → FY → Quarter → Nature. Periodic
+                      documents use governed period metadata where available.
+                      Genuinely non-periodic diligence material remains visible
+                      under FY not assigned → General / Non-periodic rather than
+                      receiving an invented date.
+                    </div>
+
+                    {governedHierarchy.map((investorGroup) => (
+                      <div
+                        className="form-card"
+                        key={`investor-hierarchy-${investorGroup.investorCode}-${investorGroup.investorName}`}
+                      >
+                        <div className="section-heading-row">
+                          <div>
+                            <p className="eyebrow">{activeFundName}</p>
+                            <h3>
+                              {investorGroup.investorCode} ·{" "}
+                              {investorGroup.investorName}
+                            </h3>
+                          </div>
+                          <span className="small-pill">
+                            Governed virtual archive
+                          </span>
+                        </div>
+
+                        <div className="queue-grid">
+                          {investorGroup.years.flatMap((yearGroup) =>
+                            yearGroup.quarters.map((quarterGroup) => (
+                              <div
+                                className="queue-item"
+                                key={`investor-${investorGroup.investorCode}-${yearGroup.financialYear}-${quarterGroup.quarter}`}
+                              >
+                                <strong>
+                                  {yearGroup.financialYear} →{" "}
+                                  {quarterGroup.quarter}
+                                </strong>
+                                <br />
+                                <span>
+                                  {quarterGroup.natures
+                                    .map(
+                                      (nature) =>
+                                        `${nature.nature} (${nature.documents.length})`
+                                    )
+                                    .join(" · ")}
+                                </span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
 
@@ -2095,6 +2241,66 @@ export default function DataRoomPage() {
                   Refresh Library
                 </button>
               </div>
+
+              {governedHierarchy.length > 0 && (
+                <div
+                  style={{
+                    display: "grid",
+                    gap: 14,
+                    marginBottom: 18,
+                  }}
+                >
+                  <div className="explain-box">
+                    <strong>Governed virtual archive</strong>
+                    <br />
+                    {activeFundName} → Investor → FY → Quarter → Nature.
+                    Storage objects remain at their existing private paths; this
+                    view is metadata organisation only.
+                  </div>
+
+                  {governedHierarchy.map((investorGroup) => (
+                    <div
+                      className="form-card"
+                      key={`internal-hierarchy-${investorGroup.investorCode}-${investorGroup.investorName}`}
+                    >
+                      <div className="section-heading-row">
+                        <div>
+                          <p className="eyebrow">Investor</p>
+                          <h3>
+                            {investorGroup.investorCode} ·{" "}
+                            {investorGroup.investorName}
+                          </h3>
+                        </div>
+                      </div>
+
+                      <div className="queue-grid">
+                        {investorGroup.years.flatMap((yearGroup) =>
+                          yearGroup.quarters.map((quarterGroup) => (
+                            <div
+                              className="queue-item"
+                              key={`internal-${investorGroup.investorCode}-${yearGroup.financialYear}-${quarterGroup.quarter}`}
+                            >
+                              <strong>
+                                {yearGroup.financialYear} →{" "}
+                                {quarterGroup.quarter}
+                              </strong>
+                              <br />
+                              <span>
+                                {quarterGroup.natures
+                                  .map(
+                                    (nature) =>
+                                      `${nature.nature} (${nature.documents.length})`
+                                  )
+                                  .join(" · ")}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <div
                 className="form-card"

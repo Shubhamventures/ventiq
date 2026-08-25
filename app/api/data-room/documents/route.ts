@@ -1,8 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { resolveGovernedDocumentHierarchy } from "../../../../lib/documentHierarchy";
 
 export const runtime = "nodejs";
+
+// A7.7-7B2: enrich only already-authorised Data Room records; storage paths remain unchanged.
 export const dynamic = "force-dynamic";
 
 const STORAGE_BUCKET = "ventiq-data-room";
@@ -345,6 +348,12 @@ function sanitizeDocumentForInvestor(
     imported_at: normalizeText(document.imported_at),
     updated_at: normalizeText(document.updated_at),
     download_ready: Boolean(normalizeText(document.storage_path)),
+    hierarchy:
+      document.hierarchy &&
+      typeof document.hierarchy === "object" &&
+      !Array.isArray(document.hierarchy)
+        ? document.hierarchy
+        : null,
   };
 }
 
@@ -627,6 +636,24 @@ async function resolveSourceBatch(
 const DATA_ROOM_DOCUMENT_SELECT =
   "id,fund_name,source_batch_id,investor_code,investor_name,document_name,file_name,detected_type,suggested_folder,access_level,storage_bucket,storage_path,file_size,mime_type,document_status,ddq_impact,metadata,uploaded_by,created_by_email,imported_at,updated_at" as const;
 
+function withGovernedHierarchy(
+  document: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    ...document,
+    hierarchy: resolveGovernedDocumentHierarchy({
+      fundName: document.fund_name,
+      investorCode: document.investor_code,
+      investorName: document.investor_name,
+      detectedType: document.detected_type,
+      suggestedFolder: document.suggested_folder,
+      documentName: document.document_name,
+      fileName: document.file_name,
+      metadata: document.metadata,
+    }),
+  };
+}
+
 export async function GET(request: NextRequest) {
   const supabase = getSupabaseAdmin();
 
@@ -729,12 +756,14 @@ export async function GET(request: NextRequest) {
         );
       }
 
+      const enrichedDocument = withGovernedHierarchy(documentRecord);
+
       return NextResponse.json(
         {
           document:
             user.role === "investor"
-              ? sanitizeDocumentForInvestor(documentRecord)
-              : documentRecord,
+              ? sanitizeDocumentForInvestor(enrichedDocument)
+              : enrichedDocument,
           signedUrl: signedData.signedUrl,
           expiresInSeconds: SIGNED_URL_SECONDS,
           sourceBatch,
@@ -833,10 +862,14 @@ export async function GET(request: NextRequest) {
         : [];
     }
 
+    const enrichedDocuments = documents.map(withGovernedHierarchy);
+
     const releasedDocuments =
       user.role === "investor"
-        ? documents.map((document) => sanitizeDocumentForInvestor(document))
-        : documents;
+        ? enrichedDocuments.map((document) =>
+            sanitizeDocumentForInvestor(document)
+          )
+        : enrichedDocuments;
 
     return NextResponse.json(
       {
@@ -1079,7 +1112,7 @@ export async function POST(request: NextRequest) {
         sourceBatch,
         uploadedCount: uploadedDocuments.length,
         failedCount: failedDocuments.length,
-        documents: uploadedDocuments,
+        documents: uploadedDocuments.map(withGovernedHierarchy),
         failures: failedDocuments,
       },
       { status }
