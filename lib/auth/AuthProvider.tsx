@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -128,7 +129,9 @@ export function AuthProvider({
 
   const [accessError, setAccessError] = useState("");
 
-  const clearAccessState = useCallback(() => {
+
+  const accessUserIdRef = useRef("");
+const clearAccessState = useCallback(() => {
     setProfile(null);
     setMemberships([]);
     setFundAccess([]);
@@ -310,12 +313,15 @@ export function AuthProvider({
       setSession(initialSession ?? null);
 
       if (initialSession?.user?.id) {
-        await loadUserAccess(
-          initialSession.user.id
-        );
-      } else {
-        clearAccessState();
-      }
+          await loadUserAccess(
+            initialSession.user.id
+          );
+          accessUserIdRef.current =
+            initialSession.user.id;
+        } else {
+          clearAccessState();
+          accessUserIdRef.current = "";
+        }
 
       if (mounted) {
         setLoading(false);
@@ -327,18 +333,39 @@ export function AuthProvider({
     const {
       data: { subscription },
     } = authClient.auth.onAuthStateChange(
-      (_event, nextSession) => {
+      (event, nextSession) => {
         setSession(nextSession ?? null);
+
+        const nextUserId =
+          nextSession?.user?.id ?? "";
+        const accessAlreadyLoaded =
+          Boolean(nextUserId) &&
+          accessUserIdRef.current === nextUserId;
+
+        // Supabase can rotate a JWT or emit SIGNED_IN again when a
+        // browser tab regains focus. Those events must update the
+        // session token without blanking/remounting the private app or
+        // reloading unchanged governed profile/fund permissions.
+        if (
+          event === "TOKEN_REFRESHED" ||
+          ((event === "SIGNED_IN" ||
+            event === "INITIAL_SESSION") &&
+            accessAlreadyLoaded)
+        ) {
+          return;
+        }
+
         setLoading(true);
 
         window.setTimeout(() => {
           void (async () => {
-            if (nextSession?.user?.id) {
-              await loadUserAccess(
-                nextSession.user.id
-              );
+            if (nextUserId) {
+              await loadUserAccess(nextUserId);
+              accessUserIdRef.current =
+                nextUserId;
             } else {
               clearAccessState();
+              accessUserIdRef.current = "";
             }
 
             if (mounted) {

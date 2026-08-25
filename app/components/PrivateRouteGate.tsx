@@ -44,7 +44,7 @@ export default function PrivateRouteGate({
   const { loading, session } = useVentiqAuth();
 
   const [perimeterReady, setPerimeterReady] = useState(false);
-  const lastTokenRef = useRef("");
+  const lastUserIdRef = useRef("");
 
   const publicRoute = useMemo(
     () => isPublicPath(pathname || "/"),
@@ -66,6 +66,7 @@ export default function PrivateRouteGate({
 
     if (!session?.access_token) {
       setPerimeterReady(false);
+      lastUserIdRef.current = "";
 
       void fetch("/api/auth/perimeter", {
         method: "DELETE",
@@ -81,7 +82,7 @@ export default function PrivateRouteGate({
 
     if (
       perimeterReady &&
-      lastTokenRef.current === session.access_token
+      lastUserIdRef.current === session.user.id
     ) {
       return;
     }
@@ -113,7 +114,7 @@ export default function PrivateRouteGate({
           return;
         }
 
-        lastTokenRef.current = session.access_token;
+        lastUserIdRef.current = session.user.id;
         setPerimeterReady(true);
       } catch {
         if (!cancelled) {
