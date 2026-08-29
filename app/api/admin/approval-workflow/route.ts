@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+﻿import { randomUUID } from "node:crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -64,6 +64,7 @@ const LINKED_RECORD_TYPES = new Set([
   "Covenant Breach",
   "Security Tracker",
   "Fund Memory Snapshot",
+  "Compliance Item",
 ]);
 
 const ACTION_TYPES = new Set([
@@ -78,6 +79,7 @@ const ACTION_TYPES = new Set([
   "Distribution Approval",
   "Data Deletion Approval",
   "Fund Memory Approval",
+  "Compliance Item Approval",
 ]);
 
 const PRIORITIES = new Set(["Low", "Medium", "High", "Critical"]);
@@ -222,6 +224,24 @@ function authErrorResponse(error: unknown) {
   return null;
 }
 
+function approvalDomainErrorResponse(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (
+    message === "You do not have access to this Compliance fund." ||
+    message === "You do not have edit access for this Compliance fund." ||
+    message === "You do not have approval access for this Compliance fund."
+  ) {
+    return NextResponse.json({ error: message }, { status: 403 });
+  }
+
+  if (message === "Compliance item not found.") {
+    return NextResponse.json({ error: message }, { status: 404 });
+  }
+
+  return null;
+}
+
 type CapitalCallApprovalSnapshot = {
   capitalCallId: string;
   previousCallStatus: string;
@@ -324,6 +344,139 @@ async function getFundMemorySnapshotWithAccess(
     snapshot: snapshot as Record<string, unknown>,
     fundName,
   };
+}
+
+type ComplianceItemApprovalSnapshot = {
+  complianceItemId: string;
+  previousFilingStatus: string | null;
+  previousRemarks: string | null;
+};
+
+function isComplianceItemApprovalRecord(approval: Record<string, unknown>) {
+  return (
+    normalizeText(approval.source_module, 100) === "Compliance AI" &&
+    normalizeText(approval.linked_record_type, 100) === "Compliance Item" &&
+    normalizeText(approval.action_type, 100) === "Compliance Item Approval"
+  );
+}
+
+async function getComplianceItemWithAccess(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  complianceItemId: string,
+  requiredAccess: "view" | "edit" | "approve"
+) {
+  const { data: item, error: itemError } = await supabase
+    .from("compliance_items")
+    .select("*")
+    .eq("id", complianceItemId)
+    .maybeSingle();
+
+  if (itemError) {
+    throw new Error(`Unable to load compliance item: ${itemError.message}`);
+  }
+
+  if (!item) {
+    throw new Error("Compliance item not found.");
+  }
+
+  const fundName = normalizeText(item.fund_name, 240);
+  if (!fundName) {
+    throw new Error("Compliance item fund could not be resolved.");
+  }
+
+  let accessQuery = supabase
+    .from("ventiq_user_fund_access")
+    .select("id, can_view, can_edit, can_approve, status")
+    .eq("organisation_id", user.organisationId)
+    .eq("user_id", user.userId)
+    .eq("fund_name", fundName)
+    .eq("status", "Active");
+
+  if (requiredAccess === "approve") {
+    accessQuery = accessQuery.eq("can_approve", true);
+  } else if (requiredAccess === "edit") {
+    accessQuery = accessQuery.eq("can_edit", true);
+  } else {
+    accessQuery = accessQuery.eq("can_view", true);
+  }
+
+  const { data: access, error: accessError } = await accessQuery.maybeSingle();
+
+  if (accessError) {
+    throw new Error(`Unable to verify Compliance fund access: ${accessError.message}`);
+  }
+
+  if (!access) {
+    throw new Error(
+      requiredAccess === "approve"
+        ? "You do not have approval access for this Compliance fund."
+        : requiredAccess === "edit"
+        ? "You do not have edit access for this Compliance fund."
+        : "You do not have access to this Compliance fund."
+    );
+  }
+
+  return {
+    item: item as Record<string, unknown>,
+    fundName,
+  };
+}
+
+async function applyComplianceItemDecision(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  complianceItemId: string,
+  approved: boolean
+): Promise<ComplianceItemApprovalSnapshot> {
+  const { item } = await getComplianceItemWithAccess(
+    supabase,
+    user,
+    complianceItemId,
+    "approve"
+  );
+
+  const previousFilingStatus =
+    typeof item.filing_status === "string" ? item.filing_status : null;
+  const previousRemarks = typeof item.remarks === "string" ? item.remarks : null;
+  const now = new Date().toISOString();
+  const decisionNote = approved
+    ? `[${now}] Approved through VENTIQ maker-checker workflow by ${user.fullName}.`
+    : `[${now}] Rejected through VENTIQ maker-checker workflow by ${user.fullName}; returned to Review.`;
+  const remarks = previousRemarks
+    ? `${previousRemarks}\n${decisionNote}`.slice(0, 4000)
+    : decisionNote;
+
+  const { error } = await supabase
+    .from("compliance_items")
+    .update({
+      filing_status: approved ? "Approved" : "Review",
+      remarks,
+    })
+    .eq("id", complianceItemId);
+
+  if (error) {
+    throw new Error(`Unable to apply Compliance approval decision: ${error.message}`);
+  }
+
+  return {
+    complianceItemId,
+    previousFilingStatus,
+    previousRemarks,
+  };
+}
+
+async function rollbackComplianceItemDecision(
+  supabase: SupabaseAdmin,
+  snapshot: ComplianceItemApprovalSnapshot
+) {
+  await supabase
+    .from("compliance_items")
+    .update({
+      filing_status: snapshot.previousFilingStatus,
+      remarks: snapshot.previousRemarks,
+    })
+    .eq("id", snapshot.complianceItemId);
 }
 
 async function getCapitalCallWithAccess(
@@ -763,13 +916,6 @@ async function createRequest(
   user: AuthorisedUser,
   body: Record<string, unknown>
 ) {
-  if (!CREATE_ROLES.has(user.role)) {
-    return NextResponse.json(
-      { error: "Only Fund Admin or Maker roles can create approval requests." },
-      { status: 403 }
-    );
-  }
-
   const sourceModule = normalizeText(body.sourceModule, 100);
   const linkedRecordType = normalizeText(body.linkedRecordType, 100);
   const actionType = normalizeText(body.actionType, 100);
@@ -777,6 +923,25 @@ async function createRequest(
   const actionDescription = normalizeText(body.actionDescription, 4000);
   const businessImpact = normalizeText(body.businessImpact, 4000);
   const priority = normalizeText(body.priority, 40);
+
+  const canCreateRequest =
+    CREATE_ROLES.has(user.role) ||
+    (
+      user.role === "compliance_team" &&
+      sourceModule === "Compliance AI" &&
+      linkedRecordType === "Compliance Item" &&
+      actionType === "Compliance Item Approval"
+    );
+
+  if (!canCreateRequest) {
+    return NextResponse.json(
+      {
+        error:
+          "Only Fund Admin or Maker roles can create approval requests. Compliance Team may create Compliance AI approval requests.",
+      },
+      { status: 403 }
+    );
+  }
 
   if (!SOURCE_MODULES.has(sourceModule)) {
     return NextResponse.json({ error: "Invalid source module." }, { status: 400 });
@@ -802,7 +967,9 @@ async function createRequest(
 
   const requestedLinkedRecordId = normalizeText(body.linkedRecordId, 100);
   const requiresRealLinkedRecord =
-    actionType === "Capital Call Approval" || actionType === "Fund Memory Approval";
+    actionType === "Capital Call Approval" ||
+    actionType === "Fund Memory Approval" ||
+    actionType === "Compliance Item Approval";
   const linkedRecordId = requiresRealLinkedRecord
     ? requestedLinkedRecordId
     : randomUUID();
@@ -859,6 +1026,64 @@ async function createRequest(
     if (existingRequest) {
       return NextResponse.json(
         { error: "This capital call already has an approval request in progress." },
+        { status: 409 }
+      );
+    }
+  }
+
+  if (actionType === "Compliance Item Approval") {
+    if (sourceModule !== "Compliance AI" || linkedRecordType !== "Compliance Item") {
+      return NextResponse.json(
+        {
+          error:
+            "Compliance approvals must use the Compliance AI source and Compliance Item linked record type.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!linkedRecordId) {
+      return NextResponse.json(
+        { error: "Compliance approval requires the saved compliance item ID." },
+        { status: 400 }
+      );
+    }
+
+    const { item } = await getComplianceItemWithAccess(
+      supabase,
+      user,
+      linkedRecordId,
+      "edit"
+    );
+
+    const filingStatus = normalizeText(item.filing_status, 80).toLowerCase();
+    if (["filed", "completed", "closed", "approved", "resolved", "not applicable"].includes(filingStatus)) {
+      return NextResponse.json(
+        { error: "This Compliance item is already in a final status." },
+        { status: 409 }
+      );
+    }
+
+    const { data: existingRequest, error: existingRequestError } = await supabase
+      .from("ventiq_approval_requests")
+      .select("id, approval_status")
+      .eq("organisation_id", user.organisationId)
+      .eq("linked_record_id", linkedRecordId)
+      .eq("linked_record_type", "Compliance Item")
+      .eq("action_type", "Compliance Item Approval")
+      .in("approval_status", ["Pending Review", "Pending Approval"])
+      .limit(1)
+      .maybeSingle();
+
+    if (existingRequestError) {
+      throw new Error(
+        `Unable to check existing Compliance approval: ${existingRequestError.message}`
+      );
+    }
+
+    if (existingRequest) {
+      return NextResponse.json(
+        { error: "This Compliance item already has an approval request in progress." },
         { status: 409 }
       );
     }
@@ -1099,6 +1324,23 @@ async function decideRequest(
       );
     }
 
+    if (isComplianceItemApprovalRecord(approval as Record<string, unknown>)) {
+      const complianceItemId = normalizeText(approval.linked_record_id, 100);
+      if (!complianceItemId) {
+        return NextResponse.json(
+          { error: "Compliance approval is missing its linked Compliance item ID." },
+          { status: 409 }
+        );
+      }
+
+      await getComplianceItemWithAccess(
+        supabase,
+        user,
+        complianceItemId,
+        "view"
+      );
+    }
+
     if (isFundMemoryApprovalRecord(approval as Record<string, unknown>)) {
       const fundMemorySnapshotId = normalizeText(approval.linked_record_id, 100);
       if (!fundMemorySnapshotId) {
@@ -1177,6 +1419,22 @@ async function decideRequest(
       throw new Error(`Unable to update approval request: ${requestError.message}`);
     }
 
+    if (!isApproved && isComplianceItemApprovalRecord(approval as Record<string, unknown>)) {
+      const complianceItemId = normalizeText(approval.linked_record_id, 100);
+      if (complianceItemId) {
+        const { error: complianceRejectError } = await supabase
+          .from("compliance_items")
+          .update({ filing_status: "Review" })
+          .eq("id", complianceItemId);
+
+        if (complianceRejectError) {
+          throw new Error(
+            `Unable to return Compliance item to Review: ${complianceRejectError.message}`
+          );
+        }
+      }
+    }
+
     if (!isApproved) {
       await supabase
         .from("ventiq_approval_steps")
@@ -1223,6 +1481,13 @@ async function decideRequest(
       ? normalizeText(approval.linked_record_id, 100)
       : "";
 
+    const isComplianceItemApproval = isComplianceItemApprovalRecord(
+      approval as Record<string, unknown>
+    );
+    const complianceItemId = isComplianceItemApproval
+      ? normalizeText(approval.linked_record_id, 100)
+      : "";
+
     const isFundMemoryApproval = isFundMemoryApprovalRecord(
       approval as Record<string, unknown>
     );
@@ -1242,6 +1507,22 @@ async function decideRequest(
         supabase,
         user,
         capitalCallId,
+        "approve"
+      );
+    }
+
+    if (isComplianceItemApproval) {
+      if (!complianceItemId) {
+        return NextResponse.json(
+          { error: "Compliance approval is missing its linked Compliance item ID." },
+          { status: 409 }
+        );
+      }
+
+      await getComplianceItemWithAccess(
+        supabase,
+        user,
+        complianceItemId,
         "approve"
       );
     }
@@ -1314,6 +1595,7 @@ async function decideRequest(
     }
 
     let capitalCallSnapshot: CapitalCallApprovalSnapshot | null = null;
+    let complianceDecisionState: ComplianceItemApprovalSnapshot | null = null;
     let fundMemoryDecisionState: FundMemoryApprovalSnapshot | null = null;
 
     try {
@@ -1322,6 +1604,15 @@ async function decideRequest(
           supabase,
           user,
           capitalCallId
+        );
+      }
+
+      if (isComplianceItemApproval) {
+        complianceDecisionState = await applyComplianceItemDecision(
+          supabase,
+          user,
+          complianceItemId,
+          isApproved
         );
       }
 
@@ -1351,6 +1642,10 @@ async function decideRequest(
     } catch (error) {
       if (capitalCallSnapshot) {
         await rollbackCapitalCallApproval(supabase, capitalCallSnapshot);
+      }
+
+      if (complianceDecisionState) {
+        await rollbackComplianceItemDecision(supabase, complianceDecisionState);
       }
 
       if (fundMemoryDecisionState) {
@@ -1390,6 +1685,10 @@ async function decideRequest(
       message:
         isCapitalCallApproval && isApproved
           ? `Final approval completed by ${user.fullName}. Capital call and eligible LP allocations are now approved.`
+          : isComplianceItemApproval && isApproved
+          ? `Final approval completed by ${user.fullName}. Compliance item is now approved.`
+          : isComplianceItemApproval && !isApproved
+          ? `Compliance item rejected by ${user.fullName} and returned to Review.`
           : isFundMemoryApproval && isApproved
           ? `Final approval completed by ${user.fullName}. Canonical Fund Memory is now investor-statement eligible.`
           : isFundMemoryApproval && !isApproved
@@ -1435,6 +1734,9 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const authResponse = authErrorResponse(error);
     if (authResponse) return authResponse;
+
+    const domainResponse = approvalDomainErrorResponse(error);
+    if (domainResponse) return domainResponse;
 
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Approval workflow action failed." },

@@ -35,6 +35,12 @@ type ComplianceWorkflowResponse = {
   error?: string;
 };
 
+type ApprovalWorkflowResponse = {
+  message?: string;
+  approval?: DataRow | null;
+  error?: string;
+};
+
 type ComplianceActivityEvent = {
   id: string;
   time: string;
@@ -215,6 +221,7 @@ export default function ComplianceAIPage() {
   const [reviewNote, setReviewNote] = useState("");
   const [workflowSaving, setWorkflowSaving] = useState(false);
   const [workflowMessage, setWorkflowMessage] = useState("");
+  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
 
   async function loadComplianceWorkflow(sourceBatch: string, accessToken: string) {
     try {
@@ -255,6 +262,92 @@ export default function ComplianceAIPage() {
           ? error.message
           : "Compliance actions are temporarily unavailable."
       );
+    }
+  }
+
+  async function submitComplianceForApproval() {
+    const selectedItem = complianceItems.find(
+      (row) => getId(row) === selectedComplianceId
+    );
+
+    if (!selectedItem) {
+      setWorkflowMessage("Select a compliance item before submitting for approval.");
+      return;
+    }
+
+    if (!workflowCapabilities.canAct) {
+      setWorkflowMessage(
+        "Read-only access: Compliance Team or Fund Admin edit access is required."
+      );
+      return;
+    }
+
+    const accessToken = session?.access_token ?? "";
+    if (!accessToken) {
+      setWorkflowMessage("An authenticated session is required.");
+      return;
+    }
+
+    const itemId = getId(selectedItem);
+    const documentName = getString(
+      selectedItem,
+      ["document_name"],
+      "Compliance item"
+    );
+    const authority = getString(selectedItem, ["authority"], "Authority");
+    const risk = getString(selectedItem, ["risk_level"], "Medium");
+    const priority = ["Low", "Medium", "High", "Critical"].includes(risk)
+      ? risk
+      : risk.toLowerCase().includes("high")
+      ? "High"
+      : "Medium";
+
+    setApprovalSubmitting(true);
+    setWorkflowMessage("");
+
+    try {
+      const response = await fetch("/api/admin/approval-workflow", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "create_request",
+          sourceModule: "Compliance AI",
+          linkedRecordId: itemId,
+          linkedRecordType: "Compliance Item",
+          actionType: "Compliance Item Approval",
+          actionTitle: `Approve ${documentName}`,
+          actionDescription: `${documentName} (${authority}) is ready for governed maker-checker approval.`,
+          businessImpact:
+            "Approval records the governed Compliance disposition and preserves the enterprise audit trail.",
+          priority,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as
+        ApprovalWorkflowResponse;
+
+      if (!response.ok) {
+        throw new Error(
+          payload.error || "Unable to submit the Compliance item for approval."
+        );
+      }
+
+      setWorkflowMessage(
+        payload.message ||
+          "Compliance item submitted to the governed maker-checker approval queue."
+      );
+      await loadComplianceWorkspace();
+    } catch (error) {
+      setWorkflowMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to submit the Compliance item for approval."
+      );
+    } finally {
+      setApprovalSubmitting(false);
     }
   }
 
@@ -1207,147 +1300,6 @@ export default function ComplianceAIPage() {
               </div>
             </div>
 
-            <div className="preview-card">
-              <h2>Compliance Workspace Preview</h2>
-
-              <div className="explain-box">
-                VENTIQ reviewed {complianceMetrics.totalItems} migrated
-                compliance item(s), {complianceMetrics.evidenceAvailable} item(s)
-                with evidence available, {complianceMetrics.pendingReview} item(s)
-                pending or under review, {complianceMetrics.highRiskItems}{" "}
-                high-risk item(s), {complianceMetrics.pdfReview} PDF review
-                item(s) and {complianceMetrics.dueSoonItems} item(s) due within
-                15 days.
-              </div>
-
-              <div className="action-row">
-                <a
-                  className="monitor-btn monitor-btn-primary"
-                  href="/migration/compliance-data"
-                >
-                  Review Compliance Data
-                </a>
-
-                <a
-                  className="monitor-btn monitor-btn-secondary"
-                  href="/migration/pdf-intelligence"
-                >
-                  Review PDF Evidence
-                </a>
-
-                <a
-                  className="monitor-btn monitor-btn-secondary"
-                  href="/knowledge-hub"
-                >
-                  Review Regulatory Items
-                </a>
-
-                <a
-                  className="monitor-btn monitor-btn-secondary"
-                  href="/migration/fund-data"
-                >
-                  Review Fund Data
-                </a>
-
-                <a
-                  className="monitor-btn monitor-btn-secondary"
-                  href="/migration/activation"
-                >
-                  View Migration Readiness
-                </a>
-              </div>
-            </div>
-
-            <div className="impact-grid">
-              <div className="impact-card">
-                <h3>{complianceMetrics.totalItems}</h3>
-                <p>Total compliance items</p>
-              </div>
-
-              <div className="impact-card">
-                <h3>{complianceMetrics.evidenceAvailable}</h3>
-                <p>Evidence available</p>
-              </div>
-
-              <div className="impact-card">
-                <h3>{complianceMetrics.pendingReview}</h3>
-                <p>Pending / review</p>
-              </div>
-
-              <div className="impact-card">
-                <h3>{complianceMetrics.highRiskItems}</h3>
-                <p>High-risk items</p>
-              </div>
-            </div>
-
-            <div className="impact-grid">
-              <div className="impact-card">
-                <h3>{complianceMetrics.pdfTotal}</h3>
-                <p>Batch PDF evidence files</p>
-              </div>
-
-              <div className="impact-card">
-                <h3>{complianceMetrics.pdfReview}</h3>
-                <p>PDF review queue</p>
-              </div>
-
-              <div className="impact-card">
-                <h3>{complianceMetrics.dueSoonItems}</h3>
-                <p>Due within 15 days</p>
-              </div>
-
-              <div className="impact-card">
-                <h3>{complianceMetrics.evidenceReadinessScore}%</h3>
-                <p>Evidence coverage</p>
-              </div>
-            </div>
-
-            <div className="preview-card">
-              <h2>Compliance Category Snapshot</h2>
-
-              <div className="journal-preview">
-                <div className="journal-row">
-                  <span>SEBI / regulatory items</span>
-                  <strong>{complianceMetrics.sebiItems}</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Tax items / Form 64C / Form 64D</span>
-                  <strong>{complianceMetrics.taxItems}</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Audit evidence items</span>
-                  <strong>{complianceMetrics.auditItems}</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Valuation evidence items</span>
-                  <strong>{complianceMetrics.valuationItems}</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Missing evidence</span>
-                  <strong>{complianceMetrics.missingEvidence}</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Overdue items</span>
-                  <strong>{complianceMetrics.overdueItems}</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Fund records available</span>
-                  <strong>{complianceMetrics.fundCount}</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Stored investor documents</span>
-                  <strong>{complianceMetrics.storedInvestorDocuments}</strong>
-                </div>
-              </div>
-            </div>
-
             <div className="preview-card compliance-action-workspace">
               <div className="section-heading-row">
                 <div>
@@ -1364,7 +1316,9 @@ export default function ComplianceAIPage() {
               <div className="logic-note">
                 Actions below update only the latest verified source-batch compliance
                 item through the server. Every mutation writes to the enterprise audit
-                log. Filed / Approved / Closed records cannot be changed here.
+                log. Use Ready for Approval to hand the selected item into VENTIQ's
+                existing maker-checker queue. Filed / Approved / Closed records cannot
+                be changed here.
               </div>
 
               {workflowMessage && (
@@ -1535,6 +1489,20 @@ export default function ComplianceAIPage() {
                           >
                             {workflowSaving ? "Recording..." : "Add Governed Note"}
                           </button>
+                          <button
+                            className="monitor-btn monitor-btn-primary"
+                            disabled={
+                              workflowSaving ||
+                              approvalSubmitting ||
+                              !workflowCapabilities.canAct
+                            }
+                            onClick={() => void submitComplianceForApproval()}
+                            type="button"
+                          >
+                            {approvalSubmitting
+                              ? "Submitting..."
+                              : "Ready for Approval"}
+                          </button>
                           <a
                             className="monitor-btn monitor-btn-secondary"
                             href="/admin/audit-workflow"
@@ -1556,6 +1524,148 @@ export default function ComplianceAIPage() {
                   </div>
                 </div>
               )}
+            </div>
+
+
+            <div className="preview-card">
+              <h2>Compliance Workspace Preview</h2>
+
+              <div className="explain-box">
+                VENTIQ reviewed {complianceMetrics.totalItems} migrated
+                compliance item(s), {complianceMetrics.evidenceAvailable} item(s)
+                with evidence available, {complianceMetrics.pendingReview} item(s)
+                pending or under review, {complianceMetrics.highRiskItems}{" "}
+                high-risk item(s), {complianceMetrics.pdfReview} PDF review
+                item(s) and {complianceMetrics.dueSoonItems} item(s) due within
+                15 days.
+              </div>
+
+              <div className="action-row">
+                <a
+                  className="monitor-btn monitor-btn-primary"
+                  href="/migration/compliance-data"
+                >
+                  Review Compliance Data
+                </a>
+
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/migration/pdf-intelligence"
+                >
+                  Review PDF Evidence
+                </a>
+
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/knowledge-hub"
+                >
+                  Review Regulatory Items
+                </a>
+
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/migration/fund-data"
+                >
+                  Review Fund Data
+                </a>
+
+                <a
+                  className="monitor-btn monitor-btn-secondary"
+                  href="/migration/activation"
+                >
+                  View Migration Readiness
+                </a>
+              </div>
+            </div>
+
+            <div className="impact-grid">
+              <div className="impact-card">
+                <h3>{complianceMetrics.totalItems}</h3>
+                <p>Total compliance items</p>
+              </div>
+
+              <div className="impact-card">
+                <h3>{complianceMetrics.evidenceAvailable}</h3>
+                <p>Evidence available</p>
+              </div>
+
+              <div className="impact-card">
+                <h3>{complianceMetrics.pendingReview}</h3>
+                <p>Pending / review</p>
+              </div>
+
+              <div className="impact-card">
+                <h3>{complianceMetrics.highRiskItems}</h3>
+                <p>High-risk items</p>
+              </div>
+            </div>
+
+            <div className="impact-grid">
+              <div className="impact-card">
+                <h3>{complianceMetrics.pdfTotal}</h3>
+                <p>Batch PDF evidence files</p>
+              </div>
+
+              <div className="impact-card">
+                <h3>{complianceMetrics.pdfReview}</h3>
+                <p>PDF review queue</p>
+              </div>
+
+              <div className="impact-card">
+                <h3>{complianceMetrics.dueSoonItems}</h3>
+                <p>Due within 15 days</p>
+              </div>
+
+              <div className="impact-card">
+                <h3>{complianceMetrics.evidenceReadinessScore}%</h3>
+                <p>Evidence coverage</p>
+              </div>
+            </div>
+
+            <div className="preview-card">
+              <h2>Compliance Category Snapshot</h2>
+
+              <div className="journal-preview">
+                <div className="journal-row">
+                  <span>SEBI / regulatory items</span>
+                  <strong>{complianceMetrics.sebiItems}</strong>
+                </div>
+
+                <div className="journal-row">
+                  <span>Tax items / Form 64C / Form 64D</span>
+                  <strong>{complianceMetrics.taxItems}</strong>
+                </div>
+
+                <div className="journal-row">
+                  <span>Audit evidence items</span>
+                  <strong>{complianceMetrics.auditItems}</strong>
+                </div>
+
+                <div className="journal-row">
+                  <span>Valuation evidence items</span>
+                  <strong>{complianceMetrics.valuationItems}</strong>
+                </div>
+
+                <div className="journal-row">
+                  <span>Missing evidence</span>
+                  <strong>{complianceMetrics.missingEvidence}</strong>
+                </div>
+
+                <div className="journal-row">
+                  <span>Overdue items</span>
+                  <strong>{complianceMetrics.overdueItems}</strong>
+                </div>
+
+                <div className="journal-row">
+                  <span>Fund records available</span>
+                  <strong>{complianceMetrics.fundCount}</strong>
+                </div>
+
+                <div className="journal-row">
+                  <span>Stored investor documents</span>
+                  <strong>{complianceMetrics.storedInvestorDocuments}</strong>
+                </div>
+              </div>
             </div>
 
             <div className="preview-card">
