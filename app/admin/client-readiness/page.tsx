@@ -170,37 +170,6 @@ const defaultChecklistTemplates = [
   },
 ];
 
-const sampleClients: PilotClient[] = [
-  {
-    id: "client-001",
-    clientName: "Demo Private Credit Fund",
-    fundType: "Category II AIF",
-    jurisdiction: "India",
-    pilotStage: "Controlled Pilot",
-    dataMode: "Sample Client Data",
-    targetOnboardingDate: "2026-08-15",
-    readinessScore: 62,
-    riskStatus: "Medium",
-    primaryContactName: "Finance Head",
-    primaryContactEmail: "finance@example.com",
-    selectedModules: ["Debt LMS", "Bank MIS", "Audit Workflow"],
-    createdAt: "2026-08-02",
-  },
-];
-
-const sampleItems: ReadinessItem[] = defaultChecklistTemplates.map((item, index) => ({
-  id: `item-${index + 1}`,
-  clientId: "client-001",
-  readinessArea: item.readinessArea,
-  checklistItem: item.checklistItem,
-  ownerRole: item.ownerRole,
-  priority: item.priority,
-  readinessStatus: index < 6 ? "Completed" : "Pending",
-  evidenceNotes:
-    index < 6 ? "Demo evidence available for walkthrough." : "Pending before paid pilot.",
-  dueDate: "2026-08-10",
-}));
-
 function getString(row: DataRow, keys: string[], fallback = "") {
   for (const key of keys) {
     const value = row[key];
@@ -323,9 +292,9 @@ function getPilotDecision(score: number, blockers: number) {
 }
 
 export default function ClientReadinessPage() {
-  const [clients, setClients] = useState<PilotClient[]>(sampleClients);
-  const [items, setItems] = useState<ReadinessItem[]>(sampleItems);
-  const [selectedClientId, setSelectedClientId] = useState(sampleClients[0].id);
+  const [clients, setClients] = useState<PilotClient[]>([]);
+  const [items, setItems] = useState<ReadinessItem[]>([]);
+  const [selectedClientId, setSelectedClientId] = useState("");
 
   const [clientForm, setClientForm] = useState<ClientForm>(emptyClientForm);
   const [readinessForm, setReadinessForm] =
@@ -343,7 +312,12 @@ export default function ClientReadinessPage() {
   useEffect(() => {
     async function loadReadinessData() {
       if (!isSupabaseConfigured || !supabase) {
-        setDataMessage("Using sample readiness data. Supabase is not configured.");
+        setClients([]);
+        setItems([]);
+        setSelectedClientId("");
+        setDataMessage(
+          "Client Readiness is unavailable because the governed Supabase data layer is not configured."
+        );
         setLoading(false);
         return;
       }
@@ -370,30 +344,31 @@ export default function ClientReadinessPage() {
         const nextClients =
           clientsResult.data && clientsResult.data.length > 0
             ? (clientsResult.data as DataRow[]).map(mapClient)
-            : sampleClients;
+            : [];
 
         const nextItems =
           itemsResult.data && itemsResult.data.length > 0
             ? (itemsResult.data as DataRow[]).map(mapReadinessItem)
-            : sampleItems;
+            : [];
 
         setClients(nextClients);
         setItems(nextItems);
-        setSelectedClientId(nextClients[0]?.id || sampleClients[0].id);
+        setSelectedClientId(nextClients[0]?.id ?? "");
 
         setDataMessage(
-          clientsResult.data && clientsResult.data.length > 0
-            ? "Connected to Supabase client readiness records."
-            : "Readiness tables are ready. Showing sample data until a pilot client is created."
+          nextClients.length > 0
+            ? "Connected to governed Supabase client readiness records."
+            : "No pilot client exists yet. Create Client 001 to begin governed readiness tracking."
         );
       } catch (error) {
         setDataMessage(
           error instanceof Error
-            ? `Client readiness database issue: ${error.message}`
-            : "Unable to load readiness data. Showing sample data."
+            ? `Client readiness database issue: ${error.message}. No sample data was substituted.`
+            : "Unable to load client readiness data. No sample data was substituted."
         );
-        setClients(sampleClients);
-        setItems(sampleItems);
+        setClients([]);
+        setItems([]);
+        setSelectedClientId("");
       } finally {
         setLoading(false);
       }
@@ -405,9 +380,11 @@ export default function ClientReadinessPage() {
   const selectedClient =
     clients.find((client) => client.id === selectedClientId) ??
     clients[0] ??
-    sampleClients[0];
+    null;
 
-  const selectedItems = items.filter((item) => item.clientId === selectedClient.id);
+  const selectedItems = selectedClient
+    ? items.filter((item) => item.clientId === selectedClient.id)
+    : [];
 
   const score = getReadinessScore(selectedItems);
 
@@ -466,43 +443,27 @@ export default function ClientReadinessPage() {
       evidence_notes: "",
     }));
 
-    const localItems: ReadinessItem[] = rows.map((row) => ({
-      id: crypto.randomUUID(),
-      clientId,
-      readinessArea: row.readiness_area,
-      checklistItem: row.checklist_item,
-      ownerRole: row.owner_role,
-      priority: row.priority,
-      readinessStatus: row.readiness_status,
-      evidenceNotes: row.evidence_notes,
-      dueDate: "",
-    }));
-
     if (!isSupabaseConfigured || !supabase) {
-      setItems((currentItems) => [...localItems, ...currentItems]);
-      return;
+      throw new Error(
+        "The governed Supabase data layer is not configured. Readiness items were not created locally."
+      );
     }
 
-    try {
-      const db = supabase as any;
+    const db = supabase as any;
 
-      const { data, error } = await db
-        .from("ventiq_client_readiness_items")
-        .insert(rows)
-        .select("*");
+    const { data, error } = await db
+      .from("ventiq_client_readiness_items")
+      .insert(rows)
+      .select("*");
 
-      if (error) {
-        setItems((currentItems) => [...localItems, ...currentItems]);
-        return;
-      }
-
-      setItems((currentItems) => [
-        ...(data as DataRow[]).map(mapReadinessItem),
-        ...currentItems,
-      ]);
-    } catch {
-      setItems((currentItems) => [...localItems, ...currentItems]);
+    if (error) {
+      throw new Error(`Unable to create governed readiness checklist: ${error.message}`);
     }
+
+    setItems((currentItems) => [
+      ...(data as DataRow[]).map(mapReadinessItem),
+      ...currentItems,
+    ]);
   }
 
   async function submitClient(event: FormEvent<HTMLFormElement>) {
@@ -531,37 +492,23 @@ export default function ClientReadinessPage() {
     };
 
     try {
-      let savedClient: PilotClient;
-
       if (!isSupabaseConfigured || !supabase) {
-        savedClient = {
-          id: crypto.randomUUID(),
-          clientName: payload.client_name,
-          fundType: payload.fund_type,
-          jurisdiction: payload.jurisdiction,
-          pilotStage: payload.pilot_stage,
-          dataMode: payload.data_mode,
-          targetOnboardingDate: clientForm.targetOnboardingDate,
-          readinessScore: 0,
-          riskStatus: payload.risk_status,
-          primaryContactName: payload.primary_contact_name,
-          primaryContactEmail: payload.primary_contact_email,
-          selectedModules: payload.selected_modules,
-          createdAt: new Date().toISOString().slice(0, 10),
-        };
-      } else {
-        const db = supabase as any;
-
-        const { data, error } = await db
-          .from("ventiq_pilot_clients")
-          .insert(payload)
-          .select("*")
-          .single();
-
-        if (error) throw new Error(error.message);
-
-        savedClient = mapClient(data as DataRow);
+        throw new Error(
+          "The governed Supabase data layer is not configured. Client workspace was not created locally."
+        );
       }
+
+      const db = supabase as any;
+
+      const { data, error } = await db
+        .from("ventiq_pilot_clients")
+        .insert(payload)
+        .select("*")
+        .single();
+
+      if (error) throw new Error(error.message);
+
+      const savedClient = mapClient(data as DataRow);
 
       setClients((currentClients) => [savedClient, ...currentClients]);
       setSelectedClientId(savedClient.id);
@@ -581,6 +528,11 @@ export default function ClientReadinessPage() {
   async function submitReadinessItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setItemMessage("");
+
+    if (!selectedClient) {
+      setItemMessage("Create or select a governed pilot client before adding readiness items.");
+      return;
+    }
 
     if (!readinessForm.checklistItem.trim()) {
       setItemMessage("Checklist item is required.");
@@ -602,22 +554,9 @@ export default function ClientReadinessPage() {
 
     try {
       if (!isSupabaseConfigured || !supabase) {
-        const localItem: ReadinessItem = {
-          id: crypto.randomUUID(),
-          clientId: selectedClient.id,
-          readinessArea: payload.readiness_area,
-          checklistItem: payload.checklist_item,
-          ownerRole: payload.owner_role,
-          priority: payload.priority,
-          readinessStatus: payload.readiness_status,
-          evidenceNotes: payload.evidence_notes,
-          dueDate: readinessForm.dueDate,
-        };
-
-        setItems((currentItems) => [localItem, ...currentItems]);
-        setReadinessForm(emptyReadinessForm);
-        setItemMessage("Readiness item added locally.");
-        return;
+        throw new Error(
+          "The governed Supabase data layer is not configured. Readiness item was not added locally."
+        );
       }
 
       const db = supabase as any;
@@ -1144,7 +1083,7 @@ export default function ClientReadinessPage() {
         </div>
 
         <div className="ribbon">
-          {loading ? "Loading client readiness center..." : dataMessage} · Demo
+          {loading ? "Loading client readiness center..." : dataMessage} · Governed
           readiness → controlled pilot → limited real data → paid pilot
         </div>
 
@@ -1159,53 +1098,67 @@ export default function ClientReadinessPage() {
             </div>
           </div>
 
-          <div className="selector-row">
-            <select
-              value={selectedClientId}
-              onChange={(event) => setSelectedClientId(event.target.value)}
-            >
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.clientName}
-                </option>
-              ))}
-            </select>
+          {selectedClient ? (
+            <>
+              <div className="selector-row">
+                <select
+                  value={selectedClientId}
+                  onChange={(event) => setSelectedClientId(event.target.value)}
+                >
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.clientName}
+                    </option>
+                  ))}
+                </select>
 
-            <span
-              className={`status-pill status-${statusClass(
-                selectedClient.pilotStage
-              )}`}
-            >
-              {selectedClient.pilotStage}
-            </span>
+                <span
+                  className={`status-pill status-${statusClass(
+                    selectedClient.pilotStage
+                  )}`}
+                >
+                  {selectedClient.pilotStage}
+                </span>
 
-            <span
-              className={`status-pill status-${statusClass(
-                selectedClient.dataMode
-              )}`}
-            >
-              {selectedClient.dataMode}
-            </span>
-          </div>
+                <span
+                  className={`status-pill status-${statusClass(
+                    selectedClient.dataMode
+                  )}`}
+                >
+                  {selectedClient.dataMode}
+                </span>
+              </div>
 
-          <div className="decision-card">
-            <span>VENTIQ Readiness Decision</span>
-            <strong>{decision}</strong>
-            <p>
-              Client: {selectedClient.clientName} · Fund Type:{" "}
-              {selectedClient.fundType} · Target onboarding:{" "}
-              {formatDate(selectedClient.targetOnboardingDate)} · Risk:{" "}
-              {selectedClient.riskStatus}
-            </p>
+              <div className="decision-card">
+                <span>VENTIQ Readiness Decision</span>
+                <strong>{decision}</strong>
+                <p>
+                  Client: {selectedClient.clientName} · Fund Type:{" "}
+                  {selectedClient.fundType} · Target onboarding:{" "}
+                  {formatDate(selectedClient.targetOnboardingDate)} · Risk:{" "}
+                  {selectedClient.riskStatus}
+                </p>
 
-            <div className="module-grid">
-              {selectedClient.selectedModules.map((module) => (
-                <div className="module-pill" key={module}>
-                  {module}
+                <div className="module-grid">
+                  {selectedClient.selectedModules.map((module) => (
+                    <div className="module-pill" key={module}>
+                      {module}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
+            </>
+          ) : (
+            <div className="decision-card">
+              <span>VENTIQ Readiness Decision</span>
+              <strong>No governed client selected</strong>
+              <p>
+                No pilot-client record is available in the governed data layer.
+                Create Client 001 below before recording readiness evidence or
+                making a pilot decision.
+              </p>
             </div>
-          </div>
+          )}
         </div>
         <div className="panel">
           <div className="panel-header">
@@ -1510,7 +1463,7 @@ export default function ClientReadinessPage() {
 
               <button
                 className="primary-button"
-                disabled={savingItem}
+                disabled={savingItem || !selectedClient}
                 type="submit"
               >
                 {savingItem ? "Adding..." : "Add Readiness Item"}
