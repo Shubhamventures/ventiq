@@ -1,0 +1,322 @@
+%PDF-1.4
+%VENTIQ-P2B
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R 7 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 1594 >>
+stream
+q
+BT
+/F2 9 Tf
+54 748 Td
+(VENTIQ CLIENT 001 - SYNTHETIC PILOT EVIDENCE) Tj
+ET
+BT
+/F2 18 Tf
+54 714 Td
+(STATEMENT OF ACCOUNT) Tj
+ET
+BT
+/F1 10 Tf
+54 692 Td
+(Investor Capital Account Statement / SOA) Tj
+ET
+54 680 m 558 680 l S
+BT
+/F2 9 Tf
+54 650 Td
+(Fund Name) Tj
+ET
+BT
+/F1 10 Tf
+72 634 Td
+(VENTIQ CLIENT 001 SYNTHETIC PDF FUND) Tj
+ET
+BT
+/F2 9 Tf
+54 608 Td
+(Investor Code) Tj
+ET
+BT
+/F1 10 Tf
+72 592 Td
+(INV-P2B-001) Tj
+ET
+BT
+/F2 9 Tf
+54 566 Td
+(Investor Name) Tj
+ET
+BT
+/F1 10 Tf
+72 550 Td
+(Aarav Shah) Tj
+ET
+BT
+/F2 9 Tf
+54 524 Td
+(Email) Tj
+ET
+BT
+/F1 10 Tf
+72 508 Td
+(aarav.shah.p2b@example.test) Tj
+ET
+BT
+/F2 9 Tf
+54 482 Td
+(PAN / Tax ID) Tj
+ET
+BT
+/F1 10 Tf
+72 466 Td
+(AAAAA9999A) Tj
+ET
+BT
+/F2 9 Tf
+54 440 Td
+(Folio Number) Tj
+ET
+BT
+/F1 10 Tf
+72 424 Td
+(FOL-P2B-001) Tj
+ET
+BT
+/F2 9 Tf
+54 398 Td
+(Reporting Period) Tj
+ET
+BT
+/F1 10 Tf
+72 382 Td
+(Q1 FY27) Tj
+ET
+BT
+/F2 9 Tf
+54 356 Td
+(Reporting Date) Tj
+ET
+BT
+/F1 10 Tf
+72 340 Td
+(30-Jun-2026) Tj
+ET
+BT
+/F2 12 Tf
+54 312 Td
+(CAPITAL POSITION) Tj
+ET
+BT
+/F2 9 Tf
+54 284 Td
+(Commitment Amount) Tj
+ET
+BT
+/F1 10 Tf
+72 268 Td
+(INR 10,000,000.00) Tj
+ET
+BT
+/F2 9 Tf
+54 246 Td
+(Capital Called Till Date) Tj
+ET
+BT
+/F1 10 Tf
+72 230 Td
+(INR 4,000,000.00) Tj
+ET
+BT
+/F2 9 Tf
+54 208 Td
+(Uncalled Capital) Tj
+ET
+BT
+/F1 10 Tf
+72 192 Td
+(INR 6,000,000.00) Tj
+ET
+BT
+/F2 9 Tf
+54 170 Td
+(Distributions Till Date) Tj
+ET
+BT
+/F1 10 Tf
+72 154 Td
+(INR 1,000,000.00) Tj
+ET
+BT
+/F2 9 Tf
+54 132 Td
+(Current NAV) Tj
+ET
+BT
+/F1 10 Tf
+72 116 Td
+(INR 3,650,000.00) Tj
+ET
+BT
+/F1 8 Tf
+54 70 Td
+(This statement is synthetic regression evidence and has no legal or financial effect.) Tj
+ET
+Q
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 8 0 R >>
+endobj
+8 0 obj
+<< /Length 1322 >>
+stream
+q
+BT
+/F2 9 Tf
+54 748 Td
+(VENTIQ CLIENT 001 - SYNTHETIC PILOT EVIDENCE) Tj
+ET
+BT
+/F2 18 Tf
+54 714 Td
+(STATEMENT OF ACCOUNT - TRANSACTIONS) Tj
+ET
+BT
+/F1 10 Tf
+54 692 Td
+(Deterministic transaction extraction fixture) Tj
+ET
+54 680 m 558 680 l S
+BT
+/F1 9 Tf
+54 654 Td
+(Fund Name: VENTIQ CLIENT 001 SYNTHETIC PDF FUND) Tj
+ET
+BT
+/F1 9 Tf
+54 636 Td
+(Investor Code: INV-P2B-001) Tj
+ET
+BT
+/F1 9 Tf
+54 618 Td
+(Reporting Period: Q1 FY27) Tj
+ET
+BT
+/F2 12 Tf
+54 580 Td
+(TRANSACTION ROWS) Tj
+ET
+BT
+/F1 10 Tf
+72 550 Td
+(15-Apr-2026) Tj
+ET
+BT
+/F1 10 Tf
+72 533 Td
+(Capital Call) Tj
+ET
+BT
+/F1 10 Tf
+72 516 Td
+(CC-2026-04-001) Tj
+ET
+BT
+/F1 10 Tf
+72 499 Td
+(INR 2,000,000.00) Tj
+ET
+BT
+/F1 10 Tf
+72 482 Td
+(Investor Contribution) Tj
+ET
+BT
+/F1 10 Tf
+72 451 Td
+(30-May-2026) Tj
+ET
+BT
+/F1 10 Tf
+72 434 Td
+(Capital Call) Tj
+ET
+BT
+/F1 10 Tf
+72 417 Td
+(CC-2026-05-001) Tj
+ET
+BT
+/F1 10 Tf
+72 400 Td
+(INR 2,000,000.00) Tj
+ET
+BT
+/F1 10 Tf
+72 383 Td
+(Investor Contribution) Tj
+ET
+BT
+/F1 10 Tf
+72 352 Td
+(20-Jun-2026) Tj
+ET
+BT
+/F1 10 Tf
+72 335 Td
+(Distribution) Tj
+ET
+BT
+/F1 10 Tf
+72 318 Td
+(DIST-2026-06-001) Tj
+ET
+BT
+/F1 10 Tf
+72 301 Td
+(INR 1,000,000.00) Tj
+ET
+BT
+/F1 10 Tf
+72 284 Td
+(Paid to Investor) Tj
+ET
+BT
+/F1 8 Tf
+54 94 Td
+(Each transaction is intentionally rendered as five extraction lines: date, nature, reference, amount, direction.) Tj
+ET
+Q
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000021 00000 n 
+0000000070 00000 n 
+0000000133 00000 n 
+0000000203 00000 n 
+0000000278 00000 n 
+0000000414 00000 n 
+0000002060 00000 n 
+0000002196 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+3570
+%%EOF
