@@ -1,0 +1,40 @@
+{
+  "name": "VENTIQ Client 001 Structured Intake Regression",
+  "version": 1,
+  "synthetic_fund_name": "VENTIQ CLIENT 001 SYNTHETIC MIGRATION FUND",
+  "purpose": "Deterministic pilot fixture specification for the canonical structured-intake pipeline. Contains no real client or investor data.",
+  "cases": [
+    {
+      "id": "valid_canonical",
+      "file": "client001-valid-canonical.xlsx",
+      "expected": "All 16 canonical operating sheets present with one representative valid row per sheet."
+    },
+    {
+      "id": "missing_required_field",
+      "file": "client001-missing-required-field.xlsx",
+      "expected": "Investor_Master email is blank and should produce REQUIRED_FIELD_MISSING during processing."
+    },
+    {
+      "id": "missing_required_sheet",
+      "file": "client001-missing-required-sheet.xlsx",
+      "expected": "Fund_Master is absent and should produce REQUIRED_SHEET_MISSING during processing."
+    },
+    {
+      "id": "duplicate_source_key",
+      "file": "client001-duplicate-source-key.xlsx",
+      "expected": "Investor_Master contains two rows with the same investor_code and should produce DUPLICATE_SOURCE_KEY warning semantics."
+    }
+  ],
+  "future_e2e_assertions": [
+    "Matching governed fund accepts valid canonical workbook upload.",
+    "Wrong fund context cannot process the batch.",
+    "Second upload of the identical valid file is rejected by file-hash duplicate protection.",
+    "Valid processing persists source_batch_id, source_sheet_name and source_row_number lineage.",
+    "Missing required field is persisted as a reviewable validation issue.",
+    "Missing required sheet produces review-required outcome.",
+    "Duplicate source key produces deterministic warning handling.",
+    "Batch metrics record inserted, updated, rejected and warning counts.",
+    "Replay/update path does not silently duplicate economic records.",
+    "Structured source_batch_id can continue into the existing Maker/Checker activation workflow."
+  ]
+}
