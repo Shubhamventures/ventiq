@@ -52,8 +52,7 @@ export default function PrivacyPage() {
 
         <p>
           VENTIQ does not claim to sell personal information to advertisers.
-          Product and walkthrough information should be used only for legitimate
-          business communication and product development purposes.
+          Product and walkthrough information is used for legitimate business communication, product evaluation, support and product improvement purposes.
         </p>
       </section>
 
@@ -71,15 +70,11 @@ export default function PrivacyPage() {
         <h2>Data protection direction</h2>
 
         <p>
-          VENTIQ is being designed for private capital workflows where investor,
-          fund and compliance information can be sensitive. The product roadmap
-          includes role-based access, audit history, document controls and
-          enterprise security documentation.
+          VENTIQ is designed for private capital workflows where investor, fund and compliance information can be sensitive. Role-aware access, audit history, document controls and governed workflow patterns are part of the product data-handling approach.
         </p>
 
         <p>
-          This privacy page is an initial version and should be reviewed before
-          production client onboarding or formal enterprise procurement.
+          This notice may be updated as VENTIQ’s product, operating model and applicable privacy requirements evolve. Material changes should be reflected on this page.
         </p>
       </section>
     </main>

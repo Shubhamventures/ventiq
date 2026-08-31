@@ -43,8 +43,8 @@ export default function Home() {
       title: "Bring the fund into one governed structure.",
       body: "Canonical structured data and controlled document intake stay scoped to the authorised fund from the start.",
       chips: ["Canonical workbook", "Legacy migration", "Fund-scoped intake"],
-      href: "/migration/data-intake",
-      linkLabel: "Open Data Intake",
+      href: "/demo#journey",
+      linkLabel: "Explore guided journey",
       image: "/website/ventiq-product-data-intake.png",
       imageLabel: "VENTIQ Migration Portal",
       imageTitle: "Canonical Data Intake",
@@ -60,8 +60,8 @@ export default function Home() {
       title: "Activate only when the fund is ready.",
       body: "Validation, checker approval and activation sit between raw intake and stakeholder use.",
       chips: ["Maker-checker", "Readiness controls", "Frozen activation state"],
-      href: "/migration/activation",
-      linkLabel: "Open Fund Activation",
+      href: "/demo#journey",
+      linkLabel: "Explore guided journey",
       image: "/website/ventiq-product-activation.png",
       imageLabel: "VENTIQ Migration Portal",
       imageTitle: "Governed Activation",
@@ -77,8 +77,8 @@ export default function Home() {
       title: "Turn governed data into investor-ready documents.",
       body: "Templates, investor data, PDF generation and publishing move through one controlled workflow.",
       chips: ["Template library", "Batch PDF generation", "Portal publishing"],
-      href: "/document-studio",
-      linkLabel: "Open Document Studio",
+      href: "/demo#capabilities",
+      linkLabel: "Explore capabilities",
       image: "/website/ventiq-hero-document-studio.png",
       imageLabel: "VENTIQ Document Studio",
       imageTitle: "Batch Generation",
@@ -94,8 +94,8 @@ export default function Home() {
       title: "Give LPs governed access, not another attachment.",
       body: "Verified financial position, cashflows and private documents stay inside the investor's entitled context.",
       chips: ["Financial position", "Cashflows", "Private documents"],
-      href: "/investor-portal",
-      linkLabel: "Open Investor Portal",
+      href: "/demo#stakeholders",
+      linkLabel: "Explore stakeholder experience",
       image: "/website/ventiq-hero-investor-portal-focus.png",
       imageLabel: "VENTIQ Investor Experience",
       imageTitle: "Governed LP Access",
@@ -111,8 +111,8 @@ export default function Home() {
       title: "Keep shared documents and DDQ inside the same relationship.",
       body: "Private document sharing, DDQ questions and engagement history stay tied to the entitled investor identity.",
       chips: ["Restricted LP access", "DDQ & Q&A", "Engagement history"],
-      href: "/data-room",
-      linkLabel: "Open Data Room & DDQ",
+      href: "/demo#capabilities",
+      linkLabel: "Explore capabilities",
       image: "/website/ventiq-hero-data-room-focus.png",
       imageLabel: "VENTIQ Investor Relations",
       imageTitle: "Data Room & DDQ Hub",
@@ -145,7 +145,7 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
       label: "Executive AI View",
       role: "Managing Partner",
       title: "Managing Partner Command Center",
-      href: "/managing-partner-ai",
+      href: "/demo#stakeholders",
       description:
         "Executive command center for fund performance, deployment, portfolio risk, exits, LP narrative and the decisions a Managing Partner needs to make.",
       productLabel: "Executive dashboard",
@@ -191,7 +191,7 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
       label: "Finance AI Workspace",
       role: "Finance Head",
       title: "Finance Head Workspace",
-      href: "/finance-head-ai",
+      href: "/demo#stakeholders",
       description:
         "Finance operations workspace for capital calls, distributions, reconciliations, repayment notices, investor statements, approvals and accounting-impact visibility.",
       productLabel: "Finance operations",
@@ -237,7 +237,7 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
       label: "Compliance AI View",
       role: "Compliance Officer",
       title: "Compliance Officer View",
-      href: "/compliance-ai",
+      href: "/demo#stakeholders",
       description:
         "Compliance command center for regulatory calendars, filing readiness, audit evidence, Form 64C, Form 64D, QCR, TCR and GIFT City obligations.",
       productLabel: "Compliance control room",
@@ -283,7 +283,7 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
       label: "Portfolio AI Workspace",
       role: "Investment Team",
       title: "Investment Team Workspace",
-      href: "/investment-team-ai",
+      href: "/demo#stakeholders",
       description:
         "Portfolio intelligence workspace for company movement, repayment risk, valuation changes, operating signals, follow-on decisions and exit readiness.",
       productLabel: "Portfolio intelligence",
@@ -329,7 +329,7 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
       label: "IR AI Workspace",
       role: "Investor Relations",
       title: "IR & Fundraising Workspace",
-      href: "/fundraising-ai",
+      href: "/demo#stakeholders",
       description:
         "Investor relations workspace for LP follow-ups, DDQs, reporting packs, fundraising decks, data-room requests and relationship intelligence.",
       productLabel: "Investor relations",
@@ -375,7 +375,7 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
       label: "Investor AI Portal",
       role: "Investors / LPs",
       title: "Investor Portal",
-      href: "/investor-portal",
+      href: "/demo#stakeholders",
       description:
         "Private investor experience for commitments, capital calls, distributions, verified financial position, statements, documents, cashflows and entitled data-room access.",
       productLabel: "Investor self-service portal",
@@ -9562,8 +9562,8 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
                 ))}
               </div>
 
-              <a className="w1b-open-workspace" href={selectedWorkspace.href}>
-                Open {selectedWorkspace.role} workspace
+              <a className="w1b-open-workspace" href="#contact">
+                See {selectedWorkspace.role} in a walkthrough
                 <span>↗</span>
               </a>
 
@@ -9665,7 +9665,7 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
 
                     <div className="w1b-action-list">
                       {selectedWorkspace.actions.map((action, index) => (
-                        <a key={action} href={selectedWorkspace.href}>
+                        <a key={action} href="#contact">
                           <span>{String(index + 1).padStart(2, "0")}</span>
                           <strong>{action}</strong>
                           <i>→</i>
@@ -9902,10 +9902,10 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
               </div>
 
               <div className="w1f2-platform-items">
-                <a href="/capital-call"><strong>Capital Calls</strong><span>Allocations · approvals · notices</span><i>↗</i></a>
-                <a href="/distribution-waterfall"><strong>Distribution Waterfall</strong><span>Waterfall · payouts · communication</span><i>↗</i></a>
-                <a href="/debt-lms"><strong>Debt LMS</strong><span>Debt strategy-specific · repayments · notices · borrower tracking</span><i>↗</i></a>
-                <a href="/repayment-notice"><strong>Repayment Notices</strong><span>Generation · email queue · audit trail</span><i>↗</i></a>
+                <a href="/demo#capabilities"><strong>Capital Calls</strong><span>Allocations · approvals · notices</span><i>↗</i></a>
+                <a href="/demo#capabilities"><strong>Distribution Waterfall</strong><span>Waterfall · payouts · communication</span><i>↗</i></a>
+                <a href="/demo#capabilities"><strong>Debt LMS</strong><span>Debt strategy-specific · repayments · notices · borrower tracking</span><i>↗</i></a>
+                <a href="/demo#capabilities"><strong>Repayment Notices</strong><span>Generation · email queue · audit trail</span><i>↗</i></a>
               </div>
             </div>
 
@@ -9919,10 +9919,10 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
               </div>
 
               <div className="w1f2-platform-items">
-                <a href="/portfolio-intelligence"><strong>Portfolio Intelligence</strong><span>Movement · valuation · repayment risk</span><i>↗</i></a>
-                <a href="/compliance-ai"><strong>Compliance & Regulatory</strong><span>Filings · evidence · readiness</span><i>↗</i></a>
-                <a href="/activity-engine"><strong>Activity Engine</strong><span>Actions · approvals · operating history</span><i>↗</i></a>
-                <a href="/document-studio"><strong>Document Studio</strong><span>Templates · generation · approval · publishing</span><i>↗</i></a>
+                <a href="/demo#capabilities"><strong>Portfolio Intelligence</strong><span>Movement · valuation · repayment risk</span><i>↗</i></a>
+                <a href="/demo#stakeholders"><strong>Compliance & Regulatory</strong><span>Filings · evidence · readiness</span><i>↗</i></a>
+                <a href="/demo#capabilities"><strong>Activity Engine</strong><span>Actions · approvals · operating history</span><i>↗</i></a>
+                <a href="/demo#capabilities"><strong>Document Studio</strong><span>Templates · generation · approval · publishing</span><i>↗</i></a>
               </div>
             </div>
 
@@ -9931,15 +9931,15 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
                 <i />
                 <div>
                   <span>EXPANSION ENGINES</span>
-                  <strong>Active development + roadmap</strong>
+                  <strong>Planned extensions of the operating layer</strong>
                 </div>
               </div>
 
               <div className="w1f2-platform-items">
-                <div><strong>Knowledge Hub</strong><span>Regulations · policies · institutional knowledge</span><em>In development</em></div>
-                <div><strong>Bank Reconciliation</strong><span>Matching · exceptions · accounting prep</span><em>In development</em></div>
-                <div><strong>Finance Mission Control</strong><span>Priorities · approvals · operating risk</span><em>In development</em></div>
-                <div><strong>Fee & Carry Engine</strong><span>Fees · carry accruals · fund economics</span><em>Roadmap</em></div>
+                <div><strong>Knowledge Hub</strong><span>Regulations · policies · institutional knowledge</span><em>Expansion</em></div>
+                <div><strong>Bank Reconciliation</strong><span>Matching · exceptions · accounting prep</span><em>Expansion</em></div>
+                <div><strong>Finance Mission Control</strong><span>Priorities · approvals · operating risk</span><em>Expansion</em></div>
+                <div><strong>Fee & Carry Engine</strong><span>Fees · carry accruals · fund economics</span><em>Planned</em></div>
               </div>
             </div>
           </div>
@@ -10002,9 +10002,9 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
                 </div>
                 <div className="w1f2-ai-actions">
                   <span>NEXT BEST ACTIONS</span>
-                  <a href="/managing-partner-ai"><strong>Generate LP deck narrative</strong><i>→</i></a>
-                  <a href="/portfolio-intelligence"><strong>Review portfolio risk</strong><i>→</i></a>
-                  <a href="/fundraising-ai"><strong>Prepare fundraising update</strong><i>→</i></a>
+                  <a href="/demo#stakeholders"><strong>Generate LP deck narrative</strong><i>→</i></a>
+                  <a href="/demo#capabilities"><strong>Review portfolio risk</strong><i>→</i></a>
+                  <a href="/demo#stakeholders"><strong>Prepare fundraising update</strong><i>→</i></a>
                 </div>
               </div>
             </div>
@@ -10040,7 +10040,7 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
               VENTIQ comes from working across alternative-investment fund
               operations, investor reporting and the controls that sit between
               internal teams, service providers and investors. The product is
-              being built from those workflows outward — a governed fund layer
+              built from those workflows outward — a governed fund layer
               first, then role-native software on top.
             </p>
 
@@ -10083,7 +10083,7 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
             </div>
 
             <button type="button" onClick={() => setIsDemoOpen(true)}>
-              Contact founder
+              Request walkthrough
               <span>↗</span>
             </button>
           </div>

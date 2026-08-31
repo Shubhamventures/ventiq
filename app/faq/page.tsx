@@ -15,7 +15,7 @@ const faqs = [
   {
     question: "Who is VENTIQ built for?",
     answer:
-      "VENTIQ is being built for VC funds, private equity funds, private credit funds, Category II AIFs, GIFT City fund managers, family offices, fund finance teams, compliance teams, investor relations teams and managing partners.",
+      "VENTIQ is built for VC funds, private equity funds, private credit funds, Category II AIFs, GIFT City fund managers, family offices, fund finance teams, compliance teams, investor relations teams and managing partners.",
   },
   {
     question: "Is VENTIQ a fund accounting software?",
@@ -25,7 +25,7 @@ const faqs = [
   {
     question: "Is the product live?",
     answer:
-      "Selected workflows are available as live workflow previews and walkthroughs. Some modules are in active development or roadmap stage. Public product screens may use sample or illustrative data for demonstration.",
+      "VENTIQ is deployed in a controlled production environment and is available for guided evaluation and controlled pilot onboarding. Authenticated operating workspaces remain restricted, and public product views may use sample or illustrative data.",
   },
   {
     question: "Does VENTIQ use AI?",
@@ -45,7 +45,7 @@ const faqs = [
   {
     question: "How does VENTIQ handle sensitive fund data?",
     answer:
-      "VENTIQ is being designed around role-based access, document controls, workflow history and audit trail thinking. Formal enterprise security documentation will continue to evolve as the product moves toward production deployments.",
+      "VENTIQ uses role-aware access, document controls, workflow history and governed approval patterns across its operating model. Formal certifications are not claimed unless they have been independently completed, and enterprise security documentation will continue to evolve as deployments expand.",
   },
   {
     question: "Can I request a walkthrough?",

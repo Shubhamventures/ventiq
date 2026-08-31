@@ -1,361 +1,239 @@
+import Link from "next/link";
+
+const journeySteps = [
+  {
+    step: "01",
+    title: "Bring historical fund data into one structure",
+    description:
+      "Investor, fund, portfolio, compliance and document records are brought into a governed fund context instead of remaining scattered across spreadsheets, PDFs and folders.",
+    outcome: "One operating data foundation",
+  },
+  {
+    step: "02",
+    title: "Review data quality and activation readiness",
+    description:
+      "VENTIQ surfaces readiness, review and approval controls before migrated information becomes the basis for stakeholder workflows.",
+    outcome: "Governed activation",
+  },
+  {
+    step: "03",
+    title: "Give each stakeholder the right operating view",
+    description:
+      "Managing Partners, Finance, Investment, Compliance and Investor Relations work from role-native views connected to the same fund context.",
+    outcome: "Role-native operations",
+  },
+  {
+    step: "04",
+    title: "Turn governed data into investor outputs",
+    description:
+      "Investor financial position, cashflows, documents and diligence workflows remain connected to the fund and the entitled investor relationship.",
+    outcome: "Controlled investor delivery",
+  },
+  {
+    step: "05",
+    title: "Expand one workflow at a time",
+    description:
+      "A firm can begin with a focused use case and expand into additional workflows without replacing every operating process on day one.",
+    outcome: "Modular adoption",
+  },
+];
+
+const stakeholderViews = [
+  {
+    title: "Managing Partner",
+    description:
+      "Fund performance, deployment, portfolio movement, risk, capital and decision context.",
+  },
+  {
+    title: "Finance Head",
+    description:
+      "Capital calls, distributions, fund economics, documents, repayments and operating queues.",
+  },
+  {
+    title: "Investment Team",
+    description:
+      "Portfolio monitoring, valuation context, exits, risk and repayment tracking.",
+  },
+  {
+    title: "Compliance",
+    description:
+      "Filings, evidence, due dates, ownership, approvals and compliance priorities.",
+  },
+  {
+    title: "Investor Relations",
+    description:
+      "Investor documents, Data Room, DDQ, engagement and LP servicing context.",
+  },
+  {
+    title: "Investor",
+    description:
+      "Entitled commitments, cashflows, financial position and private documents.",
+  },
+];
+
+const capabilityGroups = [
+  {
+    title: "Migration & data readiness",
+    body:
+      "Historical structured data and documents move through validation, exception review and governed activation.",
+  },
+  {
+    title: "Investor operations",
+    body:
+      "Capital calls, distributions, statements, documents and investor access stay connected to the underlying fund context.",
+  },
+  {
+    title: "Portfolio operations",
+    body:
+      "Portfolio monitoring supports strategy-specific information such as valuation, exits, repayment schedules and risk.",
+  },
+  {
+    title: "Governance & controls",
+    body:
+      "Role-aware access, maker-checker workflows, private document delivery and audit evidence travel with the workflow.",
+  },
+];
+
 export default function DemoPage() {
-  const demoSteps = [
-    {
-      step: "01",
-      title: "Upload Fund Data",
-      description:
-        "Start with investor master, commitments, portfolio data, fund economics, compliance records and historical PDFs.",
-      href: "/migration/data-intake",
-      cta: "Open Data Intake",
-      status: "Internal onboarding",
-    },
-    {
-      step: "02",
-      title: "Classify Investor PDFs",
-      description:
-        "VENTIQ reads uploaded PDFs, detects document type, matches investors, assigns confidence and creates a review queue.",
-      href: "/migration/pdf-intelligence",
-      cta: "Open PDF Intelligence",
-      status: "Document intelligence",
-    },
-    {
-      step: "03",
-      title: "Validate Migration Readiness",
-      description:
-        "Review whether investor, fund, portfolio, PDF and compliance layers are ready before launching dashboards.",
-      href: "/migration/activation",
-      cta: "View Readiness",
-      status: "Quality control",
-    },
-    {
-      step: "04",
-      title: "Launch Stakeholder Dashboards",
-      description:
-        "Move from migrated raw data to role-wise dashboards for each stakeholder inside the fund.",
-      href: "/migration/stakeholder-launch",
-      cta: "Open Launch Center",
-      status: "Dashboard activation",
-    },
-    {
-      step: "05",
-      title: "Show Managing Partner View",
-      description:
-        "Show fund-level intelligence, portfolio value, commitments, compliance risks, PDF readiness and stakeholder signals.",
-      href: "/managing-partner-ai",
-      cta: "Open MP Dashboard",
-      status: "Leadership view",
-    },
-    {
-      step: "06",
-      title: "Show Finance Head View",
-      description:
-        "Show capital call readiness, allocation drafts, fund economics, repayment schedules, PDFs and compliance evidence.",
-      href: "/finance-head-ai",
-      cta: "Open Finance Dashboard",
-      status: "Finance control room",
-    },
-    {
-      step: "07",
-      title: "Show Investor-Facing Portal",
-      description:
-        "End with the clean LP experience: commitments, capital calls, distributions, financial position, cashflows and documents.",
-      href: "/investor-portal",
-      cta: "Open Investor Portal",
-      status: "Client-facing proof",
-    },
-  ];
-
-  const roleDashboards = [
-    {
-      title: "Managing Partner",
-      href: "/managing-partner-ai",
-      description: "Fund performance, risk, capital, compliance and portfolio view.",
-    },
-    {
-      title: "Finance Head",
-      href: "/finance-head-ai",
-      description: "Capital calls, allocations, documents, repayments and finance queue.",
-    },
-    {
-      title: "Investment Team",
-      href: "/investment-team-ai",
-      description: "Portfolio monitoring, valuation, exits, risk and repayment tracking.",
-    },
-    {
-      title: "Compliance Officer",
-      href: "/compliance-ai",
-      description: "Filings, evidence, due dates, owners and high-risk compliance items.",
-    },
-    {
-      title: "Investor Relations",
-      href: "/fundraising-ai",
-      description: "Investor documents, data room, DDQs, engagement and LP readiness.",
-    },
-    {
-      title: "Investor Portal",
-      href: "/investor-portal",
-      description: "Investor-facing commitments, cashflows, performance and documents.",
-    },
-  ];
-
   return (
     <main className="app-page">
       <section className="app-shell">
         <div className="app-header">
           <div>
-            <p className="eyebrow">VENTIQ Client Demo Flow</p>
-            <h1>One Guided Walkthrough From Data Migration to Investor Portal</h1>
+            <p className="eyebrow">VENTIQ Guided Product Experience</p>
+            <h1>See one fund move from fragmented data to connected operations.</h1>
             <p>
-              Use this page during a live walkthrough. It connects the internal
-              migration engine, readiness checks, stakeholder dashboards and the
-              investor-facing portal into one simple demo journey.
+              Explore how VENTIQ brings historical fund information into one
+              governed operating layer, then serves the right context to
+              internal stakeholders and investors.
             </p>
           </div>
 
-          <a className="back-link" href="/">
+          <Link className="back-link" href="/">
             Back to Home
-          </a>
+          </Link>
         </div>
 
         <div className="sample-data-ribbon">
-          Demo command center · Data intake → PDF intelligence → readiness →
-          stakeholder dashboards → investor portal
+          Migration & data readiness → governed workflows → stakeholder views →
+          investor experience
         </div>
 
         <div className="preview-card">
-          <h2>How to Demo VENTIQ</h2>
+          <p className="eyebrow">THE CONNECTED JOURNEY</p>
+          <h2>A guided view of the VENTIQ operating model</h2>
 
           <div className="explain-box">
-            The story is simple: a private capital firm gives VENTIQ its
-            historical investor, fund, portfolio, compliance and PDF records.
-            VENTIQ cleans and activates that data into role-wise dashboards for
-            the internal team and a clean portal experience for investors.
+            Private-capital teams often operate across spreadsheets, PDFs,
+            shared folders, fund-administrator outputs and manual follow-ups.
+            VENTIQ connects those inputs into a governed fund context so the
+            same underlying information can support operations, approvals,
+            management views and investor access.
           </div>
 
           <div className="action-row">
-            <a className="monitor-btn monitor-btn-primary" href="/migration/data-intake">
-              Start Demo
+            <a className="monitor-btn monitor-btn-primary" href="#journey">
+              Explore the journey
             </a>
 
-            <a
-              className="monitor-btn monitor-btn-secondary"
-              href="/migration/stakeholder-launch"
-            >
-              Launch Dashboards
+            <a className="monitor-btn monitor-btn-secondary" href="#stakeholders">
+              See stakeholder views
             </a>
 
-            <a
-              className="monitor-btn monitor-btn-secondary"
-              href="/investor-portal"
-            >
-              Show Investor Portal
-            </a>
+            <Link className="monitor-btn monitor-btn-secondary" href="/#contact">
+              Request a walkthrough
+            </Link>
           </div>
         </div>
 
-        <div className="impact-grid">
-          <div className="impact-card">
-            <h3>1</h3>
-            <p>Operating data layer</p>
-          </div>
-
-          <div className="impact-card">
-            <h3>5</h3>
-            <p>Migration data sources</p>
-          </div>
-
-          <div className="impact-card">
-            <h3>6</h3>
-            <p>Stakeholder experiences</p>
-          </div>
-
-          <div className="impact-card">
-            <h3>1</h3>
-            <p>Investor-facing portal</p>
-          </div>
+        <div className="impact-grid" aria-label="VENTIQ product model">
+          <div className="impact-card"><h3>1</h3><p>Governed fund layer</p></div>
+          <div className="impact-card"><h3>5</h3><p>Core data-readiness layers</p></div>
+          <div className="impact-card"><h3>6</h3><p>Stakeholder experiences</p></div>
+          <div className="impact-card"><h3>1</h3><p>Connected investor experience</p></div>
         </div>
 
-        <div className="preview-card">
-          <h2>VENTIQ Demo Journey</h2>
-
+        <div className="preview-card" id="journey">
+          <p className="eyebrow">PRODUCT JOURNEY</p>
+          <h2>From historical data to governed stakeholder delivery</h2>
           <div className="queue-grid">
-            {demoSteps.map((item) => (
-              <a
-                key={item.step}
-                className="queue-item"
-                href={item.href}
-                style={{
-                  textDecoration: "none",
-                  color: "inherit",
-                }}
-              >
-                <span className="small-pill">Step {item.step}</span>
-                <br />
-                <strong>{item.title}</strong>
-                <br />
-                {item.description}
-                <br />
-                <br />
-                Status: {item.status}
-                <br />
-                → {item.cta}
-              </a>
+            {journeySteps.map((item) => (
+              <div className="queue-item" key={item.step}>
+                <span className="small-pill">Step {item.step}</span><br />
+                <strong>{item.title}</strong><br />
+                {item.description}<br /><br />
+                <span className="small-pill">{item.outcome}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="preview-card" id="stakeholders">
+          <p className="eyebrow">ROLE-NATIVE EXPERIENCES</p>
+          <h2>One fund context. Different views for the people who run it.</h2>
+          <div className="queue-grid">
+            {stakeholderViews.map((role) => (
+              <div className="queue-item" key={role.title}>
+                <strong>{role.title}</strong><br />
+                {role.description}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="preview-card" id="capabilities">
+          <p className="eyebrow">OPERATING CAPABILITIES</p>
+          <h2>Start with the workflow that creates the most immediate value.</h2>
+          <div className="queue-grid">
+            {capabilityGroups.map((item) => (
+              <div className="queue-item" key={item.title}>
+                <strong>{item.title}</strong><br />
+                {item.body}
+              </div>
             ))}
           </div>
         </div>
 
         <div className="knowledge-grid">
           <div className="preview-card">
-            <h2>Recommended Live Demo Script</h2>
-
+            <p className="eyebrow">WHY THE MODEL MATTERS</p>
+            <h2>Governance stays attached as information moves.</h2>
             <div className="journal-preview">
-              <div className="journal-row">
-                <span>Opening</span>
-                <strong>“VENTIQ starts by migrating your messy fund data.”</strong>
-              </div>
-
-              <div className="journal-row">
-                <span>Problem</span>
-                <strong>“Today, every team works on separate Excel, PDFs and folders.”</strong>
-              </div>
-
-              <div className="journal-row">
-                <span>Product shift</span>
-                <strong>“VENTIQ creates one operating data layer.”</strong>
-              </div>
-
-              <div className="journal-row">
-                <span>Internal value</span>
-                <strong>“Each stakeholder gets their own real-time dashboard.”</strong>
-              </div>
-
-              <div className="journal-row">
-                <span>Investor value</span>
-                <strong>“LPs get one clean portal for documents and fund position.”</strong>
-              </div>
-
-              <div className="journal-row">
-                <span>Closing</span>
-                <strong>“We can start with one fund and one dashboard first.”</strong>
-              </div>
+              <div className="journal-row"><span>Data</span><strong>Bring historical records into one fund context.</strong></div>
+              <div className="journal-row"><span>Control</span><strong>Review readiness and approvals before activation.</strong></div>
+              <div className="journal-row"><span>Operations</span><strong>Serve role-native workspaces from the same layer.</strong></div>
+              <div className="journal-row"><span>Investors</span><strong>Release only entitled information and documents.</strong></div>
             </div>
           </div>
 
           <div className="ai-side-panel">
-            <h2>Demo Positioning</h2>
-
-            <div className="chat-message">
-              Do not position VENTIQ as only automation software.
-            </div>
-
-            <div className="chat-message">
-              Position it as the operating system and data layer for private
-              capital teams.
-            </div>
-
-            <div className="chat-message">
-              Show migration first, dashboards second, investor portal last.
-            </div>
-
-            <div className="chat-message">
-              End by offering a guided pilot for one fund or one stakeholder
-              dashboard.
-            </div>
+            <p className="eyebrow">GUIDED PILOT</p>
+            <h2>Start focused. Expand after the workflow is proven.</h2>
+            <div className="chat-message">Begin with one agreed fund and a clearly defined operating use case.</div>
+            <div className="chat-message">Migrate the data required for that workflow and resolve exceptions before activation.</div>
+            <div className="chat-message">Add stakeholder and investor experiences only within the approved scope.</div>
+            <div className="chat-message">Expand into additional workflows as the operating model proves useful.</div>
           </div>
         </div>
 
-        <div className="preview-card">
-          <h2>Role-Wise Dashboard Launch</h2>
-
-          <div className="queue-grid">
-            {roleDashboards.map((role) => (
-              <a
-                key={role.title}
-                className="queue-item"
-                href={role.href}
-                style={{
-                  textDecoration: "none",
-                  color: "inherit",
-                }}
-              >
-                <strong>{role.title}</strong>
-                <br />
-                {role.description}
-                <br />
-                <br />→ Open dashboard
-              </a>
-            ))}
-          </div>
-        </div>
-
-        <div className="preview-card">
-          <h2>What This Demo Proves</h2>
-
-          <div className="queue-grid">
-            <div className="queue-item">
-              ✅ VENTIQ can ingest historical fund data
-            </div>
-
-            <div className="queue-item">
-              ✅ VENTIQ can classify and match investor PDFs
-            </div>
-
-            <div className="queue-item">
-              ✅ VENTIQ can validate data readiness before dashboard launch
-            </div>
-
-            <div className="queue-item">
-              ✅ VENTIQ can power six stakeholder dashboards from the same data
-            </div>
-
-            <div className="queue-item">
-              ✅ VENTIQ can convert internal fund operations into investor-facing
-              portal access
-            </div>
-
-            <div className="queue-item">
-              ✅ VENTIQ can start as a guided pilot instead of a full replacement
-              on day one
-            </div>
-          </div>
-        </div>
-
-        <div className="preview-card">
-          <h2>Best Demo Flow for First Client Call</h2>
-
+        <div className="preview-card" id="pilot">
+          <p className="eyebrow">SEE VENTIQ AROUND YOUR FUND</p>
+          <h2>A walkthrough is most useful when it starts with your operating reality.</h2>
           <div className="explain-box">
-            Start with the migration problem, not the dashboard. Show how raw
-            investor data and PDFs become clean operating data. Then show
-            readiness. Then open the role dashboards. End with the Investor
-            Portal because that is the easiest output for a client to understand.
+            Tell us which workflow creates the most friction today—historical
+            migration, investor operations, finance, compliance, portfolio
+            monitoring or LP servicing—and we can focus the walkthrough around
+            that use case.
           </div>
-
           <div className="action-row">
-            <a className="monitor-btn monitor-btn-primary" href="/migration">
-              Open Migration Hub
-            </a>
-
-            <a
-              className="monitor-btn monitor-btn-secondary"
-              href="/managing-partner-ai"
-            >
-              Show MP View
-            </a>
-
-            <a
-              className="monitor-btn monitor-btn-secondary"
-              href="/investor-portal"
-            >
-              Show LP Portal
-            </a>
-
-            <a
-              className="monitor-btn monitor-btn-secondary"
-              href="/product-overview"
-            >
-              Product Overview
-            </a>
+            <Link className="monitor-btn monitor-btn-primary" href="/#contact">Request a private walkthrough</Link>
+            <Link className="monitor-btn monitor-btn-secondary" href="/product-overview">View product overview</Link>
+            <Link className="monitor-btn monitor-btn-secondary" href="/security">Security & controls</Link>
           </div>
+          <p style={{ marginTop: "20px", opacity: 0.72 }}>
+            Public product views use sample or illustrative information and do
+            not expose private client workspaces.
+          </p>
         </div>
       </section>
     </main>

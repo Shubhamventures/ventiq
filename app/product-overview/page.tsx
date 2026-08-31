@@ -64,16 +64,16 @@ export default function ProductOverviewPage() {
             Request Walkthrough
           </Link>
 
-                    <Link href="/capital-call" className="public-secondary-cta">
-            See Capital Call Workflow
+                    <Link href="/demo#capabilities" className="public-secondary-cta">
+            Explore Operating Workflows
           </Link>
 
-          <Link href="/data-room" className="public-secondary-cta">
-            Explore Data Room
+          <Link href="/demo#capabilities" className="public-secondary-cta">
+            Explore Investor Operations
           </Link>
 
-          <Link href="/migration" className="public-secondary-cta">
-            View Migration Path
+          <Link href="/demo#journey" className="public-secondary-cta">
+            Explore Guided Product Journey
           </Link>
         </div>
       </section>
@@ -113,8 +113,8 @@ export default function ProductOverviewPage() {
           same operating layer.
         </p>
 
-        <Link href="/migration" className="public-secondary-cta">
-          View Migration & Adoption Path
+        <Link href="/demo#journey" className="public-secondary-cta">
+          Explore Migration & Adoption
         </Link>
       </section>
       <section className="legal-content-card">
@@ -133,8 +133,8 @@ export default function ProductOverviewPage() {
           VENTIQ operating system.
         </p>
 
-        <Link href="/data-room" className="public-secondary-cta">
-          Open Investor Data Room
+        <Link href="/demo#capabilities" className="public-secondary-cta">
+          Explore Investor Operations
         </Link>
       </section>
       <section className="legal-content-card">

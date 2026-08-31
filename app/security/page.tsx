@@ -51,7 +51,7 @@ export default function SecurityPage() {
         <h1>Security and control principles for private capital workflows.</h1>
 
         <p>
-          VENTIQ is being designed for fund operations, investor reporting,
+          VENTIQ is designed for fund operations, investor reporting,
           compliance workflows and private capital teams that need controlled
           access, traceable actions and careful handling of sensitive fund data.
         </p>
@@ -70,16 +70,11 @@ export default function SecurityPage() {
         <h2>Current security position</h2>
 
         <p>
-          VENTIQ is currently in product development and walkthrough stage. The
-          platform should not be represented as SOC 2, ISO 27001 or VAPT
-          certified unless those reviews and certifications are formally
-          completed.
+          VENTIQ is deployed for controlled production pilots with governed access, workflow controls and production monitoring. The platform is not represented as SOC 2, ISO 27001 or VAPT certified unless those reviews and certifications are formally completed.
         </p>
 
         <p>
-          For early walkthroughs, all product data shown publicly should be
-          treated as sample or illustrative data unless explicitly agreed
-          otherwise with a client or design partner.
+          Public product pages use sample or illustrative data unless explicitly stated otherwise. Client and pilot workspaces are available only through authenticated, governed access under the agreed scope.
         </p>
       </section>
 

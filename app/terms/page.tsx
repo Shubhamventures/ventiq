@@ -30,8 +30,7 @@ export default function TermsPage() {
         <p>
           VENTIQ product screens shown on the website may include sample,
           illustrative or demonstration data. Public previews are intended to
-          explain product direction, workflow design and operating system
-          concepts for private capital teams.
+          explain VENTIQ workflows, operating concepts and product capabilities for private capital teams.
         </p>
 
         <p>
@@ -68,9 +67,7 @@ export default function TermsPage() {
         <h2>Product availability</h2>
 
         <p>
-          Some VENTIQ workflows may be available for walkthrough, private beta,
-          design preview or roadmap discussion. Availability may change as the
-          product evolves.
+          VENTIQ may be made available through guided evaluation, controlled pilot onboarding or an authenticated production workspace depending on the agreed scope. Availability and permitted use may vary by client, workflow and access rights.
         </p>
       </section>
 
@@ -78,8 +75,7 @@ export default function TermsPage() {
         <h2>Updates</h2>
 
         <p>
-          These terms may be updated as VENTIQ moves from product preview and
-          walkthrough stage toward broader production usage.
+          These terms may be updated as VENTIQ’s product, pilot programme and broader production usage evolve.
         </p>
       </section>
     </main>
