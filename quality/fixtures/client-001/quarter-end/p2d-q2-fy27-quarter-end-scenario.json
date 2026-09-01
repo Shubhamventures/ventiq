@@ -1,0 +1,197 @@
+{
+  "name": "VENTIQ Client 001 P2D Q2 FY27 Quarter-End Rehearsal",
+  "version": 1,
+  "synthetic_only": true,
+  "purpose": "Deterministic quarter-end operating-close scenario proving that existing VENTIQ operating tables can reconcile fund NAV, portfolio value/cashflows, capital activity, expenses, investor positions, debt schedules, compliance, governance and investor-reporting readiness without introducing a new quarter-end accounting engine.",
+  "period": {
+    "financial_year": "FY27",
+    "quarter": "Q2",
+    "period_start": "2026-07-01",
+    "period_end": "2026-09-30",
+    "opening_date": "2026-06-30",
+    "currency": "INR"
+  },
+  "synthetic_fund": {
+    "fund_name_prefix": "VENTIQ CLIENT 001 SYNTHETIC Q2 FY27 CLOSE",
+    "fund_type": "Private Credit / Category II AIF",
+    "reporting_currency": "INR"
+  },
+  "operating_tables": [
+    "fund_nav_snapshots",
+    "portfolio_valuations",
+    "portfolio_cashflows",
+    "capital_call_allocations",
+    "capital_call_receipts",
+    "distributions",
+    "distribution_allocations",
+    "fund_fee_expenses",
+    "fund_commitments",
+    "investor_cashflows",
+    "investor_position_snapshots",
+    "migration_validation_issues",
+    "compliance_items",
+    "ventiq_approval_requests",
+    "ventiq_approval_steps",
+    "ventiq_enterprise_audit_logs",
+    "investor_documents",
+    "debt_repayment_schedules"
+  ],
+  "opening_fund_position": {
+    "opening_nav": 25000000,
+    "opening_portfolio_fair_value": 20000000,
+    "opening_cash": 5000000
+  },
+  "portfolio": {
+    "portfolio_company": "P2D Synthetic Credit SPV 01",
+    "instrument": "Senior Secured Debt",
+    "opening_fair_value": 20000000,
+    "closing_fair_value": 22000000,
+    "valuation_movement": 2000000,
+    "quarter_interest_cash_receipt": 800000
+  },
+  "capital_activity": {
+    "capital_call": {
+      "event_date": "2026-07-15",
+      "due_date": "2026-07-31",
+      "total_call": 3000000,
+      "total_received": 3000000,
+      "receipt_status": "fully_received"
+    },
+    "distribution": {
+      "event_date": "2026-09-15",
+      "total_distribution": 1000000,
+      "payment_status": "paid"
+    }
+  },
+  "fund_expenses": [
+    {
+      "expense_type": "Management Fee",
+      "amount": 250000,
+      "recognition_date": "2026-09-25",
+      "close_required": true
+    },
+    {
+      "expense_type": "Fund Administration",
+      "amount": 50000,
+      "recognition_date": "2026-09-25",
+      "close_required": true
+    }
+  ],
+  "investors": [
+    {
+      "investor_code": "P2D-INV-A",
+      "investor_name": "P2D Synthetic Investor A",
+      "ownership_weight": 0.4,
+      "commitment_amount": 20000000,
+      "opening_called_to_date": 10000000,
+      "quarter_capital_call": 1200000,
+      "closing_called_to_date": 11200000,
+      "closing_uncalled_capital": 8800000,
+      "quarter_distribution": 400000,
+      "closing_distributions_to_date": 400000,
+      "opening_nav": 10000000,
+      "allocated_quarter_net_operating_gain": 1000000,
+      "closing_nav": 11800000
+    },
+    {
+      "investor_code": "P2D-INV-B",
+      "investor_name": "P2D Synthetic Investor B",
+      "ownership_weight": 0.6,
+      "commitment_amount": 30000000,
+      "opening_called_to_date": 15000000,
+      "quarter_capital_call": 1800000,
+      "closing_called_to_date": 16800000,
+      "closing_uncalled_capital": 13200000,
+      "quarter_distribution": 600000,
+      "closing_distributions_to_date": 600000,
+      "opening_nav": 15000000,
+      "allocated_quarter_net_operating_gain": 1500000,
+      "closing_nav": 17700000
+    }
+  ],
+  "debt_close": {
+    "quarter_due_date": "2026-09-15",
+    "scheduled_interest_due": 800000,
+    "cash_received": 800000,
+    "status_after_match": "paid",
+    "next_due_date": "2026-10-15",
+    "next_due_status_at_close": "not_due"
+  },
+  "compliance_close": [
+    {
+      "item": "Q2 FY27 valuation sign-off",
+      "due_date": "2026-09-30",
+      "draft_close_status": "Pending",
+      "ready_close_status": "Completed"
+    }
+  ],
+  "draft_close": {
+    "purpose": "Prove quarter-end readiness is fail-closed while a close-required expense and compliance sign-off remain unresolved.",
+    "recorded_expenses": 250000,
+    "missing_expense": 50000,
+    "draft_closing_nav": 29550000,
+    "expected_closing_nav": 29500000,
+    "nav_reconciliation_delta": 50000,
+    "open_validation_exceptions": 1,
+    "open_compliance_items": 1,
+    "close_ready": false
+  },
+  "ready_close": {
+    "capital_calls_received": 3000000,
+    "portfolio_interest_income": 800000,
+    "portfolio_valuation_movement": 2000000,
+    "distributions_paid": 1000000,
+    "fees_and_expenses": 300000,
+    "closing_cash": 7500000,
+    "closing_portfolio_fair_value": 22000000,
+    "closing_nav": 29500000,
+    "open_validation_exceptions": 0,
+    "open_compliance_items": 0,
+    "close_ready": true
+  },
+  "readiness_assertions": [
+    "Draft close is NOT READY while the INR 50,000 administration expense is absent.",
+    "Draft close is NOT READY while the Q2 valuation sign-off is Pending.",
+    "The missing INR 50,000 expense explains the entire draft NAV reconciliation delta.",
+    "After the expense is recorded and compliance sign-off is Completed, validation blockers are zero.",
+    "Closing fund NAV equals opening NAV plus capital calls plus interest income plus valuation movement minus distributions minus fees/expenses.",
+    "Closing fund NAV also equals closing portfolio fair value plus closing cash.",
+    "Capital-call allocations equal the fund-level call and receipts equal allocations.",
+    "Distribution allocations equal the fund-level distribution.",
+    "Investor closing NAV values sum exactly to closing fund NAV.",
+    "Investor called capital plus uncalled capital equals commitment for each investor.",
+    "Debt schedule interest due equals cash received and is paid by quarter end."
+  ],
+  "governance_assertions": [
+    "No quarter-close result is considered final while readiness blockers remain.",
+    "Once blockers are zero, the close evidence package may enter the existing central maker-checker workflow.",
+    "Maker/checker separation must remain enforced.",
+    "Final approval must occur before investor-reporting outputs are considered publishable.",
+    "The exact current approval action/link contract must be extracted from source before any live P2D rehearsal; P2D-2 does not invent a new approval action type."
+  ],
+  "output_assertions": [
+    "A 30-Sep-2026 fund NAV snapshot records INR 29,500,000.",
+    "Closing investor position snapshots total INR 29,500,000: Investor A INR 11,800,000 and Investor B INR 17,700,000.",
+    "Closing capital called totals INR 28,000,000 and uncalled capital totals INR 22,000,000 against INR 50,000,000 commitments.",
+    "Quarter distributions total INR 1,000,000.",
+    "Quarter fee/expense recognition totals INR 300,000.",
+    "Portfolio closing fair value is INR 22,000,000 and quarter interest cash receipt is INR 800,000.",
+    "The debt schedule shows the Q2 interest item paid and the 15-Oct-2026 item not due at quarter close.",
+    "All quarter-close validation/compliance blockers are resolved before approval.",
+    "Approved close evidence retains source/audit lineage.",
+    "Investor documents/reporting remain governed by existing approval/publication controls."
+  ],
+  "p2d3_contract_extraction_required": [
+    "Exact write payloads / required columns for the operating rows used in the rehearsal.",
+    "Exact current mechanism used to create or refresh fund_nav_snapshots and investor_position_snapshots.",
+    "Exact central approval action/link contract suitable for the close evidence package, without inventing a new action type.",
+    "Exact investor-reporting readiness/publication checks relevant after close approval.",
+    "Exact synthetic cleanup order for every P2D-created DB/storage/auth row."
+  ],
+  "cleanup_contract": [
+    "Use a unique synthetic fund namespace.",
+    "Never mutate or delete any pre-existing fund or investor.",
+    "Delete only P2D-created operating rows, snapshots, approvals/audits, access/profile/auth rows and any storage objects.",
+    "If cleanup cannot be confirmed, stop all later mutating runs."
+  ]
+}
