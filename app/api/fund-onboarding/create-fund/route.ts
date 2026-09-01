@@ -158,6 +158,11 @@ export async function POST(request: NextRequest) {
   }
 
   let createdFundId = "";
+  let createdCanonicalBatchId = "";
+  let createdCanonicalFundCode = "";
+  let createdAccessAuditId = "";
+  let createdEnterpriseAuditId = "";
+  let enterpriseAuditAttempted = false;
   let accessCreated = false;
   let fundName = "";
 
@@ -240,6 +245,71 @@ export async function POST(request: NextRequest) {
 
     createdFundId = normalizeText(fund.id, 80);
 
+    const canonicalBatchName =
+      `Assisted Fund Onboarding - ${fundName} - ${new Date().toISOString()}`;
+
+    const { data: canonicalBatch, error: canonicalBatchError } =
+      await supabaseAdmin
+        .from("fund_data_migration_batches")
+        .insert({
+          batch_name: canonicalBatchName,
+          total_funds: 1,
+          total_target_corpus: 0,
+          total_committed_capital: 0,
+          total_green_shoe: 0,
+          total_sponsor_commitment: 0,
+          average_management_fee: 0,
+          average_carry: 0,
+          status: "published",
+        })
+        .select("id")
+        .single();
+
+    if (canonicalBatchError || !canonicalBatch) {
+      throw new Error(
+        `Fund was created but canonical onboarding lineage could not be established: ${
+          canonicalBatchError?.message || "No batch row returned"
+        }`
+      );
+    }
+
+    createdCanonicalBatchId = normalizeText(canonicalBatch.id, 80);
+
+    if (!createdCanonicalBatchId) {
+      throw new Error(
+        "Fund was created but canonical onboarding lineage returned no batch ID."
+      );
+    }
+
+    const canonicalFundPayload = {
+      batch_id: createdCanonicalBatchId,
+      fund_code: createdFundId,
+      fund_name: fundName,
+      fund_type: fundType,
+      jurisdiction,
+      trustee_name: trusteeName || null,
+      investment_manager: investmentManagerName || null,
+      migration_status: "Fund Created",
+    };
+
+    const { data: canonicalFund, error: canonicalFundError } =
+      await supabaseAdmin
+        .from("fund_master")
+        .insert(canonicalFundPayload)
+        .select("fund_code")
+        .single();
+
+    if (canonicalFundError || !canonicalFund) {
+      throw new Error(
+        `Fund was created but canonical fund persistence failed: ${
+          canonicalFundError?.message || "No canonical fund row returned"
+        }`
+      );
+    }
+
+    createdCanonicalFundCode =
+      normalizeText(canonicalFund.fund_code, 80) || createdFundId;
+
     const { error: accessError } = await supabaseAdmin
       .from("ventiq_user_fund_access")
       .insert({
@@ -263,23 +333,62 @@ export async function POST(request: NextRequest) {
 
     accessCreated = true;
 
-    const { error: auditError } = await supabaseAdmin
-      .from("ventiq_access_audit_logs")
-      .insert({
-        fund_id: createdFundId || null,
-        stakeholder_id: null,
-        event_type: "Fund Created",
-        event_title: "New fund created",
-        event_description: `${fundName} was created and the creating Fund Admin received governed fund access.`,
-        actor_name: actor.fullName,
-        actor_email: actor.email,
-      });
+    const { data: accessAudit, error: auditError } =
+      await supabaseAdmin
+        .from("ventiq_access_audit_logs")
+        .insert({
+          fund_id: createdFundId || null,
+          stakeholder_id: null,
+          event_type: "Fund Created",
+          event_title: "New fund created",
+          event_description: `${fundName} was created and the creating Fund Admin received governed fund access.`,
+          actor_name: actor.fullName,
+          actor_email: actor.email,
+        })
+        .select("id")
+        .single();
 
-    if (auditError) {
+    if (auditError || !accessAudit) {
       throw new Error(
-        `Fund access was created but the audit event could not be recorded: ${auditError.message}`
+        `Fund access was created but the audit event could not be recorded: ${
+          auditError?.message || "No access-audit row returned"
+        }`
       );
     }
+
+    createdAccessAuditId = normalizeText(accessAudit.id, 80);
+
+    enterpriseAuditAttempted = true;
+
+    const { data: enterpriseAudit, error: enterpriseAuditError } =
+      await supabaseAdmin
+        .from("ventiq_enterprise_audit_logs")
+        .insert({
+          organisation_id: actor.organisationId,
+          source_module: "Fund Onboarding",
+          linked_record_id: createdFundId || null,
+          linked_record_type: "Fund",
+          event_type: "Fund Created",
+          event_title: "New fund created",
+          event_description: `${fundName} was created, persisted to canonical Fund Master and the creating Fund Admin received governed fund access.`,
+          actor_name: actor.fullName,
+          actor_email: actor.email,
+          actor_role: "fund_admin",
+          event_status: "Recorded",
+          risk_level: "Low",
+        })
+        .select("id")
+        .single();
+
+    if (enterpriseAuditError || !enterpriseAudit) {
+      throw new Error(
+        `Fund setup completed but enterprise audit evidence could not be recorded: ${
+          enterpriseAuditError?.message || "No enterprise-audit row returned"
+        }`
+      );
+    }
+
+    createdEnterpriseAuditId = normalizeText(enterpriseAudit.id, 80);
 
     return NextResponse.json({
       ok: true,
@@ -297,6 +406,36 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (createdEnterpriseAuditId) {
+      await supabaseAdmin
+        .from("ventiq_enterprise_audit_logs")
+        .delete()
+        .eq("id", createdEnterpriseAuditId);
+    } else if (enterpriseAuditAttempted && createdFundId) {
+      await supabaseAdmin
+        .from("ventiq_enterprise_audit_logs")
+        .delete()
+        .eq("organisation_id", actor.organisationId)
+        .eq("source_module", "Fund Onboarding")
+        .eq("linked_record_id", createdFundId)
+        .eq("event_type", "Fund Created")
+        .eq("actor_email", actor.email);
+    }
+
+    if (createdAccessAuditId) {
+      await supabaseAdmin
+        .from("ventiq_access_audit_logs")
+        .delete()
+        .eq("id", createdAccessAuditId);
+    } else if (createdFundId) {
+      await supabaseAdmin
+        .from("ventiq_access_audit_logs")
+        .delete()
+        .eq("fund_id", createdFundId)
+        .eq("event_type", "Fund Created")
+        .eq("actor_email", actor.email);
+    }
+
     if (accessCreated && fundName) {
       await supabaseAdmin
         .from("ventiq_user_fund_access")
@@ -304,6 +443,29 @@ export async function POST(request: NextRequest) {
         .eq("organisation_id", actor.organisationId)
         .eq("user_id", actor.userId)
         .eq("fund_name", fundName);
+    }
+
+    if (createdCanonicalFundCode) {
+      let canonicalCleanup = supabaseAdmin
+        .from("fund_master")
+        .delete()
+        .eq("fund_code", createdCanonicalFundCode);
+
+      if (createdCanonicalBatchId) {
+        canonicalCleanup = canonicalCleanup.eq(
+          "batch_id",
+          createdCanonicalBatchId
+        );
+      }
+
+      await canonicalCleanup;
+    }
+
+    if (createdCanonicalBatchId) {
+      await supabaseAdmin
+        .from("fund_data_migration_batches")
+        .delete()
+        .eq("id", createdCanonicalBatchId);
     }
 
     if (createdFundId) {
