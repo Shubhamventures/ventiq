@@ -1163,7 +1163,7 @@ function splitEvidencePages(text: string) {
 
 function parseMoneyValue(value: string) {
   const cleaned = value
-    .replace(/(?:INR|Rs\.?|₹|\$)/gi, "")
+    .replace(/(?:INR|Rs\.?|â‚¹|\$)/gi, "")
     .replace(/,/g, "")
     .replace(/\s+/g, "")
     .trim();
@@ -1327,7 +1327,7 @@ function extractSoaTransactions(
 
   for (const page of pages) {
     const regex =
-      /(\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)-\d{4})\s*\n(Capital Call|Distribution)\s*\n([A-Za-z0-9._/-]+)\s*\n(?:INR|Rs\.?|₹|\$)?\s*([\d,]+(?:\.\d+)?)\s*\n([^\n]+)/gi;
+      /(\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)-\d{4})\s*\n(Capital Call|Distribution)\s*\n([A-Za-z0-9._/-]+)\s*\n(?:INR|Rs\.?|â‚¹|\$)?\s*([\d,]+(?:\.\d+)?)\s*\n([^\n]+)/gi;
 
     let match: RegExpExecArray | null;
 
@@ -2646,6 +2646,17 @@ async function prepareCanonicalSnapshot(
   // A7.7-6J: derive the writable metadata surface from the actual live
   // snapshot row. This prevents optional metadata fields from breaking the
   // canonical path when the deployed schema is older/narrower than the route.
+  //
+  // A7.7-6K: tolerate the controlled builder's governed draft contract.
+  // The canonical Fund Memory builder historically returns a newly-created
+  // snapshot in "draft". PDF Intelligence owns the governed promotion of that
+  // exact row to "pending_approval" after reconciliation + human resolution.
+  // A tightly-scoped orphan discovered above is already "pending_approval".
+  //
+  // Inspect by immutable snapshot ID before applying an approval-status
+  // predicate; otherwise a valid fresh draft is incorrectly treated as
+  // missing and PostgREST reports "Cannot coerce the result to a single JSON
+  // object".
   const { data: candidateCurrentRaw, error: candidateCurrentError } =
     await supabaseAdmin
       .from("investor_position_snapshots")
@@ -2654,9 +2665,8 @@ async function prepareCanonicalSnapshot(
       .eq("organisation_id", actor.organisationId)
       .eq("fund_name", fundName)
       .eq("investor_id", row.matched_investor_id || "")
-      .eq("approval_status", "pending_approval")
       .is("superseded_at", null)
-      .single();
+      .maybeSingle();
 
   if (candidateCurrentError || !candidateCurrentRaw) {
     throw new Error(
@@ -2668,6 +2678,28 @@ async function prepareCanonicalSnapshot(
 
   const candidateCurrent =
     candidateCurrentRaw as unknown as DataRow;
+  const candidatePreApprovalStatus = normalizeText(
+    candidateCurrent.approval_status,
+    40
+  );
+
+  if (!["draft", "pending_approval"].includes(candidatePreApprovalStatus)) {
+    throw new Error(
+      `PDF_CANONICAL_UNEXPECTED_CANDIDATE_STATUS: ${
+        candidatePreApprovalStatus || "missing"
+      }`
+    );
+  }
+
+  if (
+    reusedPendingCandidate &&
+    candidatePreApprovalStatus !== "pending_approval"
+  ) {
+    throw new Error(
+      `PDF_CANONICAL_REUSED_CANDIDATE_STATUS_MISMATCH: ${candidatePreApprovalStatus}`
+    );
+  }
+
   const supportedColumns = new Set(Object.keys(candidateCurrent));
 
   const requiredCandidateColumns = [
@@ -2715,7 +2747,7 @@ async function prepareCanonicalSnapshot(
     .eq("organisation_id", actor.organisationId)
     .eq("fund_name", fundName)
     .eq("investor_id", row.matched_investor_id || "")
-    .eq("approval_status", "pending_approval")
+    .eq("approval_status", candidatePreApprovalStatus)
     .is("superseded_at", null)
     .select(
       "id, snapshot_version, reporting_date, reporting_period, approval_status"
@@ -2725,14 +2757,15 @@ async function prepareCanonicalSnapshot(
   if (candidateUpdateError || !inserted) {
     if (!reusedPendingCandidate) {
       // The builder created this candidate during the current request. If the
-      // PDF lineage patch fails, remove only that new pending candidate so the
-      // request stays retry-safe. A previously discovered orphan is preserved.
+      // PDF lineage patch fails, remove only that exact new candidate in its
+      // pre-promotion state so the request stays retry-safe. A previously
+      // discovered pending orphan is preserved.
       await supabaseAdmin
         .from("investor_position_snapshots")
         .delete()
         .eq("id", builtSnapshotId)
         .eq("organisation_id", actor.organisationId)
-        .eq("approval_status", "pending_approval")
+        .eq("approval_status", candidatePreApprovalStatus)
         .is("superseded_at", null);
     }
 
