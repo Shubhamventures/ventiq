@@ -1,0 +1,144 @@
+{
+    "name":  "VENTIQ Client 001 P2C Conflict Resolution Canonical Regression",
+    "version":  1,
+    "synthetic_only":  true,
+    "purpose":  "Deterministic P2C contract proving a deliberate Structured/Excel versus PDF financial conflict, explicit human resolution, maker-checker-final approval, and approved canonical Fund Memory persistence without touching any existing fund.",
+    "source_fixtures":  {
+                            "p2a_structured_scenario":  "quality/fixtures/client-001/structured-intake-scenario.json",
+                            "p2b_pdf_scenario":  "quality/fixtures/client-001/pdf-intelligence/p2b-pdf-intelligence-scenario.json",
+                            "capital_call_pdf":  "quality/fixtures/client-001/pdf-intelligence/client001-capital-call-notice-2026-07-15.pdf"
+                        },
+    "live_test_contract":  {
+                               "fund_name_prefix":  "VENTIQ P2C SYNTHETIC CONFLICT FUND",
+                               "investor_code":  "P2C-INV-001",
+                               "investor_name":  "P2C Synthetic Investor 001",
+                               "reporting_period":  "Q2 FY27",
+                               "reporting_date":  "2026-07-31",
+                               "currency":  "INR",
+                               "class_name":  "Class A"
+                           },
+    "base_approved_snapshot":  {
+                                   "commitment_amount":  10000000,
+                                   "capital_called":  5000000,
+                                   "uncalled_capital":  5000000,
+                                   "distributions_to_date":  1000000,
+                                   "net_contributed":  4000000,
+                                   "current_nav":  3650000,
+                                   "approval_status":  "approved"
+                               },
+    "structured_reconciliation_evidence":  {
+                                               "commitment_amount":  10000000,
+                                               "capital_called_to_date":  5000000,
+                                               "uncalled_capital":  5000000
+                                           },
+    "pdf_reconciliation_evidence":  {
+                                        "source_document_type":  "Capital Call Notice",
+                                        "notice_number":  "CC-P2B-2026-07-001",
+                                        "notice_date":  "15-Jul-2026",
+                                        "due_date":  "31-Jul-2026",
+                                        "commitment_amount":  10000000,
+                                        "capital_called_before_notice":  4000000,
+                                        "current_capital_call":  1500000,
+                                        "capital_called_to_date":  5500000,
+                                        "uncalled_capital":  4500000
+                                    },
+    "expected_reconciliation":  [
+                                    {
+                                        "key":  "commitment_amount",
+                                        "structured_value":  10000000,
+                                        "pdf_value":  10000000,
+                                        "status":  "MATCHED"
+                                    },
+                                    {
+                                        "key":  "capital_called_to_date",
+                                        "structured_value":  5000000,
+                                        "pdf_value":  5500000,
+                                        "difference":  500000,
+                                        "status":  "CONFLICT"
+                                    },
+                                    {
+                                        "key":  "uncalled_capital",
+                                        "structured_value":  5000000,
+                                        "pdf_value":  4500000,
+                                        "difference":  -500000,
+                                        "status":  "CONFLICT"
+                                    }
+                                ],
+    "resolution_sequence":  {
+                                "first_draft":  {
+                                                    "purpose":  "Prove fail-closed canonical preparation while at least one inconsistency remains unresolved.",
+                                                    "decisions":  [
+                                                                      {
+                                                                          "key":  "capital_called_to_date",
+                                                                          "choice":  "use_pdf",
+                                                                          "correctedValue":  null,
+                                                                          "note":  "Use the investor-specific Capital Call Notice cumulative called amount."
+                                                                      },
+                                                                      {
+                                                                          "key":  "uncalled_capital",
+                                                                          "choice":  "unresolved",
+                                                                          "correctedValue":  null,
+                                                                          "note":  ""
+                                                                      }
+                                                                  ],
+                                                    "expected_unresolved_decision_count":  1,
+                                                    "canonical_preparation_must_fail":  true
+                                                },
+                                "final_draft":  {
+                                                    "purpose":  "Resolve both deliberate conflicts to the PDF evidence.",
+                                                    "decisions":  [
+                                                                      {
+                                                                          "key":  "capital_called_to_date",
+                                                                          "choice":  "use_pdf",
+                                                                          "correctedValue":  null,
+                                                                          "note":  "Use the investor-specific Capital Call Notice cumulative called amount."
+                                                                      },
+                                                                      {
+                                                                          "key":  "uncalled_capital",
+                                                                          "choice":  "use_pdf",
+                                                                          "correctedValue":  null,
+                                                                          "note":  "Use the investor-specific Capital Call Notice remaining uncalled commitment."
+                                                                      }
+                                                                  ],
+                                                    "expected_unresolved_decision_count":  0,
+                                                    "canonical_preparation_must_succeed":  true
+                                                }
+                            },
+    "expected_pending_canonical_candidate":  {
+                                                 "commitment_amount":  10000000,
+                                                 "capital_called":  5500000,
+                                                 "uncalled_capital":  4500000,
+                                                 "distributions_to_date":  1000000,
+                                                 "net_contributed":  4500000,
+                                                 "current_nav":  3650000,
+                                                 "approval_status":  "pending_approval",
+                                                 "canonical_write_state":  "pending_final_approval",
+                                                 "must_supersede_base_snapshot_only_after_final_approval":  true
+                                             },
+    "approval_assertions":  [
+                                "Maker creates the Fund Memory Approval request.",
+                                "Maker self-approval is denied.",
+                                "Checker approval advances the request to Final Approval.",
+                                "A final approver role approves the request.",
+                                "Approval request reaches Approved / Completed.",
+                                "Candidate snapshot becomes approved and remains the same snapshot ID.",
+                                "Base approved snapshot becomes superseded only at final approval.",
+                                "Approved candidate values equal the explicit resolution package.",
+                                "Resolution/source lineage remains attached to the canonical snapshot."
+                            ],
+    "publication_assertions":  [
+                                   "Financial PDF publication is blocked before final canonical approval.",
+                                   "After final canonical approval the publication gate may become eligible, but P2C does not need to publish the PDF."
+                               ],
+    "cleanup_contract":  [
+                             "Use a unique synthetic organisation/fund/investor namespace.",
+                             "Delete only P2C-created approval steps/requests, PDF intelligence rows, sidecars/raw PDF, candidate/base snapshots, commitment/investor/fund/access/profile/auth rows.",
+                             "Do not mutate or delete any pre-existing fund.",
+                             "If cleanup cannot be confirmed, stop all later mutating runs."
+                         ],
+    "publication_gate_api_contract":  {
+                                          "approved_snapshot_field":  "approvedSnapshotId",
+                                          "approval_request_field":  "publicationApprovalRequestId",
+                                          "semantic_rule":  "publishEligible may become true only after the linked canonical snapshot is approved/live and the linked Fund Memory approval workflow is Approved / Completed"
+                                      }
+}
