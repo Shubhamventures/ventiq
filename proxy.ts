@@ -7,6 +7,7 @@ const APP_ACCESS_COOKIE = "ventiq_app_access";
 const PUBLIC_EXACT_PATHS = new Set([
   "/",
   "/demo",
+  "/start",
   "/faq",
   "/security",
   "/privacy",

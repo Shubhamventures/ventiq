@@ -243,6 +243,7 @@ export default function LoginPage() {
             {buttonLabel}
           </button>
 
+          <a href="/start">New to VENTIQ? Start fund onboarding</a>
           <a href="/">Back to public VENTIQ site</a>
         </form>
       </section>

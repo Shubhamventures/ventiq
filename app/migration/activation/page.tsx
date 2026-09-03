@@ -1113,6 +1113,11 @@ export default function DataActivationDashboardPage() {
                   ? "Activating..."
                   : "Activate Fund Across VENTIQ"}
             </button>
+            {readiness.activationStatus === "Active" && (
+              <Link className="activation-secondary-button" href="/launch-center">
+                Launch VENTIQ Workspaces
+              </Link>
+            )}
           </div>
         </div>
 

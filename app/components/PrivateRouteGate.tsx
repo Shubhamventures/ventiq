@@ -13,6 +13,7 @@ import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 const PUBLIC_PATHS = new Set([
   "/",
   "/demo",
+  "/start",
   "/faq",
   "/security",
   "/privacy",

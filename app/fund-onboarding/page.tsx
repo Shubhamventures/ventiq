@@ -610,7 +610,7 @@ export default function FundOnboardingPage() {
 
         setDataMessage(
           fundsResult.data && fundsResult.data.length > 0
-            ? "Connected to onboarding Supabase records."
+            ? "Onboarding workspace connected."
             : "Onboarding tables are ready. Showing sample data until a fund is created."
         );
       } catch (error) {
@@ -1332,6 +1332,29 @@ export default function FundOnboardingPage() {
     }
   }
 
+  const hasSelectedFund = Boolean(selectedFund);
+  const hasPeople = selectedStakeholders.length > 0;
+  const currentSetupStage = !hasSelectedFund ? 1 : !hasPeople ? 2 : 3;
+
+  function setupStepClass(stage: number) {
+    if (stage < currentSetupStage) return "setup-step complete";
+    if (stage === currentSetupStage) return "setup-step current";
+    return "setup-step upcoming";
+  }
+
+  function setupStepStatus(stage: number) {
+    if (stage < currentSetupStage) return "Complete";
+    if (stage === currentSetupStage) return "Current";
+    return stage === currentSetupStage + 1 ? "Next" : "Later";
+  }
+
+  const nextAction =
+    currentSetupStage === 1
+      ? { href: "#create-fund", label: "Create Fund" }
+      : currentSetupStage === 2
+        ? { href: "#people-access", label: "Add People & Access" }
+        : { href: "/migration/data-intake", label: "Continue to Fund Data" };
+
   return (
     <main className="onboarding-page">
       <style>{`
@@ -1343,7 +1366,7 @@ export default function FundOnboardingPage() {
             #07101f;
           color: #f8fbff;
           font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-          padding: 34px;
+          padding: 24px 28px 60px;
         }
 
         .onboarding-shell {
@@ -1354,10 +1377,10 @@ export default function FundOnboardingPage() {
         .hero {
           border: 1px solid rgba(147, 197, 253, 0.16);
           background: rgba(15, 23, 42, 0.78);
-          border-radius: 32px;
-          padding: 34px;
-          box-shadow: 0 24px 80px rgba(0, 0, 0, 0.26);
-          margin-bottom: 22px;
+          border-radius: 20px;
+          padding: 22px 24px;
+          box-shadow: 0 18px 60px rgba(0, 0, 0, 0.20);
+          margin-bottom: 16px;
         }
 
         .hero-top,
@@ -1379,17 +1402,17 @@ export default function FundOnboardingPage() {
 
         h1 {
           margin: 0;
-          font-size: clamp(42px, 6vw, 74px);
-          line-height: 0.96;
-          letter-spacing: -0.06em;
+          font-size: clamp(32px, 4vw, 46px);
+          line-height: 1.02;
+          letter-spacing: -0.045em;
         }
 
         .hero-copy {
-          margin: 20px 0 0;
-          color: #c7d7f4;
-          font-size: 18px;
-          line-height: 1.65;
-          max-width: 850px;
+          margin: 12px 0 0;
+          color: #aebfd4;
+          font-size: 14px;
+          line-height: 1.55;
+          max-width: 760px;
         }
 
         .actions {
@@ -1457,7 +1480,7 @@ export default function FundOnboardingPage() {
           display: grid;
           grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 14px;
-          margin-top: 24px;
+          margin-top: 18px;
         }
 
         .stat-card,
@@ -1471,19 +1494,19 @@ export default function FundOnboardingPage() {
         }
 
         .stat-card {
-          padding: 20px;
+          padding: 15px 17px;
         }
 
         .stat-card span {
           display: block;
           color: #9db3d7;
           font-size: 13px;
-          margin-bottom: 8px;
+          margin-bottom: 4px;
         }
 
         .stat-card strong {
           display: block;
-          font-size: 26px;
+          font-size: 22px;
           letter-spacing: -0.04em;
         }
 
@@ -1765,6 +1788,105 @@ export default function FundOnboardingPage() {
           font-size: 18px;
         }
 
+        .setup-journey {
+          display: grid;
+          grid-template-columns: repeat(6, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 18px;
+        }
+
+        .setup-step {
+          min-height: 64px;
+          padding: 10px 11px;
+          border-radius: 12px;
+          border: 1px solid rgba(147, 197, 253, 0.14);
+          background: rgba(2, 12, 31, 0.58);
+          text-decoration: none;
+          color: #dbeafe;
+        }
+
+        .setup-step span {
+          display: block;
+          color: #60a5fa;
+          font-weight: 950;
+          font-size: 11px;
+          letter-spacing: 0.08em;
+          margin-bottom: 4px;
+        }
+
+        .setup-step strong {
+          font-size: 12px;
+          line-height: 1.28;
+        }
+
+        .setup-step.current {
+          border-color: rgba(96, 165, 250, 0.42);
+          background: rgba(37, 99, 235, 0.16);
+        }
+
+        .setup-step.complete {
+          border-color: rgba(34, 197, 94, 0.24);
+          background: rgba(22, 163, 74, 0.10);
+        }
+
+        .setup-step.complete span {
+          color: #86efac;
+        }
+
+        .setup-step.upcoming {
+          opacity: 0.78;
+        }
+
+        .setup-step em {
+          display: block;
+          margin-top: 5px;
+          color: #7189a8;
+          font-size: 9px;
+          font-style: normal;
+          font-weight: 850;
+          text-transform: uppercase;
+          letter-spacing: 0.07em;
+        }
+
+        .setup-step.complete em {
+          color: #86efac;
+        }
+
+        .setup-step.current em {
+          color: #93c5fd;
+        }
+
+        .hero-next {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+        }
+
+        .hero-next span {
+          color: #879bb7;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .next-stage-panel {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 18px;
+        }
+
+        .next-stage-panel h2 {
+          margin: 0 0 7px;
+        }
+
+        .next-stage-panel p {
+          margin: 0;
+          color: #c7d7f4;
+          line-height: 1.5;
+        }
+
         @media (max-width: 1100px) {
           .summary-grid,
           .main-grid,
@@ -1774,13 +1896,33 @@ export default function FundOnboardingPage() {
             grid-template-columns: 1fr;
           }
 
+          .setup-journey {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+
+          .next-stage-panel {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+
           .hero-top,
           .panel-header {
             flex-direction: column;
           }
 
-          .actions {
+          .actions,
+          .hero-next {
             justify-content: flex-start;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .onboarding-page {
+            padding: 18px 14px 44px;
+          }
+
+          .setup-journey {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
           }
         }
       `}</style>
@@ -1789,42 +1931,74 @@ export default function FundOnboardingPage() {
         <div className="hero">
           <div className="hero-top">
             <div>
-              <p className="eyebrow">VENTIQ Implementation Layer</p>
-              <h1>Fund Onboarding & Stakeholder Access</h1>
+              <p className="eyebrow">VENTIQ Setup Control Center</p>
+              <h1>Set up and activate your fund.</h1>
               <p className="hero-copy">
-                Create a fund, add schemes, invite stakeholders, assign
-                role-based dashboards and track activation from one workspace.
-                This replaces unsafe password sharing with secure invite links
-                where each stakeholder sets their own password.
+                Complete the fund record, assign people and access, then move
+                through governed data intake, readiness and activation.
               </p>
             </div>
 
-            <div className="actions">
-              <Link className="primary-button" href="/debt-lms">
-                Debt LMS
-              </Link>
-              <Link className="secondary-button" href="/bank-reconciliation">
-                Bank MIS
-              </Link>
+            <div className="hero-next">
+              <span>Recommended next step</span>
+              {nextAction.href.startsWith("#") ? (
+                <a className="primary-button" href={nextAction.href}>
+                  {nextAction.label} &rarr;
+                </a>
+              ) : (
+                <Link className="primary-button" href={nextAction.href}>
+                  {nextAction.label} &rarr;
+                </Link>
+              )}
             </div>
           </div>
+
+          <nav className="setup-journey" aria-label="VENTIQ onboarding journey">
+            <a className={setupStepClass(1)} href="#create-fund">
+              <span>01</span>
+              <strong>Fund Setup</strong>
+              <em>{setupStepStatus(1)}</em>
+            </a>
+            <a className={setupStepClass(2)} href="#people-access">
+              <span>02</span>
+              <strong>People & Access</strong>
+              <em>{setupStepStatus(2)}</em>
+            </a>
+            <Link className={setupStepClass(3)} href="/migration/data-intake">
+              <span>03</span>
+              <strong>Fund Data</strong>
+              <em>{setupStepStatus(3)}</em>
+            </Link>
+            <Link className={setupStepClass(4)} href="/migration/activation">
+              <span>04</span>
+              <strong>Review</strong>
+              <em>{setupStepStatus(4)}</em>
+            </Link>
+            <Link className={setupStepClass(5)} href="/migration/activation">
+              <span>05</span>
+              <strong>Activate</strong>
+              <em>{setupStepStatus(5)}</em>
+            </Link>
+            <Link className={setupStepClass(6)} href="/launch-center">
+              <span>06</span>
+              <strong>Launch</strong>
+              <em>{setupStepStatus(6)}</em>
+            </Link>
+          </nav>
 
           <div className="summary-grid">
             <div className="stat-card">
               <span>Funds</span>
               <strong>{summary.totalFunds}</strong>
             </div>
-
             <div className="stat-card">
               <span>Schemes</span>
               <strong>{summary.totalSchemes}</strong>
             </div>
-
             <div className="stat-card">
               <span>Stakeholders</span>
               <strong>{summary.totalStakeholders}</strong>
             </div>
-
             <div className="stat-card">
               <span>Activated users</span>
               <strong>{summary.activated}</strong>
@@ -1833,8 +2007,8 @@ export default function FundOnboardingPage() {
         </div>
 
         <div className="ribbon">
-          {loading ? "Loading onboarding workspace..." : dataMessage} · Secure
-          invite flow → role-based dashboard access → audit trail → onboarding
+          {loading ? "Loading onboarding workspace..." : dataMessage} &middot; Secure
+          invite flow &rarr; role-based dashboard access &rarr; audit trail &rarr; onboarding
           readiness
         </div>
 
@@ -1921,7 +2095,7 @@ export default function FundOnboardingPage() {
         </div>
 
         <div className="main-grid">
-          <form className="setup-card" onSubmit={submitFund}>
+          <form className="setup-card" id="create-fund" onSubmit={submitFund}>
             <h2>Create Fund</h2>
             <p>
               Start client onboarding by creating the fund / platform master.
@@ -2148,7 +2322,7 @@ export default function FundOnboardingPage() {
             </div>
           </form>
 
-          <form className="setup-card" onSubmit={submitStakeholder}>
+          <form className="setup-card" id="people-access" onSubmit={submitStakeholder}>
             <h2>Add Stakeholder</h2>
             <p>
               Add one stakeholder and assign dashboard access. Password is not
@@ -2476,7 +2650,7 @@ export default function FundOnboardingPage() {
                   <p>
                     {auditLog.eventDescription}
                     <br />
-                    {auditLog.actorName} · {formatDate(auditLog.createdAt)}
+                    {auditLog.actorName} &middot; {formatDate(auditLog.createdAt)}
                   </p>
                 </div>
               ))}
@@ -2488,6 +2662,26 @@ export default function FundOnboardingPage() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        <div className="panel next-stage-panel">
+          <div>
+            <p className="eyebrow">NEXT STEP</p>
+            <h2>Fund and people are established. Bring in the operating data.</h2>
+            <p>
+              Continue to Data Intake for investor, fund, portfolio, compliance
+              and document history. VENTIQ will then surface readiness and
+              exceptions before activation.
+            </p>
+          </div>
+          <div className="actions">
+            <Link className="primary-button" href="/migration/data-intake">
+              Add Fund Data
+            </Link>
+            <Link className="secondary-button" href="/migration/activation">
+              Review Readiness
+            </Link>
           </div>
         </div>
 

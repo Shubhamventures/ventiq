@@ -15,6 +15,7 @@ const PUBLIC_PAGES = new Set([
   "/privacy",
   "/product-overview",
   "/security",
+  "/start",
   "/terms",
 ]);
 
@@ -88,7 +89,7 @@ async function request(route, accept = "text/html") {
 }
 
 function pass(ok, label, detail = "") {
-  console.log(`${ok ? "PASS" : "FAIL"} - ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${ok ? "PASS" : "FAIL"} - ${label}${detail ? ` â€” ${detail}` : ""}`);
   return ok;
 }
 

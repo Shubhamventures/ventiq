@@ -28,6 +28,16 @@ export default function AuthenticatedAccountControl() {
 
   const [signingOut, setSigningOut] = useState(false);
 
+  const publicPage =
+    pathname === "/" ||
+    pathname === "/start" ||
+    pathname === "/demo" ||
+    pathname === "/faq" ||
+    pathname === "/security" ||
+    pathname === "/privacy" ||
+    pathname === "/terms" ||
+    pathname === "/product-overview";
+
   const authPage =
     pathname?.startsWith("/auth/") ||
     pathname === "/site-lock";
@@ -35,7 +45,8 @@ export default function AuthenticatedAccountControl() {
   if (
     loading ||
     !session?.user ||
-    authPage
+    authPage ||
+    publicPage
   ) {
     return null;
   }

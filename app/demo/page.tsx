@@ -3,37 +3,44 @@ import Link from "next/link";
 const journeySteps = [
   {
     step: "01",
+    title: "Create the fund and establish secure Fund Admin access",
+    description:
+      "Start with the governed fund master, then add the people who will operate the fund. Each person receives a secure invitation and sets their own password.",
+    outcome: "Fund + people established",
+  },
+  {
+    step: "02",
     title: "Bring historical fund data into one structure",
     description:
       "Investor, fund, portfolio, compliance and document records are brought into a governed fund context instead of remaining scattered across spreadsheets, PDFs and folders.",
     outcome: "One operating data foundation",
   },
   {
-    step: "02",
+    step: "03",
     title: "Review data quality and activation readiness",
     description:
-      "VENTIQ surfaces readiness, review and approval controls before migrated information becomes the basis for stakeholder workflows.",
+      "VENTIQ surfaces readiness, reconciliation, exceptions and maker-checker controls before migrated information becomes the basis for stakeholder workflows.",
     outcome: "Governed activation",
   },
   {
-    step: "03",
-    title: "Give each stakeholder the right operating view",
+    step: "04",
+    title: "Activate the fund and launch role-native workspaces",
     description:
-      "Managing Partners, Finance, Investment, Compliance and Investor Relations work from role-native views connected to the same fund context.",
+      "Once the required data layers are approved, the fund is activated and Finance, Investment, Compliance, Management and Investor workflows launch from one control centre.",
     outcome: "Role-native operations",
   },
   {
-    step: "04",
+    step: "05",
     title: "Turn governed data into investor outputs",
     description:
       "Investor financial position, cashflows, documents and diligence workflows remain connected to the fund and the entitled investor relationship.",
     outcome: "Controlled investor delivery",
   },
   {
-    step: "05",
+    step: "06",
     title: "Expand one workflow at a time",
     description:
-      "A firm can begin with a focused use case and expand into additional workflows without replacing every operating process on day one.",
+      "A firm can begin with one controlled fund and expand into additional workflows without replacing every operating process on day one.",
     outcome: "Modular adoption",
   },
 ];
@@ -132,17 +139,17 @@ export default function DemoPage() {
           </div>
 
           <div className="action-row">
-            <a className="monitor-btn monitor-btn-primary" href="#journey">
+            <Link className="monitor-btn monitor-btn-primary" href="/start">
+              Start fund onboarding
+            </Link>
+
+            <a className="monitor-btn monitor-btn-secondary" href="#journey">
               Explore the journey
             </a>
 
             <a className="monitor-btn monitor-btn-secondary" href="#stakeholders">
               See stakeholder views
             </a>
-
-            <Link className="monitor-btn monitor-btn-secondary" href="/#contact">
-              Request a walkthrough
-            </Link>
           </div>
         </div>
 
@@ -226,8 +233,8 @@ export default function DemoPage() {
             that use case.
           </div>
           <div className="action-row">
-            <Link className="monitor-btn monitor-btn-primary" href="/#contact">Request a private walkthrough</Link>
-            <Link className="monitor-btn monitor-btn-secondary" href="/product-overview">View product overview</Link>
+            <Link className="monitor-btn monitor-btn-primary" href="/start">Get started with one fund</Link>
+            <Link className="monitor-btn monitor-btn-secondary" href="/#contact">Request a private walkthrough</Link>
             <Link className="monitor-btn monitor-btn-secondary" href="/security">Security & controls</Link>
           </div>
           <p style={{ marginTop: "20px", opacity: 0.72 }}>
