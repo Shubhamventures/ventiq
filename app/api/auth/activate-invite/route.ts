@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   getRoleHomeRoute,
   getRoleLabel,
-  normalizeVentiqRole,
+  isVentiqRole,
   type VentiqRole,
 } from "../../../../lib/auth/types";
 import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
@@ -92,6 +92,23 @@ const ROLE_FUND_CAPABILITIES: Record<VentiqRole, FundCapabilities> = {
 function normalizeText(value: unknown, maxLength = 500) {
   if (typeof value !== "string") return "";
   return value.trim().slice(0, maxLength);
+}
+
+const ACTIVATION_LEGACY_ROLE_ALIASES: Record<string, VentiqRole> = {
+  compliance_officer: "compliance_team",
+  investor_lp: "investor",
+};
+
+function normalizeActivationRole(value: unknown): VentiqRole | null {
+  if (isVentiqRole(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  return ACTIVATION_LEGACY_ROLE_ALIASES[value.trim()] ?? null;
 }
 
 function normalizeEmail(value: unknown) {
@@ -380,7 +397,7 @@ async function resolveActivationContext(
     throw new Error("STAKEHOLDER_FUND_REQUIRED");
   }
 
-  const role = normalizeVentiqRole(
+  const role = normalizeActivationRole(
     stakeholder.role_key
   );
 
