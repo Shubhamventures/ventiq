@@ -12,22 +12,78 @@ export default function SetPasswordPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [activationReady, setActivationReady] = useState(false);
+  const [passwordUpdated, setPasswordUpdated] = useState(false);
 
   const [checking, setChecking] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("Checking invite session...");
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function runActivationPreflight(
+      accessToken: string,
+      requestedStakeholderId: string
+    ) {
+      const response = await fetch("/api/auth/activate-invite", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          stakeholderId: requestedStakeholderId,
+          mode: "preflight",
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        message?: string;
+        nextPath?: string;
+      };
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(
+          payload.message ||
+            "Your VENTIQ access cannot be activated safely yet."
+        );
+      }
+
+      if (
+        payload.nextPath &&
+        payload.nextPath.startsWith("/")
+      ) {
+        setNextPath(payload.nextPath);
+      }
+
+      setActivationReady(true);
+    }
+
     async function prepareInviteSession() {
       const params = new URLSearchParams(window.location.search);
 
-      const requestedNext = params.get("next") || "/fund-onboarding";
-      const requestedStakeholderId = params.get("stakeholder") || "";
+      const requestedNext =
+        params.get("next") || "/fund-onboarding";
+      const requestedStakeholderId =
+        params.get("stakeholder") || "";
 
       setNextPath(
-        requestedNext.startsWith("/") ? requestedNext : "/fund-onboarding"
+        requestedNext.startsWith("/")
+          ? requestedNext
+          : "/fund-onboarding"
       );
       setStakeholderId(requestedStakeholderId);
+      setActivationReady(false);
+
+      if (!requestedStakeholderId) {
+        setMessage(
+          "This invitation link is incomplete. Ask the Fund Administrator to resend the secure invite."
+        );
+        setChecking(false);
+        return;
+      }
 
       if (!isSupabaseConfigured || !supabase) {
         setMessage("Supabase is not configured.");
@@ -35,52 +91,95 @@ export default function SetPasswordPage() {
         return;
       }
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.user) {
+      try {
         const {
-          data: { user },
-        } = await supabase.auth.getUser();
+          data: { session },
+        } = await supabase.auth.getSession();
 
-        if (!user) {
-          setMessage(
-            "Invite session not found. Open this page from the latest invite email. If the invite expired, ask admin to resend it."
-          );
-          setChecking(false);
-          return;
+        let activeSession = session;
+
+        if (!activeSession?.user) {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+
+          if (!user) {
+            throw new Error(
+              "Invite session not found. Open this page from the latest invite email. If the invite expired, ask admin to resend it."
+            );
+          }
+
+          const {
+            data: { session: refreshedSession },
+          } = await supabase.auth.getSession();
+
+          activeSession = refreshedSession;
         }
 
-        setEmail(user.email || "");
-      } else {
-        setEmail(session.user.email || "");
-      }
+        if (
+          !activeSession?.user ||
+          !activeSession.access_token
+        ) {
+          throw new Error(
+            "Invite session not found. Open this page from the latest invite email. If the invite expired, ask admin to resend it."
+          );
+        }
 
-      setMessage("Invite verified. Please set your password.");
-      setChecking(false);
+        if (cancelled) return;
+
+        setEmail(activeSession.user.email || "");
+
+        await runActivationPreflight(
+          activeSession.access_token,
+          requestedStakeholderId
+        );
+
+        if (cancelled) return;
+
+        setMessage(
+          "Invite verified. Governed access is ready to activate after you set your password."
+        );
+      } catch (error) {
+        if (cancelled) return;
+
+        setActivationReady(false);
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to verify this VENTIQ invitation."
+        );
+      } finally {
+        if (!cancelled) {
+          setChecking(false);
+        }
+      }
     }
 
-    prepareInviteSession();
+    void prepareInviteSession();
 
-    if (!supabase) return;
+    if (!supabase) {
+      return () => {
+        cancelled = true;
+      };
+    }
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user?.email) {
         setEmail(session.user.email);
-        setMessage("Invite verified. Please set your password.");
-        setChecking(false);
       }
     });
 
     return () => {
+      cancelled = true;
       subscription.unsubscribe();
     };
   }, []);
 
-  async function submitPassword(event: FormEvent<HTMLFormElement>) {
+  async function submitPassword(
+    event: FormEvent<HTMLFormElement>
+  ) {
     event.preventDefault();
     setMessage("");
 
@@ -89,58 +188,160 @@ export default function SetPasswordPage() {
       return;
     }
 
-    if (password.length < 8) {
-      setMessage("Password must be at least 8 characters.");
+    if (!stakeholderId || !activationReady) {
+      setMessage(
+        "This invitation is not ready for governed activation. Reopen the latest invite email or contact the Fund Administrator."
+      );
       return;
     }
 
-    if (password !== confirmPassword) {
-      setMessage("Passwords do not match.");
-      return;
+    if (!passwordUpdated) {
+      if (password.length < 8) {
+        setMessage(
+          "Password must be at least 8 characters."
+        );
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        setMessage("Passwords do not match.");
+        return;
+      }
     }
 
     setSaving(true);
 
     try {
-      const { error } = await supabase.auth.updateUser({
-        password,
-      });
+      const {
+        data: { session: preflightSession },
+      } = await supabase.auth.getSession();
 
-      if (error) {
-        throw new Error(error.message);
+      if (
+        !preflightSession?.user ||
+        !preflightSession.access_token
+      ) {
+        throw new Error(
+          "Invite session not found. Open this page from the latest invite email."
+        );
       }
 
-      const now = new Date().toISOString();
+      const preflightResponse = await fetch(
+        "/api/auth/activate-invite",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${preflightSession.access_token}`,
+          },
+          body: JSON.stringify({
+            stakeholderId,
+            mode: "preflight",
+          }),
+        }
+      );
 
-      if (stakeholderId) {
-        await supabase
-          .from("ventiq_stakeholders")
-          .update({
-            invite_status: "Activated",
-            activated_at: now,
-            last_password_set_at: now,
-            access_status: "Active",
-          })
-          .eq("id", stakeholderId);
+      const preflightPayload =
+        (await preflightResponse.json()) as {
+          ok?: boolean;
+          message?: string;
+          nextPath?: string;
+        };
 
-        await supabase.from("ventiq_access_audit_logs").insert({
-          stakeholder_id: stakeholderId,
-          event_type: "Password Set",
-          event_title: "Stakeholder password set",
-          event_description:
-            "Stakeholder completed invite setup and created their password.",
-          actor_name: email || "Invited User",
-          actor_email: email || "",
-        });
+      if (
+        !preflightResponse.ok ||
+        !preflightPayload.ok
+      ) {
+        throw new Error(
+          preflightPayload.message ||
+            "Your VENTIQ access cannot be activated safely yet."
+        );
       }
 
-      setMessage("Password set successfully. Redirecting...");
-      router.push(nextPath);
+      if (
+        preflightPayload.nextPath &&
+        preflightPayload.nextPath.startsWith("/")
+      ) {
+        setNextPath(
+          preflightPayload.nextPath
+        );
+      }
+
+      if (!passwordUpdated) {
+        const { error } =
+          await supabase.auth.updateUser({
+            password,
+          });
+
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        setPasswordUpdated(true);
+      }
+
+      const {
+        data: { session: activationSession },
+      } = await supabase.auth.getSession();
+
+      if (
+        !activationSession?.user ||
+        !activationSession.access_token
+      ) {
+        throw new Error(
+          "Your password was saved, but the activation session could not be refreshed. Reopen this page and retry access activation."
+        );
+      }
+
+      const activationResponse = await fetch(
+        "/api/auth/activate-invite",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${activationSession.access_token}`,
+          },
+          body: JSON.stringify({
+            stakeholderId,
+            mode: "activate",
+          }),
+        }
+      );
+
+      const activationPayload =
+        (await activationResponse.json()) as {
+          ok?: boolean;
+          message?: string;
+          nextPath?: string;
+        };
+
+      if (
+        !activationResponse.ok ||
+        !activationPayload.ok
+      ) {
+        throw new Error(
+          activationPayload.message ||
+            "Your password was saved, but governed VENTIQ access did not finish activating. Retry access activation."
+        );
+      }
+
+      const canonicalNextPath =
+        activationPayload.nextPath &&
+        activationPayload.nextPath.startsWith("/")
+          ? activationPayload.nextPath
+          : nextPath;
+
+      setMessage(
+        "Password set and governed access activated. Redirecting..."
+      );
+
+      router.push(canonicalNextPath);
     } catch (error) {
       setMessage(
         error instanceof Error
           ? error.message
-          : "Unable to set password. Please try again."
+          : passwordUpdated
+            ? "Your password is saved, but access activation still needs to be retried."
+            : "Unable to set password. Please try again."
       );
     } finally {
       setSaving(false);
@@ -331,7 +532,7 @@ export default function SetPasswordPage() {
           <div className="field">
             <label>New Password</label>
             <input
-              disabled={checking || saving}
+              disabled={checking || saving || passwordUpdated}
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -342,7 +543,7 @@ export default function SetPasswordPage() {
           <div className="field">
             <label>Confirm Password</label>
             <input
-              disabled={checking || saving}
+              disabled={checking || saving || passwordUpdated}
               type="password"
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
@@ -352,10 +553,16 @@ export default function SetPasswordPage() {
 
           <button
             className="primary-button"
-            disabled={checking || saving}
+            disabled={checking || saving || !activationReady}
             type="submit"
           >
-            {saving ? "Saving..." : "Set Password & Continue"}
+            {saving
+              ? passwordUpdated
+                ? "Activating Access..."
+                : "Saving..."
+              : passwordUpdated
+                ? "Retry Access Activation"
+                : "Set Password & Continue"}
           </button>
         </form>
 
