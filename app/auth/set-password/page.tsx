@@ -19,6 +19,29 @@ export default function SetPasswordPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("Checking invite session...");
 
+  async function establishApplicationPerimeter(
+    accessToken: string
+  ) {
+    const response = await fetch("/api/auth/perimeter", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      error?: string;
+    };
+
+    if (!response.ok || !payload.ok) {
+      throw new Error(
+        payload.error ||
+          "Governed access is active, but the application session could not be established. Retry access activation."
+      );
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -330,8 +353,12 @@ export default function SetPasswordPage() {
           ? activationPayload.nextPath
           : nextPath;
 
+      await establishApplicationPerimeter(
+        activationSession.access_token
+      );
+
       setMessage(
-        "Password set and governed access activated. Redirecting..."
+        "Password set, governed access activated, and secure application session established. Redirecting..."
       );
 
       router.push(canonicalNextPath);

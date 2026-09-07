@@ -77,6 +77,7 @@ function run(command, args, options = {}) {
     encoding: "utf8",
     env: { ...process.env, ...(options.env || {}) },
     shell: false,
+    maxBuffer: 64 * 1024 * 1024,
   });
 
   if (result.error) {

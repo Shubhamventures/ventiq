@@ -21,6 +21,7 @@ const PUBLIC_PAGES = new Set([
 
 const PUBLIC_APIS = new Set([
   "/api/auth/perimeter",
+  "/api/auth/activate-invite",
   "/api/founder/leads",
 ]);
 
@@ -147,6 +148,38 @@ async function main() {
   });
   if (!pass(bridge.status === 401, "/api/auth/perimeter rejects missing bearer", `HTTP ${bridge.status}`)) failures++;
 
+  const inviteActivation = await fetch(`${BASE_URL}/api/auth/activate-invite`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      stakeholderId: "perimeter-certification",
+      mode: "preflight",
+    }),
+  });
+
+  let inviteActivationPayload = {};
+  try {
+    inviteActivationPayload = await inviteActivation.json();
+  } catch {
+    // Body contract is certified below.
+  }
+
+  if (!pass(
+    inviteActivation.status === 401,
+    "/api/auth/activate-invite rejects missing bearer",
+    `HTTP ${inviteActivation.status}`
+  )) failures++;
+
+  if (!pass(
+    inviteActivationPayload?.code === "AUTHENTICATION_REQUIRED",
+    "/api/auth/activate-invite returns governed auth code",
+    `code ${String(inviteActivationPayload?.code || "<none>")}`
+  )) failures++;
+
   console.log("");
   console.log("## Global site-lock removal");
   console.log("");
@@ -158,7 +191,14 @@ async function main() {
 
   const envPath = path.join(ROOT, ".env.local");
   const envText = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
-  if (!pass(/^\s*VENTIQ_APP_ACCESS_SECRET\s*=\s*\S+/m.test(envText), "VENTIQ_APP_ACCESS_SECRET remains configured")) failures++;
+  const appAccessSecretFromEnvironment =
+    String(process.env.VENTIQ_APP_ACCESS_SECRET || "").trim();
+  const appAccessSecretFromFile =
+    (/^\s*VENTIQ_APP_ACCESS_SECRET\s*=\s*(\S+)/m.exec(envText)?.[1] || "").trim();
+  if (!pass(
+    Boolean(appAccessSecretFromEnvironment || appAccessSecretFromFile),
+    "VENTIQ_APP_ACCESS_SECRET remains configured"
+  )) failures++;
   if (!pass(!/^\s*(SITE_LOCK_TOKEN|VENTIQ_SITE_LOCK_TOKEN)\s*=/m.test(envText), "legacy site-lock environment token removed")) failures++;
 
   const proxy = path.join(ROOT, "proxy.ts");

@@ -18,6 +18,7 @@ const PUBLIC_EXACT_PATHS = new Set([
   "/auth/welcome",
   "/auth/unauthorized",
   "/api/auth/perimeter",
+  "/api/auth/activate-invite",
   "/api/founder/leads",
   "/robots.txt",
   "/sitemap.xml",
