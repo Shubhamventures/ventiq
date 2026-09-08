@@ -11,7 +11,7 @@ import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ACTIVATION_CONTRACT_VERSION = "B8-F11S1";
+const ACTIVATION_CONTRACT_VERSION = "B8-F12A";
 
 type ActivationMode = "preflight" | "activate";
 
@@ -1626,6 +1626,174 @@ async function activateInvite(
   }
 }
 
+
+async function refreshInviteBatchActivationBookkeeping(
+  fundId: string
+) {
+  const {
+    data: auditRows,
+    error: auditError,
+  } = await supabaseAdmin
+    .from("ventiq_access_audit_logs")
+    .select("stakeholder_id,event_type")
+    .eq("fund_id", fundId)
+    .in("event_type", [
+      "Secure Invite Sent",
+      "Password Set",
+    ])
+    .limit(5000);
+
+  if (auditError) {
+    throw new Error(
+      `INVITE_BATCH_AUDIT_READ_FAILED:${auditError.message}`
+    );
+  }
+
+  const invitedStakeholderIds = new Set(
+    (auditRows ?? [])
+      .filter(
+        (row) =>
+          normalizeText(
+            row.event_type,
+            80
+          ) === "Secure Invite Sent"
+      )
+      .map((row) =>
+        normalizeText(
+          row.stakeholder_id,
+          80
+        )
+      )
+      .filter(Boolean)
+  );
+
+  const activatedStakeholderIds = new Set(
+    (auditRows ?? [])
+      .filter(
+        (row) =>
+          normalizeText(
+            row.event_type,
+            80
+          ) === "Password Set"
+      )
+      .map((row) =>
+        normalizeText(
+          row.stakeholder_id,
+          80
+        )
+      )
+      .filter(
+        (stakeholderId) =>
+          stakeholderId &&
+          invitedStakeholderIds.has(
+            stakeholderId
+          )
+      )
+  );
+
+  const {
+    data: batchRows,
+    error: batchReadError,
+  } = await supabaseAdmin
+    .from("ventiq_invite_batches")
+    .select(
+      "id,total_invites,sent_count,pending_count,activated_count,batch_status,created_at"
+    )
+    .eq("fund_id", fundId)
+    .order("created_at", {
+      ascending: false,
+    })
+    .limit(1);
+
+  if (batchReadError) {
+    throw new Error(
+      `INVITE_BATCH_READ_FAILED:${batchReadError.message}`
+    );
+  }
+
+  const batch =
+    (batchRows ?? [])[0] ?? null;
+
+  if (!batch) {
+    return {
+      ok: true,
+      updated: false,
+      activatedCount:
+        activatedStakeholderIds.size,
+      batchStatus: "No Batch",
+    };
+  }
+
+  const totalInvites = Number(
+    batch.total_invites ??
+      batch.sent_count ??
+      0
+  );
+
+  const activatedCount =
+    totalInvites > 0
+      ? Math.min(
+          activatedStakeholderIds.size,
+          totalInvites
+        )
+      : activatedStakeholderIds.size;
+
+  const batchStatus =
+    totalInvites > 0 &&
+    activatedCount >= totalInvites
+      ? "Activated"
+      : normalizeText(
+          batch.batch_status,
+          80
+        ) || "Sent";
+
+  const {
+    data: updatedBatch,
+    error: batchWriteError,
+  } = await supabaseAdmin
+    .from("ventiq_invite_batches")
+    .update({
+      activated_count: activatedCount,
+      batch_status: batchStatus,
+    })
+    .eq(
+      "id",
+      normalizeText(
+        batch.id,
+        80
+      )
+    )
+    .select(
+      "id,activated_count,batch_status"
+    )
+    .single();
+
+  if (
+    batchWriteError ||
+    !updatedBatch
+  ) {
+    throw new Error(
+      `INVITE_BATCH_UPDATE_FAILED:${
+        batchWriteError?.message ||
+        "no row returned"
+      }`
+    );
+  }
+
+  return {
+    ok: true,
+    updated: true,
+    activatedCount: Number(
+      updatedBatch.activated_count ?? 0
+    ),
+    batchStatus:
+      normalizeText(
+        updatedBatch.batch_status,
+        80
+      ) || batchStatus,
+  };
+}
+
 function publicError(error: unknown) {
   const message =
     error instanceof Error
@@ -1708,8 +1876,38 @@ export async function POST(
       context
     );
 
+    let inviteBatchBookkeeping:
+      | {
+          ok: boolean;
+          updated: boolean;
+          activatedCount: number;
+          batchStatus: string;
+        }
+      | null = null;
+
     if (mode === "activate") {
       await activateInvite(context);
+
+      try {
+        inviteBatchBookkeeping =
+          await refreshInviteBatchActivationBookkeeping(
+            context.fundId
+          );
+      } catch (bookkeepingError) {
+        console.error(
+          "VENTIQ invite batch bookkeeping failed:",
+          bookkeepingError instanceof Error
+            ? bookkeepingError.message
+            : String(bookkeepingError)
+        );
+
+        inviteBatchBookkeeping = {
+          ok: false,
+          updated: false,
+          activatedCount: -1,
+          batchStatus: "Bookkeeping Warning",
+        };
+      }
     }
 
     return jsonResponse({
@@ -1725,6 +1923,7 @@ export async function POST(
           : "Not Applicable",
       activated:
         mode === "activate",
+      inviteBatchBookkeeping,
     });
   } catch (error) {
     console.error(

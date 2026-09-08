@@ -245,16 +245,6 @@ function filterRowsForFund(
   );
 }
 
-function uniqueFundNames(rowGroups: DataRow[][]) {
-  return Array.from(
-    new Set(
-      rowGroups
-        .flat()
-        .map(getFundName)
-        .filter(Boolean)
-    )
-  ).sort((left, right) => left.localeCompare(right));
-}
 
 function latestTimestamp(rows: DataRow[]) {
   return (
@@ -317,12 +307,10 @@ export default function ManagingPartnerAIPage() {
   const { session } = useVentiqAuth();
   const {
     activeFundName,
+    availableFundNames,
     setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund("VENTIQ Growth Fund II");
-  const [availableFunds, setAvailableFunds] = useState<string[]>([
-    "VENTIQ Growth Fund II",
-  ]);
   const [fundActivationStatus, setFundActivationStatus] = useState("Checking");
   const [fundActivatedAt, setFundActivatedAt] = useState("");
   const [fundActivatedBy, setFundActivatedBy] = useState("");
@@ -435,7 +423,7 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
   async function loadManagingPartnerDashboard() {
     if (!isSupabaseConfigured || !supabase) {
       setErrorMessage(
-        "The sample Managing Partner workspace is temporarily unavailable. Please request a walkthrough."
+        "The Managing Partner workspace is unavailable because Supabase is not configured"
       );
       setLoading(false);
       return;
@@ -649,34 +637,6 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
         loadActivationRecord(),
         loadLatestPerformanceCalculation(),
       ]);
-
-      const fundOptions = uniqueFundNames([
-        migratedFundMasterData,
-        migratedInvestorMasterData,
-        migratedFundCommitmentsData,
-        migratedFinancialPositionsData,
-        migratedPortfolioInvestmentsData,
-        migratedComplianceItemsData,
-        migratedPdfDocumentsData,
-        fundsData,
-        commitmentsData,
-        capitalCallsData,
-        distributionsData,
-        documentsData,
-        fundInvestmentsData,
-        fundPerformanceMetricsData,
-        dataRoomDocumentsData,
-      ]);
-
-      const nextFundOptions = fundOptions.length
-        ? fundOptions
-        : [activeFundName];
-      setAvailableFunds(nextFundOptions);
-
-      if (!nextFundOptions.includes(activeFundName)) {
-        setActiveFundName(nextFundOptions[0]);
-        return;
-      }
 
       const selectedFundRows = [
         ...fundsData,
@@ -1062,6 +1022,44 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
   const companyMap = useMemo(() => {
     return new Map(portfolioCompanies.map((company) => [getId(company), company]));
   }, [portfolioCompanies]);
+
+  const migratedCompanyByPortfolioCode = useMemo(() => {
+    const entries =
+      migratedPortfolioInvestments
+        .map((row) => {
+          const code = getString(
+            row,
+            ["portfolio_code"],
+            ""
+          );
+          const companyName = getString(
+            row,
+            [
+              "portfolio_company",
+              "company_name",
+            ],
+            ""
+          );
+
+          return [
+            code,
+            companyName,
+          ] as const;
+        })
+        .filter(
+          ([code, companyName]) =>
+            Boolean(
+              code &&
+                companyName
+            )
+        );
+
+    return new Map(entries);
+  }, [
+    migratedPortfolioInvestments,
+  ]);
+
+
 
     const dashboardMetrics = useMemo(() => {
     const migrationInvestorCount = getNumber(latestInvestorBatch ?? undefined, [
@@ -1733,34 +1731,13 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       (question) => getString(question, ["status"], "Open") === "Answered"
     ).length;
 
-    const importedFolderSet = new Set(
-      dataRoomDocuments.map((documentRecord) =>
-        getString(documentRecord, ["suggested_folder"], "")
-      )
-    );
-
-    const readinessScore = Math.min(
-      95,
-      Math.max(
-        0,
-        55 +
-          Math.min(20, importedDataRoomDocuments * 4) +
-          Math.min(10, lpEngagementEvents * 2) +
-          Math.min(12, answeredDDQQuestions * 3) -
-          Math.min(10, openDDQQuestions * 2) +
-          (importedFolderSet.has("Fund Overview") ? 5 : 0) +
-          (importedFolderSet.has("Legal & Compliance") ? 5 : 0) +
-          (importedFolderSet.has("Track Record & Performance") ? 5 : 0) +
-          (importedFolderSet.has("Investor Reporting Samples") ? 5 : 0)
-      )
-    );
 
     const diligenceStatus =
       openDDQQuestions > 0
         ? "Action needed"
-        : readinessScore >= 80
-        ? "Ready"
-        : "Needs review";
+        : importedDataRoomDocuments > 0
+        ? "No open DDQ questions"
+        : "No data room documents";
 
     const recommendedAction =
       openDDQQuestions > 0
@@ -1774,7 +1751,6 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
         : "Continue monitoring LP diligence";
 
     return {
-      readinessScore,
       portalReadyDocuments,
       storedDataRoomFiles,
       investorReportingDocuments,
@@ -1793,7 +1769,7 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     dataRoomEngagementEvents,
     dataRoomQuestions,
   ]);
-  const fundRows = useMemo(() => {
+  const legacyFundRows = useMemo(() => {
     return funds.map((fund) => {
       const fundId = getId(fund);
 
@@ -1883,6 +1859,72 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     distributions,
     fundPerformanceMetrics,
     fundInvestments,
+  ]);
+
+
+  const fundRows = useMemo(() => {
+    if (legacyFundRows.length > 0) {
+      return legacyFundRows;
+    }
+
+    const governedFundIsActive =
+      fundActivationStatus.toLowerCase() === "active" ||
+      dashboardMetrics.activeFunds > 0;
+
+    if (
+      !activeFundName ||
+      !governedFundIsActive
+    ) {
+      return [];
+    }
+
+    const canonicalFund =
+      migratedFundMaster[0];
+
+    return [
+      {
+        id:
+          getId(canonicalFund) ||
+          activeFundName,
+        name: activeFundName,
+        startDate: formatDate(
+          canonicalFund?.["fund_start_date"] ??
+            canonicalFund?.["start_date"] ??
+            canonicalFund?.["inception_date"]
+        ),
+        committed:
+          dashboardMetrics.totalCommitted,
+        called:
+          dashboardMetrics.totalCalled,
+        distributed:
+          dashboardMetrics.totalDistributed,
+        dryPowder:
+          dashboardMetrics.uncalledCapital,
+        deploymentRate:
+          dashboardMetrics.deploymentRate,
+        investors:
+          migratedFundCommitments.length,
+        grossIrr:
+          dashboardMetrics.grossIrr,
+        netIrr:
+          dashboardMetrics.netIrr,
+        dpi:
+          dashboardMetrics.dpi,
+        tvpi:
+          dashboardMetrics.tvpi,
+        currentNav:
+          dashboardMetrics.currentNav,
+        investments:
+          dashboardMetrics.fundInvestments,
+      },
+    ];
+  }, [
+    activeFundName,
+    dashboardMetrics,
+    fundActivationStatus,
+    legacyFundRows,
+    migratedFundCommitments.length,
+    migratedFundMaster,
   ]);
 
   const upcomingRepaymentRows = useMemo(() => {
@@ -2610,7 +2652,7 @@ async function handleGeneratePowerPoint() {
                 </span>
                 <select
                   aria-label="Select active fund"
-                  disabled={!fundContextReady || loading}
+                  disabled={!fundContextReady || loading || availableFundNames.length === 0}
                   onChange={(event) => setActiveFundName(event.target.value)}
                   style={{
                     background: "#0f172a",
@@ -2622,7 +2664,7 @@ async function handleGeneratePowerPoint() {
                   }}
                   value={activeFundName}
                 >
-                  {availableFunds.map((fundName) => (
+                  {availableFundNames.map((fundName) => (
                     <option key={fundName} value={fundName}>
                       {fundName}
                     </option>
@@ -2649,8 +2691,8 @@ async function handleGeneratePowerPoint() {
           <div className="preview-card">
             <h2>Preparing Managing Partner Workspace...</h2>
             <p>
-              VENTIQ is preparing the sample fund performance, portfolio,
-              compliance and workflow intelligence view.
+              VENTIQ is loading governed fund performance, portfolio,
+              compliance and workflow intelligence records.
             </p>
           </div>
         )}
@@ -2980,8 +3022,8 @@ async function handleGeneratePowerPoint() {
 
               <div className="impact-grid">
                 <div className="impact-card">
-                  <h3>{dataRoomExecutiveMetrics.readinessScore}%</h3>
-                  <p>Data room readiness</p>
+                  <h3>{dataRoomExecutiveMetrics.importedDataRoomDocuments}</h3>
+                  <p>Data room documents</p>
                 </div>
 
                 <div className="impact-card">
@@ -3097,7 +3139,7 @@ async function handleGeneratePowerPoint() {
                   🗂️ <strong>LP Diligence</strong>
                   <br />
                   {dataRoomExecutiveMetrics.openDDQQuestions} DDQ questions open,{" "}
-                  {dataRoomExecutiveMetrics.readinessScore}% data room readiness
+                  {dataRoomExecutiveMetrics.importedDataRoomDocuments} data room documents
                 </div>
 
                 <div className="queue-item">
@@ -3175,11 +3217,40 @@ async function handleGeneratePowerPoint() {
           const company = companyMap.get(
             getString(repayment, ["portfolio_company_id"], "")
           );
+          const repaymentPortfolioCode =
+            getString(
+              repayment,
+              ["portfolio_code"],
+              ""
+            );
+          const repaymentCompanyName =
+            getString(
+              repayment,
+              [
+                "portfolio_company",
+                "borrower_name",
+                "company_name",
+              ],
+              ""
+            ) ||
+            getString(
+              company,
+              ["company_name"],
+              ""
+            ) ||
+            migratedCompanyByPortfolioCode.get(
+              repaymentPortfolioCode
+            ) ||
+            getString(
+              repayment,
+              ["portfolio_code"],
+              "Unknown"
+            );
 
           return (
             <div className="journal-row" key={getId(repayment)}>
               <span>
-                {getString(company, ["company_name"], "Unknown")} •{" "}
+                {repaymentCompanyName} •{" "}
                 {formatDate(repayment["due_date"])}
               </span>
               <strong>
