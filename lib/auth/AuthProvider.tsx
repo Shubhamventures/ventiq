@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 
@@ -20,9 +21,95 @@ import {
 
 import {
   getRoleHomeRoute,
-  isVentiqRole,
+  normalizeVentiqRole,
   type VentiqRole,
 } from "./types";
+
+const ACTIVE_FUND_STORAGE_KEY = "ventiq.activeFundName";
+const ACTIVE_FUND_CHANGE_EVENT = "ventiq:active-fund-changed";
+
+function normalizeFundName(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function readRequestedActiveFundName() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return (
+    window.localStorage
+      .getItem(ACTIVE_FUND_STORAGE_KEY)
+      ?.trim() ?? ""
+  );
+}
+
+function subscribeRequestedActiveFundName(
+  onStoreChange: () => void
+) {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+
+  function handleStorage(event: StorageEvent) {
+    if (event.key === ACTIVE_FUND_STORAGE_KEY) {
+      onStoreChange();
+    }
+  }
+
+  function handleFundChange() {
+    onStoreChange();
+  }
+
+  window.addEventListener(
+    "storage",
+    handleStorage
+  );
+  window.addEventListener(
+    ACTIVE_FUND_CHANGE_EVENT,
+    handleFundChange
+  );
+
+  return () => {
+    window.removeEventListener(
+      "storage",
+      handleStorage
+    );
+    window.removeEventListener(
+      ACTIVE_FUND_CHANGE_EVENT,
+      handleFundChange
+    );
+  };
+}
+
+function writeRequestedActiveFundName(
+  fundName: string
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const nextFundName = fundName.trim();
+
+  if (nextFundName) {
+    window.localStorage.setItem(
+      ACTIVE_FUND_STORAGE_KEY,
+      nextFundName
+    );
+  } else {
+    window.localStorage.removeItem(
+      ACTIVE_FUND_STORAGE_KEY
+    );
+  }
+
+  window.dispatchEvent(
+    new CustomEvent(ACTIVE_FUND_CHANGE_EVENT, {
+      detail: {
+        fundName: nextFundName,
+      },
+    })
+  );
+}
 
 type OrganisationSummary = {
   id: string;
@@ -81,6 +168,10 @@ type VentiqAuthContextValue = {
   profile: VentiqProfile | null;
   memberships: OrganisationMembership[];
   fundAccess: UserFundAccess[];
+  availableFundAccess: UserFundAccess[];
+  activeFundAccess: UserFundAccess | null;
+  activeFundName: string;
+  fundContextReady: boolean;
   activeRole: VentiqRole | null;
   activeOrganisationId: string | null;
   investorId: string | null;
@@ -94,6 +185,7 @@ type VentiqAuthContextValue = {
 
   signOut: () => Promise<void>;
   refreshAccess: () => Promise<void>;
+  setActiveFundName: (fundName: string) => void;
 
   canUseRole: (
     allowedRoles: readonly VentiqRole[]
@@ -127,11 +219,18 @@ export function AuthProvider({
     UserFundAccess[]
   >([]);
 
+  const requestedActiveFundName =
+    useSyncExternalStore(
+      subscribeRequestedActiveFundName,
+      readRequestedActiveFundName,
+      () => ""
+    );
+
   const [accessError, setAccessError] = useState("");
 
-
   const accessUserIdRef = useRef("");
-const clearAccessState = useCallback(() => {
+
+  const clearAccessState = useCallback(() => {
     setProfile(null);
     setMemberships([]);
     setFundAccess([]);
@@ -388,9 +487,11 @@ const clearAccessState = useCallback(() => {
   const activeRole =
     useMemo<VentiqRole | null>(() => {
       const profileRole =
-        profile?.default_role;
+        normalizeVentiqRole(
+          profile?.default_role
+        );
 
-      if (isVentiqRole(profileRole)) {
+      if (profileRole) {
         return profileRole;
       }
 
@@ -400,11 +501,9 @@ const clearAccessState = useCallback(() => {
             membership.is_primary
         ) ?? memberships[0];
 
-      return isVentiqRole(
+      return normalizeVentiqRole(
         primaryMembership?.role
-      )
-        ? primaryMembership.role
-        : null;
+      );
     }, [
       memberships,
       profile?.default_role,
@@ -428,6 +527,98 @@ const clearAccessState = useCallback(() => {
   }, [
     memberships,
     profile?.active_organisation_id,
+  ]);
+
+  const availableFundAccess = useMemo(() => {
+    const activeViewableAccess = fundAccess.filter(
+      (access) =>
+        access.status === "Active" &&
+        access.can_view &&
+        Boolean(access.fund_name.trim())
+    );
+
+    if (!activeOrganisationId) {
+      return activeViewableAccess;
+    }
+
+    return activeViewableAccess.filter(
+      (access) =>
+        access.organisation_id ===
+        activeOrganisationId
+    );
+  }, [activeOrganisationId, fundAccess]);
+
+  const activeFundAccess = useMemo(() => {
+    if (availableFundAccess.length === 0) {
+      return null;
+    }
+
+    const requested = normalizeFundName(
+      requestedActiveFundName
+    );
+
+    if (requested) {
+      const exactMatch = availableFundAccess.find(
+        (access) =>
+          normalizeFundName(access.fund_name) ===
+          requested
+      );
+
+      if (exactMatch) {
+        return exactMatch;
+      }
+    }
+
+    return availableFundAccess[0];
+  }, [
+    availableFundAccess,
+    requestedActiveFundName,
+  ]);
+
+  const activeFundName =
+    activeFundAccess?.fund_name?.trim() ?? "";
+
+  const fundContextReady = !loading;
+
+  const setActiveFundName = useCallback(
+    (fundName: string) => {
+      const nextFundName = fundName.trim();
+
+      if (!nextFundName) {
+        return;
+      }
+
+      writeRequestedActiveFundName(nextFundName);
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (
+      !fundContextReady ||
+      !session?.user?.id
+    ) {
+      return;
+    }
+
+    if (!activeFundName) {
+      if (requestedActiveFundName) {
+        writeRequestedActiveFundName("");
+      }
+      return;
+    }
+
+    if (
+      normalizeFundName(requestedActiveFundName) !==
+      normalizeFundName(activeFundName)
+    ) {
+      writeRequestedActiveFundName(activeFundName);
+    }
+  }, [
+    activeFundName,
+    fundContextReady,
+    requestedActiveFundName,
+    session?.user?.id,
   ]);
 
   const investorId = useMemo(() => {
@@ -466,33 +657,22 @@ const clearAccessState = useCallback(() => {
 
   const canAccessFund = useCallback(
     (fundName: string) => {
-      if (
-        !activeRole ||
-        !fundName.trim()
-      ) {
+      const normalizedFundName =
+        normalizeFundName(fundName);
+
+      if (!activeRole || !normalizedFundName) {
         return false;
       }
 
-      if (activeRole === "fund_admin") {
-        return true;
-      }
-
-      const normalizedFundName =
-        fundName.trim().toLowerCase();
-
-      return fundAccess.some(
+      return availableFundAccess.some(
         (access) =>
-          access.can_view &&
-          access.status === "Active" &&
-          access.fund_name
-            .trim()
-            .toLowerCase() ===
-            normalizedFundName
+          normalizeFundName(access.fund_name) ===
+          normalizedFundName
       );
     },
     [
       activeRole,
-      fundAccess,
+      availableFundAccess,
     ]
   );
 
@@ -513,14 +693,77 @@ const clearAccessState = useCallback(() => {
         };
       }
 
-      const { error } =
+      const { data, error } =
         await client.auth.signInWithPassword({
           email: email.trim(),
           password,
         });
 
+      if (error) {
+        return {
+          error: error.message,
+        };
+      }
+
+      const accessToken =
+        data.session?.access_token ?? "";
+
+      if (!accessToken) {
+        await client.auth.signOut();
+
+        return {
+          error:
+            "VENTIQ signed you in, but no secure application session was issued. Please sign in again.",
+        };
+      }
+
+      try {
+        const perimeterResponse =
+          await fetch("/api/auth/perimeter", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          });
+
+        let perimeterPayload: {
+          ok?: boolean;
+          error?: string;
+        } = {};
+
+        try {
+          perimeterPayload =
+            (await perimeterResponse.json()) as {
+              ok?: boolean;
+              error?: string;
+            };
+        } catch {
+          // The HTTP status is still authoritative below.
+        }
+
+        if (
+          !perimeterResponse.ok ||
+          !perimeterPayload.ok
+        ) {
+          await client.auth.signOut();
+
+          return {
+            error:
+              perimeterPayload.error ||
+              "VENTIQ could not establish the governed application session.",
+          };
+        }
+      } catch {
+        await client.auth.signOut();
+
+        return {
+          error:
+            "VENTIQ could not establish the governed application session.",
+        };
+      }
+
       return {
-        error: error?.message ?? null,
+        error: null,
       };
     },
     []
@@ -529,10 +772,19 @@ const clearAccessState = useCallback(() => {
   const signOut = useCallback(async () => {
     const client = supabase;
 
+    try {
+      await fetch("/api/auth/perimeter", {
+        method: "DELETE",
+      });
+    } catch {
+      // Best effort: Supabase sign-out still proceeds below.
+    }
+
     if (client !== null) {
       await client.auth.signOut();
     }
 
+    writeRequestedActiveFundName("");
     setSession(null);
     clearAccessState();
   }, [
@@ -554,6 +806,10 @@ const clearAccessState = useCallback(() => {
         profile,
         memberships,
         fundAccess,
+        availableFundAccess,
+        activeFundAccess,
+        activeFundName,
+        fundContextReady,
         activeRole,
         activeOrganisationId,
         investorId,
@@ -561,17 +817,22 @@ const clearAccessState = useCallback(() => {
         signIn,
         signOut,
         refreshAccess,
+        setActiveFundName,
         canUseRole,
         canAccessFund,
         getDefaultRoute,
       }),
       [
         accessError,
+        activeFundAccess,
+        activeFundName,
         activeOrganisationId,
         activeRole,
+        availableFundAccess,
         canAccessFund,
         canUseRole,
         fundAccess,
+        fundContextReady,
         getDefaultRoute,
         investorId,
         loading,
@@ -579,6 +840,7 @@ const clearAccessState = useCallback(() => {
         profile,
         refreshAccess,
         session,
+        setActiveFundName,
         signIn,
         signOut,
       ]

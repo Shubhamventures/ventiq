@@ -1,12 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../../lib/supabaseClient";
 
 export default function SetPasswordPage() {
-  const router = useRouter();
-
   const [nextPath, setNextPath] = useState("/fund-onboarding");
   const [stakeholderId, setStakeholderId] = useState("");
   const [email, setEmail] = useState("");
@@ -361,7 +358,7 @@ export default function SetPasswordPage() {
         "Password set, governed access activated, and secure application session established. Redirecting..."
       );
 
-      router.push(canonicalNextPath);
+      window.location.replace(canonicalNextPath);
     } catch (error) {
       setMessage(
         error instanceof Error

@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import {
+  getRoleHomeRoute,
+  getRoleLabel,
+  normalizeVentiqRole,
+} from "../../../../lib/auth/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,53 +26,19 @@ type RoleConfig = {
   dashboardPath: string;
 };
 
-const INVITABLE_ROLES: Record<string, RoleConfig> = {
-  fund_admin: {
-    canonicalRole: "fund_admin",
-    roleLabel: "Fund Admin",
-    dashboardPath: "/fund-onboarding",
-  },
-  managing_partner: {
-    canonicalRole: "managing_partner",
-    roleLabel: "Managing Partner",
-    dashboardPath: "/managing-partner-ai",
-  },
-  finance_head: {
-    canonicalRole: "finance_head",
-    roleLabel: "Finance Head",
-    dashboardPath: "/finance-head-ai",
-  },
-  investment_team: {
-    canonicalRole: "investment_team",
-    roleLabel: "Investment Team",
-    dashboardPath: "/investment-team-ai",
-  },
-  compliance_officer: {
-    canonicalRole: "compliance_team",
-    roleLabel: "Compliance Team",
-    dashboardPath: "/compliance-ai",
-  },
-  compliance_team: {
-    canonicalRole: "compliance_team",
-    roleLabel: "Compliance Team",
-    dashboardPath: "/compliance-ai",
-  },
-  investor_relations: {
-    canonicalRole: "investor_relations",
-    roleLabel: "Investor Relations",
-    dashboardPath: "/investor-portal",
-  },
-  investor_lp: {
-    canonicalRole: "investor",
-    roleLabel: "Investor / LP",
-    dashboardPath: "/investor-portal",
-  },
-  investor: {
-    canonicalRole: "investor",
-    roleLabel: "Investor / LP",
-    dashboardPath: "/investor-portal",
-  },
-};
+function resolveRoleConfig(roleKey: string): RoleConfig | null {
+  const canonicalRole = normalizeVentiqRole(roleKey);
+
+  if (!canonicalRole) {
+    return null;
+  }
+
+  return {
+    canonicalRole,
+    roleLabel: getRoleLabel(canonicalRole),
+    dashboardPath: getRoleHomeRoute(canonicalRole),
+  };
+}
 
 function normalizeText(value: unknown, maxLength = 500) {
   if (typeof value !== "string") return "";
@@ -256,7 +227,7 @@ export async function POST(request: NextRequest) {
     const fullName =
       normalizeText(stakeholder.full_name, 200) || "VENTIQ User";
     const storedRoleKey = normalizeText(stakeholder.role_key, 80);
-    const role = INVITABLE_ROLES[storedRoleKey];
+    const role = resolveRoleConfig(storedRoleKey);
     const accessStatus = normalizeText(stakeholder.access_status, 80).toLowerCase();
     const linkedAuthUserId = normalizeText(stakeholder.auth_user_id, 80);
 

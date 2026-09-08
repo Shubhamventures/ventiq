@@ -1,5 +1,3 @@
-"use client";
-
 export const VENTIQ_ROLES = [
   "fund_admin",
   "managing_partner",
@@ -21,13 +19,13 @@ export const ROLE_LABELS: Record<VentiqRole, string> = {
   investment_team: "Investment Team",
   compliance_team: "Compliance Team",
   investor_relations: "Investor Relations",
-  investor: "Investor",
+  investor: "Investor / LP",
   maker: "Maker",
   checker: "Checker",
 };
 
 export const ROLE_HOME_ROUTES: Record<VentiqRole, string> = {
-  fund_admin: "/workspace",
+  fund_admin: "/fund-onboarding",
   managing_partner: "/managing-partner-ai",
   finance_head: "/finance-head-ai",
   investment_team: "/investment-team-ai",
@@ -38,6 +36,11 @@ export const ROLE_HOME_ROUTES: Record<VentiqRole, string> = {
   checker: "/migration/activation",
 };
 
+export const LEGACY_ROLE_ALIASES: Record<string, VentiqRole> = {
+  compliance_officer: "compliance_team",
+  investor_lp: "investor",
+};
+
 export function isVentiqRole(value: unknown): value is VentiqRole {
   return (
     typeof value === "string" &&
@@ -45,10 +48,26 @@ export function isVentiqRole(value: unknown): value is VentiqRole {
   );
 }
 
+export function normalizeVentiqRole(
+  value: unknown
+): VentiqRole | null {
+  if (isVentiqRole(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  return LEGACY_ROLE_ALIASES[value.trim()] ?? null;
+}
+
 export function getRoleLabel(value: string | null | undefined) {
-  return isVentiqRole(value) ? ROLE_LABELS[value] : "Access Not Assigned";
+  const normalized = normalizeVentiqRole(value);
+  return normalized ? ROLE_LABELS[normalized] : "Access Not Assigned";
 }
 
 export function getRoleHomeRoute(value: string | null | undefined) {
-  return isVentiqRole(value) ? ROLE_HOME_ROUTES[value] : "/workspace";
+  const normalized = normalizeVentiqRole(value);
+  return normalized ? ROLE_HOME_ROUTES[normalized] : "/workspace";
 }

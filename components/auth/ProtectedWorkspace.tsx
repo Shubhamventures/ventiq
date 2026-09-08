@@ -1,11 +1,10 @@
-﻿"use client";
+"use client";
 
 import { useEffect, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 import type { VentiqRole } from "../../lib/auth/types";
-import { useActiveFund } from "../../lib/useActiveFund";
 
 type ProtectedWorkspaceProps = {
   children: ReactNode;
@@ -84,15 +83,12 @@ export default function ProtectedWorkspace({
   const router = useRouter();
 
   const {
-    activeFundName,
-    isReady: fundContextReady,
-  } = useActiveFund("VENTIQ Growth Fund II");
-
-  const {
     loading,
     session,
     profile,
     activeRole,
+    activeFundName,
+    fundContextReady,
     accessError,
     canUseRole,
     canAccessFund,
@@ -104,8 +100,13 @@ export default function ProtectedWorkspace({
 
   const fundAllowed =
     !requireFundAccess ||
-    activeRole === "fund_admin" ||
-    canAccessFund(activeFundName);
+    (Boolean(activeFundName) &&
+      canAccessFund(activeFundName));
+
+  const needsFundSetup =
+    requireFundAccess &&
+    activeRole === "fund_admin" &&
+    !activeFundName;
 
   useEffect(() => {
     if (loading || !fundContextReady) {
@@ -119,6 +120,11 @@ export default function ProtectedWorkspace({
       return;
     }
 
+    if (needsFundSetup) {
+      router.replace("/fund-onboarding");
+      return;
+    }
+
     if (!profileIsActive || !roleAllowed || !fundAllowed) {
       router.replace("/auth/unauthorized");
     }
@@ -126,6 +132,7 @@ export default function ProtectedWorkspace({
     fundAllowed,
     fundContextReady,
     loading,
+    needsFundSetup,
     pathname,
     profileIsActive,
     roleAllowed,
@@ -178,11 +185,24 @@ export default function ProtectedWorkspace({
     );
   }
 
+  if (needsFundSetup) {
+    return (
+      <GateMessage
+        title="Create or select a fund first"
+        message="This workspace needs an active fund. Redirecting to Setup Control Center so you can create or select the governed fund before continuing."
+      />
+    );
+  }
+
   if (!fundAllowed) {
     return (
       <GateMessage
         title="Fund permission required"
-        message={`Your account does not currently have access to ${activeFundName}.`}
+        message={
+          activeFundName
+            ? `Your account does not currently have access to ${activeFundName}.`
+            : "No active fund is assigned to this account. Open Setup Control Center or ask the Fund Administrator to assign fund access."
+        }
       />
     );
   }

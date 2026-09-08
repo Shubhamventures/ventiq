@@ -3,13 +3,15 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   getRoleHomeRoute,
   getRoleLabel,
-  isVentiqRole,
+  normalizeVentiqRole,
   type VentiqRole,
 } from "../../../../lib/auth/types";
 import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ACTIVATION_CONTRACT_VERSION = "B8-F11S1";
 
 type ActivationMode = "preflight" | "activate";
 
@@ -94,23 +96,6 @@ function normalizeText(value: unknown, maxLength = 500) {
   return value.trim().slice(0, maxLength);
 }
 
-const ACTIVATION_LEGACY_ROLE_ALIASES: Record<string, VentiqRole> = {
-  compliance_officer: "compliance_team",
-  investor_lp: "investor",
-};
-
-function normalizeActivationRole(value: unknown): VentiqRole | null {
-  if (isVentiqRole(value)) {
-    return value;
-  }
-
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  return ACTIVATION_LEGACY_ROLE_ALIASES[value.trim()] ?? null;
-}
-
 function normalizeEmail(value: unknown) {
   return normalizeText(value, 320).toLowerCase();
 }
@@ -137,12 +122,18 @@ function jsonResponse(
   body: Record<string, unknown>,
   status = 200
 ) {
-  return NextResponse.json(body, {
-    status,
-    headers: {
-      "Cache-Control": "no-store",
+  return NextResponse.json(
+    {
+      ...body,
+      contractVersion: ACTIVATION_CONTRACT_VERSION,
     },
-  });
+    {
+      status,
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    }
+  );
 }
 
 function jsonError(
@@ -397,7 +388,7 @@ async function resolveActivationContext(
     throw new Error("STAKEHOLDER_FUND_REQUIRED");
   }
 
-  const role = normalizeActivationRole(
+  const role = normalizeVentiqRole(
     stakeholder.role_key
   );
 
