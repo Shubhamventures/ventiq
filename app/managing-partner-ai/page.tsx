@@ -1104,11 +1104,6 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     const migrationAtRiskCount = getNumber(latestPortfolioBatch ?? undefined, [
       "at_risk_count",
     ]);
-    const migrationRepaymentCount = getNumber(
-      latestPortfolioBatch ?? undefined,
-      ["repayment_count"]
-    );
-
     const migrationFundCount = getNumber(latestFundBatch ?? undefined, [
       "total_funds",
     ]);
@@ -1160,10 +1155,6 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
 
     const migratedAtRiskRows = migratedPortfolioInvestments.filter(
       (row) => getString(row, ["risk_status"], "") === "At Risk"
-    ).length;
-
-    const migratedRepaymentRows = migratedPortfolioInvestments.filter((row) =>
-      Boolean(getString(row, ["repayment_due_date"], ""))
     ).length;
 
     const migratedComplianceReviewRows = migratedComplianceItems.filter((row) => {
@@ -1371,12 +1362,9 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       ? String(sourceBatchIds[0] ?? "")
       : "";
 
-    const legacyUpcomingRepayments = debtRepayments.filter(
+    const upcomingRepayments = debtRepayments.filter(
       (row) => getString(row, ["payment_status"], "") === "upcoming"
     ).length;
-
-    const upcomingRepayments =
-      migrationRepaymentCount || migratedRepaymentRows || legacyUpcomingRepayments;
 
     const overdueRepayments = debtRepayments.filter(
       (row) => getString(row, ["payment_status"], "") === "overdue"
