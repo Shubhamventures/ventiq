@@ -38,6 +38,7 @@ const ACTIONS = new Set([
   "start_review",
   "assign_owner",
   "request_evidence",
+  "receive_evidence",
   "add_review_note",
 ]);
 
@@ -251,6 +252,183 @@ async function loadComplianceItem(
   return data as DataRow;
 }
 
+type ComplianceBatchSnapshot = {
+  id: string;
+  fundName: string;
+  totalItems: number;
+  evidenceAvailableCount: number;
+  pendingReviewCount: number;
+  highRiskCount: number;
+  readyCount: number;
+  updatedAt: unknown;
+};
+
+function isOpenComplianceStatus(row: DataRow) {
+  const status = normalizeText(row.filing_status, 80).toLowerCase();
+  return !FINAL_STATUSES.has(status);
+}
+
+function isHighRiskComplianceItem(row: DataRow) {
+  return normalizeText(row.risk_level, 40).toLowerCase() === "high";
+}
+
+async function loadGovernedEvidenceDocument(
+  supabase: SupabaseAdmin,
+  fundName: string,
+  sourceBatchId: string,
+  evidenceDocumentId: string
+) {
+  const { data, error } = await supabase
+    .from("data_room_documents")
+    .select(
+      "id,fund_name,source_batch_id,document_name,file_name,detected_type,suggested_folder,document_status,storage_bucket,storage_path,storage_url"
+    )
+    .eq("id", evidenceDocumentId)
+    .ilike("fund_name", fundName)
+    .eq("source_batch_id", sourceBatchId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Unable to load Compliance evidence document: ${error.message}`);
+  }
+
+  if (!data) throw new Error("COMPLIANCE_EVIDENCE_NOT_FOUND");
+
+  const storagePath = normalizeText(data.storage_path, 1600);
+  if (!storagePath) throw new Error("COMPLIANCE_EVIDENCE_FILE_REQUIRED");
+
+  return data as DataRow;
+}
+
+async function loadEvidenceCandidates(
+  supabase: SupabaseAdmin,
+  fundName: string,
+  sourceBatchId: string
+) {
+  const { data, error } = await supabase
+    .from("data_room_documents")
+    .select(
+      "id,document_name,file_name,detected_type,suggested_folder,document_status,source_batch_id"
+    )
+    .ilike("fund_name", fundName)
+    .eq("source_batch_id", sourceBatchId)
+    .not("storage_path", "is", null)
+    .order("imported_at", { ascending: false })
+    .limit(100);
+
+  if (error) {
+    throw new Error(`Unable to load Compliance evidence candidates: ${error.message}`);
+  }
+
+  return (data || []) as DataRow[];
+}
+
+async function refreshComplianceBatchSummary(
+  supabase: SupabaseAdmin,
+  item: DataRow
+): Promise<ComplianceBatchSnapshot | null> {
+  const batchId = normalizeText(item.batch_id, 100);
+  const fundName = normalizeText(item.fund_name, 240);
+
+  if (!batchId || !fundName) return null;
+
+  const { data: batch, error: batchError } = await supabase
+    .from("compliance_data_migration_batches")
+    .select(
+      "id,fund_name,total_items,evidence_available_count,pending_review_count,high_risk_count,ready_count,updated_at"
+    )
+    .eq("id", batchId)
+    .eq("fund_name", fundName)
+    .maybeSingle();
+
+  if (batchError) {
+    throw new Error(`Unable to load Compliance summary batch: ${batchError.message}`);
+  }
+
+  if (!batch) {
+    throw new Error("COMPLIANCE_BATCH_NOT_FOUND");
+  }
+
+  const { data: itemRows, error: itemRowsError } = await supabase
+    .from("compliance_items")
+    .select("filing_status,evidence_available,risk_level")
+    .eq("batch_id", batchId)
+    .eq("fund_name", fundName)
+    .limit(2000);
+
+  if (itemRowsError) {
+    throw new Error(`Unable to recalculate Compliance summary: ${itemRowsError.message}`);
+  }
+
+  const complianceRows = (itemRows || []) as DataRow[];
+  const totalItems = complianceRows.length;
+  const evidenceAvailableCount = complianceRows.filter(
+    (row) => row.evidence_available === true
+  ).length;
+  const pendingReviewCount = complianceRows.filter(isOpenComplianceStatus).length;
+  const highRiskCount = complianceRows.filter(isHighRiskComplianceItem).length;
+  const readyCount = complianceRows.filter(
+    (row) =>
+      row.evidence_available === true &&
+      !isOpenComplianceStatus(row) &&
+      !isHighRiskComplianceItem(row)
+  ).length;
+
+  const snapshot: ComplianceBatchSnapshot = {
+    id: normalizeText(batch.id, 100),
+    fundName: normalizeText(batch.fund_name, 240),
+    totalItems: Number(batch.total_items ?? 0),
+    evidenceAvailableCount: Number(batch.evidence_available_count ?? 0),
+    pendingReviewCount: Number(batch.pending_review_count ?? 0),
+    highRiskCount: Number(batch.high_risk_count ?? 0),
+    readyCount: Number(batch.ready_count ?? 0),
+    updatedAt: batch.updated_at ?? null,
+  };
+
+  const { error: updateError } = await supabase
+    .from("compliance_data_migration_batches")
+    .update({
+      total_items: totalItems,
+      evidence_available_count: evidenceAvailableCount,
+      pending_review_count: pendingReviewCount,
+      high_risk_count: highRiskCount,
+      ready_count: readyCount,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", batchId)
+    .eq("fund_name", fundName);
+
+  if (updateError) {
+    throw new Error(`Unable to update Compliance summary batch: ${updateError.message}`);
+  }
+
+  return snapshot;
+}
+
+async function rollbackComplianceBatchSummary(
+  supabase: SupabaseAdmin,
+  snapshot: ComplianceBatchSnapshot | null
+) {
+  if (!snapshot) return;
+
+  const { error } = await supabase
+    .from("compliance_data_migration_batches")
+    .update({
+      total_items: snapshot.totalItems,
+      evidence_available_count: snapshot.evidenceAvailableCount,
+      pending_review_count: snapshot.pendingReviewCount,
+      high_risk_count: snapshot.highRiskCount,
+      ready_count: snapshot.readyCount,
+      updated_at: snapshot.updatedAt,
+    })
+    .eq("id", snapshot.id)
+    .eq("fund_name", snapshot.fundName);
+
+  if (error) {
+    throw new Error(`Unable to roll back Compliance summary batch: ${error.message}`);
+  }
+}
+
 async function insertAuditLog(
   supabase: SupabaseAdmin,
   user: AuthorisedUser,
@@ -259,6 +437,7 @@ async function insertAuditLog(
     eventType: string;
     eventTitle: string;
     eventDescription: string;
+    evidenceUrl?: string;
   }
 ) {
   const { data, error } = await supabase
@@ -276,6 +455,7 @@ async function insertAuditLog(
       actor_role: user.role,
       event_status: "Recorded",
       risk_level: normalizeText(item.risk_level, 40) || "Medium",
+      evidence_url: payload.evidenceUrl || null,
     })
     .select("*")
     .single();
@@ -315,7 +495,7 @@ async function loadAuditLogs(
   const { data: auditRows, error: auditError } = await supabase
     .from("ventiq_enterprise_audit_logs")
     .select(
-      "id,linked_record_id,linked_record_type,event_type,event_title,event_description,actor_name,actor_email,actor_role,event_status,risk_level,created_at"
+      "id,linked_record_id,linked_record_type,event_type,event_title,event_description,actor_name,actor_email,actor_role,event_status,risk_level,evidence_url,created_at"
     )
     .eq("organisation_id", user.organisationId)
     .eq("source_module", "Compliance AI")
@@ -356,12 +536,10 @@ export async function GET(request: NextRequest) {
 
   try {
     const user = await authoriseRequest(request, supabase, fundName, "view");
-    const auditLogs = await loadAuditLogs(
-      supabase,
-      user,
-      fundName,
-      sourceBatchId
-    );
+    const [auditLogs, evidenceDocuments] = await Promise.all([
+      loadAuditLogs(supabase, user, fundName, sourceBatchId),
+      loadEvidenceCandidates(supabase, fundName, sourceBatchId),
+    ]);
 
     return NextResponse.json(
       {
@@ -376,6 +554,7 @@ export async function GET(request: NextRequest) {
           canAct: user.canEdit && ACTION_ROLES.has(user.role),
         },
         auditLogs,
+        evidenceDocuments,
       },
       { headers: { "Cache-Control": "no-store" } }
     );
@@ -418,6 +597,7 @@ export async function POST(request: NextRequest) {
     const complianceItemId = normalizeText(body.complianceItemId, 100);
     const owner = normalizeText(body.owner, 200);
     const note = normalizeText(body.note, 1200);
+    const evidenceDocumentId = normalizeText(body.evidenceDocumentId, 100);
 
     if (!ACTIONS.has(action)) {
       return NextResponse.json({ error: "Invalid Compliance action." }, { status: 400 });
@@ -458,6 +638,7 @@ export async function POST(request: NextRequest) {
     const authority = normalizeText(item.authority, 160) || "Authority";
     const previous = {
       filing_status: item.filing_status ?? null,
+      evidence_available: item.evidence_available ?? false,
       owner: item.owner ?? null,
       remarks: item.remarks ?? null,
     };
@@ -466,6 +647,7 @@ export async function POST(request: NextRequest) {
     let eventType = "Compliance Action";
     let eventTitle = `${documentName} updated`;
     let eventDescription = "";
+    let evidenceUrl = "";
 
     if (action === "start_review") {
       if (currentStatus === "review") {
@@ -516,6 +698,40 @@ export async function POST(request: NextRequest) {
       eventDescription = `${requestNote} Requested by ${user.fullName} (${roleLabel(user.role)}) for ${documentName} (${authority}).`;
     }
 
+    if (action === "receive_evidence") {
+      if (!evidenceDocumentId) {
+        return NextResponse.json(
+          { error: "Select a governed evidence document before receiving evidence." },
+          { status: 400 }
+        );
+      }
+
+      const evidenceDocument = await loadGovernedEvidenceDocument(
+        supabase,
+        fundName,
+        sourceBatchId,
+        evidenceDocumentId
+      );
+      const evidenceName =
+        normalizeText(evidenceDocument.document_name, 240) ||
+        normalizeText(evidenceDocument.file_name, 240) ||
+        "Compliance evidence";
+      const storageBucket =
+        normalizeText(evidenceDocument.storage_bucket, 160) || "data-room-documents";
+      const storagePath = normalizeText(evidenceDocument.storage_path, 1600);
+      const evidenceNote = note
+        ? `Evidence received: ${evidenceName}. ${note}`
+        : `Evidence received: ${evidenceName}.`;
+
+      updatePayload.evidence_available = true;
+      updatePayload.filing_status = "Review";
+      updatePayload.remarks = appendRemark(item.remarks, evidenceNote);
+      eventType = "Compliance Evidence Received";
+      eventTitle = `Evidence received for ${documentName}`;
+      eventDescription = `${evidenceName} was accepted as governed evidence for ${documentName} (${authority}) by ${user.fullName} (${roleLabel(user.role)}).`;
+      evidenceUrl = `storage://${storageBucket}/${storagePath}`;
+    }
+
     if (action === "add_review_note") {
       if (!note) {
         return NextResponse.json(
@@ -545,27 +761,51 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let batchSnapshot: ComplianceBatchSnapshot | null = null;
+
     try {
+      batchSnapshot = await refreshComplianceBatchSummary(
+        supabase,
+        updated as DataRow
+      );
+
       await insertAuditLog(supabase, user, updated as DataRow, {
         eventType,
         eventTitle,
         eventDescription,
+        evidenceUrl: evidenceUrl || undefined,
       });
-    } catch (auditError) {
-      const { error: rollbackError } = await supabase
+    } catch (workflowError) {
+      const rollbackErrors: string[] = [];
+
+      const { error: itemRollbackError } = await supabase
         .from("compliance_items")
         .update(previous)
         .eq("id", complianceItemId)
         .eq("fund_name", fundName)
         .eq("source_batch_id", sourceBatchId);
 
-      if (rollbackError) {
-        throw new Error(
-          `${auditError instanceof Error ? auditError.message : "Compliance audit failed."} Rollback also failed: ${rollbackError.message}`
+      if (itemRollbackError) {
+        rollbackErrors.push(`item rollback failed: ${itemRollbackError.message}`);
+      }
+
+      try {
+        await rollbackComplianceBatchSummary(supabase, batchSnapshot);
+      } catch (batchRollbackError) {
+        rollbackErrors.push(
+          batchRollbackError instanceof Error
+            ? batchRollbackError.message
+            : "Compliance summary rollback failed."
         );
       }
 
-      throw auditError;
+      if (rollbackErrors.length > 0) {
+        throw new Error(
+          `${workflowError instanceof Error ? workflowError.message : "Compliance workflow failed."} ${rollbackErrors.join(" ")}`
+        );
+      }
+
+      throw workflowError;
     }
 
     return NextResponse.json({
@@ -578,6 +818,8 @@ export async function POST(request: NextRequest) {
           ? `${documentName} assigned to ${owner} and recorded in the enterprise audit trail.`
           : action === "request_evidence"
           ? `Evidence request recorded for ${documentName}.`
+          : action === "receive_evidence"
+          ? `Governed evidence received for ${documentName}.`
           : `Governed review note recorded for ${documentName}.`,
     });
   } catch (error) {
@@ -588,6 +830,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "The selected compliance item is not part of the active verified source batch." },
         { status: 404 }
+      );
+    }
+
+    if (error instanceof Error && error.message === "COMPLIANCE_EVIDENCE_NOT_FOUND") {
+      return NextResponse.json(
+        { error: "The selected evidence document is not part of this governed fund and verified source batch." },
+        { status: 404 }
+      );
+    }
+
+    if (error instanceof Error && error.message === "COMPLIANCE_EVIDENCE_FILE_REQUIRED") {
+      return NextResponse.json(
+        { error: "The selected evidence record does not have a governed stored file." },
+        { status: 409 }
       );
     }
 

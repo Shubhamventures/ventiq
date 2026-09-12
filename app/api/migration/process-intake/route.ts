@@ -240,22 +240,24 @@ async function authoriseRequest(
     );
   }
 
-  // Preserve the existing Fund Admin operating model, while still deriving a
-  // tenant identity. Maker processing continues to require explicit fund edit
-  // access. Fund Admins use governed fund access when present, otherwise their
-  // active primary organisation membership.
-  if (role !== "fund_admin") {
-    if (!fundAccess?.can_view || !fundAccess?.can_edit) {
-      throw new Error("FUND_EDIT_ACCESS_REQUIRED");
-    }
+  // Every role, including Fund Admin, must hold explicit governed access to
+  // the exact fund being processed. Service-role execution must never turn a
+  // profile-level Fund Admin role into cross-fund authority.
+  if (!fundAccess?.can_view || !fundAccess?.can_edit) {
+    throw new Error("FUND_EDIT_ACCESS_REQUIRED");
   }
 
-  const organisationId = String(
-    fundAccess?.organisation_id || membership?.organisation_id || ""
+  const organisationId = String(fundAccess.organisation_id || "").trim();
+  const membershipOrganisationId = String(
+    membership?.organisation_id || ""
   ).trim();
 
-  if (!organisationId) {
+  if (!organisationId || !membershipOrganisationId) {
     throw new Error("ORGANISATION_CONTEXT_REQUIRED");
+  }
+
+  if (organisationId !== membershipOrganisationId) {
+    throw new Error("ORGANISATION_CONTEXT_MISMATCH");
   }
 
   return {
@@ -286,7 +288,8 @@ function getAuthErrorResponse(error: unknown) {
     message === "PROFILE_NOT_ACTIVE" ||
     message === "ROLE_NOT_ALLOWED" ||
     message === "FUND_EDIT_ACCESS_REQUIRED" ||
-    message === "ORGANISATION_CONTEXT_REQUIRED"
+    message === "ORGANISATION_CONTEXT_REQUIRED" ||
+    message === "ORGANISATION_CONTEXT_MISMATCH"
   ) {
     return NextResponse.json(
       {
@@ -1953,6 +1956,359 @@ async function processDatasetRows(
   await syncRows(definition, mappedRows, context, stats, sheetName);
 }
 
+
+// Canonical intake is the authoritative data lineage. The legacy migration
+// batch tables below remain the activation/stakeholder-launch compatibility
+// surface, so a successfully processed canonical workbook must materialise a
+// truthful summary batch for each structured operating layer. Canonical rows
+// keep source_batch_id as provenance; batch_id is populated only after the
+// corresponding legacy summary batch exists and therefore satisfies its FK.
+async function materialiseCanonicalActivationLayerSummaries(
+  context: ProcessingContext
+) {
+  const batchLabel = context.batchId;
+  const now = new Date().toISOString();
+
+  const [
+    investorResult,
+    commitmentResult,
+    portfolioResult,
+    complianceResult,
+    fundResult,
+  ] = await Promise.all([
+    context.supabase
+      .from("investor_master")
+      .select("id")
+      .eq("fund_name", context.fundName)
+      .eq("source_batch_id", context.batchId),
+    context.supabase
+      .from("fund_commitments")
+      .select("commitment_amount")
+      .eq("fund_name", context.fundName)
+      .eq("source_batch_id", context.batchId),
+    context.supabase
+      .from("portfolio_investments")
+      .select(
+        "id, investment_cost, current_value, realised_value, expected_exit_value, risk_status, repayment_due_date"
+      )
+      .eq("fund_name", context.fundName)
+      .eq("source_batch_id", context.batchId),
+    context.supabase
+      .from("compliance_items")
+      .select("id, filing_status, migration_status, evidence_available, risk_level")
+      .eq("fund_name", context.fundName)
+      .eq("source_batch_id", context.batchId),
+    context.supabase
+      .from("fund_master")
+      .select(
+        "id, batch_id, target_corpus, committed_capital, green_shoe, sponsor_commitment, management_fee_rate, carry_rate"
+      )
+      .eq("fund_name", context.fundName)
+      .eq("source_batch_id", context.batchId)
+      .limit(2),
+  ]);
+
+  const sourceErrors = [
+    ["investor_master", investorResult.error],
+    ["fund_commitments", commitmentResult.error],
+    ["portfolio_investments", portfolioResult.error],
+    ["compliance_items", complianceResult.error],
+    ["fund_master", fundResult.error],
+  ].filter(([, error]) => Boolean(error));
+
+  if (sourceErrors.length > 0) {
+    const detail = sourceErrors
+      .map(([table, error]) => `${table}: ${(error as { message?: string })?.message || "query failed"}`)
+      .join("; ");
+    throw new Error(`Unable to materialise canonical activation summaries: ${detail}`);
+  }
+
+  const investorRows = (investorResult.data || []) as DatabaseRow[];
+  const commitmentRows = (commitmentResult.data || []) as DatabaseRow[];
+  const portfolioRows = (portfolioResult.data || []) as DatabaseRow[];
+  const complianceRows = (complianceResult.data || []) as DatabaseRow[];
+  const fundRows = (fundResult.data || []) as DatabaseRow[];
+
+  if (fundRows.length !== 1) {
+    throw new Error(
+      `Canonical activation summary requires exactly one fund_master row for ${context.fundName}; found ${fundRows.length}.`
+    );
+  }
+
+  async function ensureFundScopedBatch(
+    table: string,
+    layer: string,
+    payload: DatabaseRow
+  ) {
+    const batchName = `Canonical ${layer} summary - ${batchLabel}`;
+    const { data: existing, error: existingError } = await context.supabase
+      .from(table)
+      .select("id")
+      .eq("fund_name", context.fundName)
+      .eq("batch_name", batchName)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingError) {
+      throw new Error(`${table}: ${existingError.message}`);
+    }
+
+    if (existing?.id) {
+      const { error: updateError } = await context.supabase
+        .from(table)
+        .update({ ...payload, updated_at: now })
+        .eq("id", existing.id);
+
+      if (updateError) throw new Error(`${table}: ${updateError.message}`);
+      return String(existing.id);
+    }
+
+    const { data: created, error: createError } = await context.supabase
+      .from(table)
+      .insert({
+        batch_name: batchName,
+        fund_name: context.fundName,
+        ...payload,
+        updated_at: now,
+      })
+      .select("id")
+      .single();
+
+    if (createError || !created?.id) {
+      throw new Error(
+        `${table}: ${createError?.message || "summary batch ID was not returned"}`
+      );
+    }
+
+    return String(created.id);
+  }
+
+  const totalCommitment = commitmentRows.reduce(
+    (sum, row) => sum + parseNumber(row.commitment_amount),
+    0
+  );
+
+  const investorBatchId = await ensureFundScopedBatch(
+    "investor_import_batches",
+    "investor",
+    {
+      source: `Canonical intake batch ${context.batchId}`,
+      total_records: investorRows.length,
+      total_commitment: totalCommitment,
+      status: "published",
+    }
+  );
+
+  for (const table of ["investor_master", "fund_commitments"]) {
+    const { error } = await context.supabase
+      .from(table)
+      .update({ batch_id: investorBatchId })
+      .eq("fund_name", context.fundName)
+      .eq("source_batch_id", context.batchId);
+
+    if (error) throw new Error(`${table}: ${error.message}`);
+  }
+
+  const totalInvestmentCost = portfolioRows.reduce(
+    (sum, row) => sum + parseNumber(row.investment_cost),
+    0
+  );
+  const currentPortfolioValue = portfolioRows.reduce(
+    (sum, row) => sum + parseNumber(row.current_value),
+    0
+  );
+  const realisedValue = portfolioRows.reduce(
+    (sum, row) => sum + parseNumber(row.realised_value),
+    0
+  );
+  const expectedExitValue = portfolioRows.reduce(
+    (sum, row) => sum + parseNumber(row.expected_exit_value),
+    0
+  );
+  const portfolioMoic = totalInvestmentCost
+    ? (currentPortfolioValue + realisedValue) / totalInvestmentCost
+    : 0;
+  const atRiskCount = portfolioRows.filter((row) => {
+    const risk = normalizeText(row.risk_status).toLowerCase();
+    return risk.includes("risk") || risk.includes("watch");
+  }).length;
+  const repaymentCount = portfolioRows.filter((row) =>
+    Boolean(normalizeText(row.repayment_due_date))
+  ).length;
+
+  const portfolioBatchId = await ensureFundScopedBatch(
+    "portfolio_data_migration_batches",
+    "portfolio",
+    {
+      total_records: portfolioRows.length,
+      total_investment_cost: totalInvestmentCost,
+      current_portfolio_value: currentPortfolioValue,
+      realised_value: realisedValue,
+      expected_exit_value: expectedExitValue,
+      portfolio_moic: portfolioMoic,
+      at_risk_count: atRiskCount,
+      repayment_count: repaymentCount,
+      status: "published",
+    }
+  );
+
+  const { error: portfolioLinkError } = await context.supabase
+    .from("portfolio_investments")
+    .update({ batch_id: portfolioBatchId })
+    .eq("fund_name", context.fundName)
+    .eq("source_batch_id", context.batchId);
+
+  if (portfolioLinkError) {
+    throw new Error(`portfolio_investments: ${portfolioLinkError.message}`);
+  }
+
+  const complianceSummary = complianceRows.reduce(
+    (summary, row) => {
+      const filingStatus = normalizeText(
+        row.filing_status || row.migration_status
+      ).toLowerCase();
+      const pending =
+        filingStatus.includes("pending") || filingStatus.includes("review");
+      const highRisk = normalizeText(row.risk_level).toLowerCase() === "high";
+      const evidenceAvailable =
+        row.evidence_available === true ||
+        ["yes", "true", "available", "1"].includes(
+          normalizeText(row.evidence_available).toLowerCase()
+        );
+
+      if (pending) summary.pendingReview += 1;
+      if (highRisk) summary.highRisk += 1;
+      if (evidenceAvailable) summary.evidenceAvailable += 1;
+      if (!pending && !highRisk && evidenceAvailable) summary.ready += 1;
+      return summary;
+    },
+    { pendingReview: 0, highRisk: 0, evidenceAvailable: 0, ready: 0 }
+  );
+
+  const complianceBatchId = await ensureFundScopedBatch(
+    "compliance_data_migration_batches",
+    "compliance",
+    {
+      total_items: complianceRows.length,
+      evidence_available_count: complianceSummary.evidenceAvailable,
+      pending_review_count: complianceSummary.pendingReview,
+      high_risk_count: complianceSummary.highRisk,
+      ready_count: complianceSummary.ready,
+      status: "published",
+    }
+  );
+
+  const { error: complianceLinkError } = await context.supabase
+    .from("compliance_items")
+    .update({ batch_id: complianceBatchId })
+    .eq("fund_name", context.fundName)
+    .eq("source_batch_id", context.batchId);
+
+  if (complianceLinkError) {
+    throw new Error(`compliance_items: ${complianceLinkError.message}`);
+  }
+
+  const fundRow = fundRows[0];
+  const fundBatchPayload = {
+    total_funds: 1,
+    total_target_corpus: parseNumber(fundRow.target_corpus),
+    total_committed_capital: parseNumber(fundRow.committed_capital),
+    total_green_shoe: parseNumber(fundRow.green_shoe),
+    total_sponsor_commitment: parseNumber(fundRow.sponsor_commitment),
+    average_management_fee: parseNumber(fundRow.management_fee_rate),
+    average_carry: parseNumber(fundRow.carry_rate),
+    status: "published",
+    updated_at: now,
+  };
+
+  let fundBatchId = normalizeText(fundRow.batch_id);
+  let validExistingFundBatch = false;
+
+  if (fundBatchId) {
+    const { data: existingFundBatch, error: existingFundBatchError } =
+      await context.supabase
+        .from("fund_data_migration_batches")
+        .select("id")
+        .eq("id", fundBatchId)
+        .maybeSingle();
+
+    if (existingFundBatchError) {
+      throw new Error(
+        `fund_data_migration_batches: ${existingFundBatchError.message}`
+      );
+    }
+
+    validExistingFundBatch = Boolean(existingFundBatch?.id);
+  }
+
+  if (validExistingFundBatch) {
+    const { error: updateFundBatchError } = await context.supabase
+      .from("fund_data_migration_batches")
+      .update(fundBatchPayload)
+      .eq("id", fundBatchId);
+
+    if (updateFundBatchError) {
+      throw new Error(
+        `fund_data_migration_batches: ${updateFundBatchError.message}`
+      );
+    }
+  } else {
+    const fundBatchName = `Canonical fund summary - ${batchLabel}`;
+    const { data: existingFundBatch, error: lookupFundBatchError } =
+      await context.supabase
+        .from("fund_data_migration_batches")
+        .select("id")
+        .eq("batch_name", fundBatchName)
+        .limit(1)
+        .maybeSingle();
+
+    if (lookupFundBatchError) {
+      throw new Error(
+        `fund_data_migration_batches: ${lookupFundBatchError.message}`
+      );
+    }
+
+    if (existingFundBatch?.id) {
+      fundBatchId = String(existingFundBatch.id);
+      const { error: updateFundBatchError } = await context.supabase
+        .from("fund_data_migration_batches")
+        .update(fundBatchPayload)
+        .eq("id", fundBatchId);
+
+      if (updateFundBatchError) {
+        throw new Error(
+          `fund_data_migration_batches: ${updateFundBatchError.message}`
+        );
+      }
+    } else {
+      const { data: createdFundBatch, error: createFundBatchError } =
+        await context.supabase
+          .from("fund_data_migration_batches")
+          .insert({ batch_name: fundBatchName, ...fundBatchPayload })
+          .select("id")
+          .single();
+
+      if (createFundBatchError || !createdFundBatch?.id) {
+        throw new Error(
+          `fund_data_migration_batches: ${
+            createFundBatchError?.message || "summary batch ID was not returned"
+          }`
+        );
+      }
+
+      fundBatchId = String(createdFundBatch.id);
+    }
+
+    const { error: fundLinkError } = await context.supabase
+      .from("fund_master")
+      .update({ batch_id: fundBatchId })
+      .eq("id", fundRow.id)
+      .eq("source_batch_id", context.batchId);
+
+    if (fundLinkError) throw new Error(`fund_master: ${fundLinkError.message}`);
+  }
+}
+
 async function processCanonicalWorkbook(
   workbook: XLSX.WorkBook,
   context: ProcessingContext,
@@ -1997,6 +2353,10 @@ async function processCanonicalWorkbook(
     ) {
       await refreshReferenceCaches(context);
     }
+  }
+
+  if (!stats.issues.some((issue) => issue.severity === "Error")) {
+    await materialiseCanonicalActivationLayerSummaries(context);
   }
 }
 
@@ -3255,6 +3615,83 @@ async function processPdfFiles(
   return aggregate;
 }
 
+const DEFAULT_CALCULATION_SETTINGS = {
+  base_currency: "INR",
+  nav_allocation_method: "Paid-in Capital Pro Rata",
+  require_final_portfolio_valuations: true,
+  include_cashflow_statuses: ["Confirmed", "Received", "Paid"],
+  xirr_initial_guess: 0.15,
+  xirr_tolerance: 1e-7,
+  xirr_max_iterations: 200,
+  reconciliation_amount_tolerance: 1,
+  reconciliation_percentage_tolerance: 0.01,
+  is_active: true,
+  performance_distribution_basis: "Net Cash",
+  nav_distribution_basis: "Gross Distribution",
+} as const;
+
+async function ensureDefaultCalculationSettingsForCanonicalFund(
+  supabase: SupabaseAdmin,
+  fundName: string
+) {
+  const { data: existingSettings, error: existingSettingsError } =
+    await supabase
+      .from("metric_calculation_settings")
+      .select("fund_name, is_active, created_at")
+      .eq("fund_name", fundName)
+      .limit(2);
+
+  if (existingSettingsError) {
+    throw new Error(
+      `Unable to check calculation settings: ${existingSettingsError.message}`
+    );
+  }
+
+  const rows = existingSettings || [];
+
+  if (rows.length > 1) {
+    throw new Error(
+      "CALCULATION_SETTINGS_AMBIGUOUS: More than one calculation-settings row exists for this fund."
+    );
+  }
+
+  if (rows.length === 1) {
+    return {
+      created: false,
+      createdAt: "",
+      active: rows[0].is_active === true,
+    };
+  }
+
+  const createdAt = new Date().toISOString();
+
+  const { data: createdSettings, error: createSettingsError } =
+    await supabase
+      .from("metric_calculation_settings")
+      .insert({
+        fund_name: fundName,
+        ...DEFAULT_CALCULATION_SETTINGS,
+        created_at: createdAt,
+        updated_at: createdAt,
+      })
+      .select("fund_name, created_at, is_active")
+      .single();
+
+  if (createSettingsError || !createdSettings) {
+    throw new Error(
+      `Unable to establish default calculation settings: ${
+        createSettingsError?.message || "No calculation-settings row returned"
+      }`
+    );
+  }
+
+  return {
+    created: true,
+    createdAt: normalizeText(createdSettings.created_at) || createdAt,
+    active: createdSettings.is_active === true,
+  };
+}
+
 function fileSortOrder(file: IntakeFile) {
   const category = file.category || "";
 
@@ -3270,6 +3707,8 @@ function fileSortOrder(file: IntakeFile) {
 export async function POST(request: NextRequest) {
   const supabase = getSupabaseAdmin();
   let activeBatchId = "";
+  let activeFundName = "";
+  let createdCalculationSettingsCreatedAt = "";
 
   if (!supabase) {
     return NextResponse.json(
@@ -3299,6 +3738,8 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    activeFundName = fundName;
 
     const actor = await authoriseRequest(request, supabase, fundName);
 
@@ -3417,6 +3858,9 @@ export async function POST(request: NextRequest) {
 
     const allFiles = ((fileData || []) as IntakeFile[]).sort(
       (left, right) => fileSortOrder(left) - fileSortOrder(right)
+    );
+    const hasCanonicalWorkbook = allFiles.some(
+      (file) => file.category === "canonical"
     );
 
     if (allFiles.length === 0) {
@@ -3595,6 +4039,23 @@ export async function POST(request: NextRequest) {
       ? "Review Required"
       : "Processed";
 
+    if (hasCanonicalWorkbook && !completedWithErrors) {
+      const settingsResult =
+        await ensureDefaultCalculationSettingsForCanonicalFund(
+          supabase,
+          fundName
+        );
+
+      if (settingsResult.created) {
+        createdCalculationSettingsCreatedAt = settingsResult.createdAt;
+      }
+
+      aggregate.summary.calculationSettingsCreated =
+        settingsResult.created ? 1 : 0;
+      aggregate.summary.calculationSettingsActive =
+        settingsResult.active ? 1 : 0;
+    }
+
     const { error: batchUpdateError } = await supabase
       .from("migration_intake_batches")
       .update({
@@ -3676,6 +4137,24 @@ export async function POST(request: NextRequest) {
         : "Migration intake processing failed.";
 
     console.error("Process intake failed:", error);
+
+    if (
+      createdCalculationSettingsCreatedAt &&
+      activeFundName
+    ) {
+      const { error: settingsRollbackError } = await supabase
+        .from("metric_calculation_settings")
+        .delete()
+        .eq("fund_name", activeFundName)
+        .eq("created_at", createdCalculationSettingsCreatedAt);
+
+      if (settingsRollbackError) {
+        console.error(
+          "Calculation settings rollback failed:",
+          settingsRollbackError
+        );
+      }
+    }
 
     if (activeBatchId) {
       await supabase

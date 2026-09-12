@@ -178,45 +178,51 @@ async function authoriseRequest(
     throw new Error("ORGANISATION_REQUIRED");
   }
 
-  if (role !== "fund_admin") {
-    const { data: fundAccess, error: fundAccessError } = await supabase
-      .from("ventiq_user_fund_access")
-      .select("organisation_id,can_view,can_edit")
-      .eq("user_id", user.id)
-      .eq("status", "Active")
-      .ilike("fund_name", fundName)
-      .limit(1)
-      .maybeSingle();
+  const { data: fundAccess, error: fundAccessError } = await supabase
+    .from("ventiq_user_fund_access")
+    .select("organisation_id,role,can_view,can_edit")
+    .eq("organisation_id", organisationId)
+    .eq("user_id", user.id)
+    .eq("status", "Active")
+    .ilike("fund_name", fundName)
+    .limit(1)
+    .maybeSingle();
 
-    if (fundAccessError) {
-      throw new Error(
-        `Unable to verify fund access: ${fundAccessError.message}`
-      );
-    }
+  if (fundAccessError) {
+    throw new Error(
+      `Unable to verify governed fund access: ${fundAccessError.message}`
+    );
+  }
 
-    const hasRequiredAccess =
-      Boolean(fundAccess?.can_view) &&
-      (mode === "view" || Boolean(fundAccess?.can_edit));
+  const fundOrganisationId = String(
+    fundAccess?.organisation_id || ""
+  ).trim();
+  const governedRole = String(fundAccess?.role || "").trim();
 
-    const fundOrganisationId = String(
-      fundAccess?.organisation_id || ""
-    ).trim();
+  if (
+    !fundAccess ||
+    !fundOrganisationId ||
+    fundOrganisationId !== organisationId
+  ) {
+    throw new Error("FUND_VIEW_ACCESS_REQUIRED");
+  }
 
-    if (
-      fundOrganisationId &&
-      organisationId &&
-      fundOrganisationId !== organisationId
-    ) {
-      throw new Error("FUND_VIEW_ACCESS_REQUIRED");
-    }
+  if (!allowedRoles.has(governedRole)) {
+    throw new Error("ROLE_NOT_ALLOWED");
+  }
 
-    if (!hasRequiredAccess) {
-      throw new Error(
-        mode === "edit"
-          ? "FUND_EDIT_ACCESS_REQUIRED"
-          : "FUND_VIEW_ACCESS_REQUIRED"
-      );
-    }
+  role = governedRole;
+
+  const hasRequiredAccess =
+    Boolean(fundAccess.can_view) &&
+    (mode === "view" || Boolean(fundAccess.can_edit));
+
+  if (!hasRequiredAccess) {
+    throw new Error(
+      mode === "edit"
+        ? "FUND_EDIT_ACCESS_REQUIRED"
+        : "FUND_VIEW_ACCESS_REQUIRED"
+    );
   }
 
   let investorCodes: string[] = [];

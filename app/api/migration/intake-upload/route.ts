@@ -3,6 +3,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  authenticateGovernedFundUser,
+  listGovernedFunds,
+} from "../../../../lib/server/governedFundAccess";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,23 +37,6 @@ type AuthorisedUser = {
   email: string;
   fullName: string;
   role: string;
-};
-
-type UserProfileRow = {
-  user_id: string;
-  email: string | null;
-  full_name: string | null;
-  default_role: string | null;
-  status: string | null;
-};
-
-type MembershipRow = {
-  role: string | null;
-};
-
-type FundAccessRow = {
-  can_view: boolean | null;
-  can_edit: boolean | null;
 };
 
 type IntakeBatchRow = {
@@ -104,12 +91,6 @@ function getSupabaseAdmin(): SupabaseAdmin | null {
       detectSessionInUrl: false,
     },
   }) as any;
-}
-
-function getBearerToken(request: NextRequest) {
-  const authorization = request.headers.get("authorization") || "";
-  if (!authorization.toLowerCase().startsWith("bearer ")) return "";
-  return authorization.slice(7).trim();
 }
 
 function sanitizeFileName(fileName: string) {
@@ -196,92 +177,35 @@ async function ensureStorageBucket(supabase: SupabaseAdmin) {
 
 async function authoriseRequest(
   request: NextRequest,
-  supabase: SupabaseAdmin,
   fundName: string,
   mode: AccessMode
 ): Promise<AuthorisedUser> {
-  const accessToken = getBearerToken(request);
-  if (!accessToken) throw new Error("AUTHENTICATION_REQUIRED");
+  const actor = await authenticateGovernedFundUser(request);
+  const governedFunds = await listGovernedFunds(actor);
+  const fundAccess = governedFunds.find(
+    (fund) =>
+      fund.fund_name.trim().toLowerCase() === fundName.trim().toLowerCase()
+  );
 
-  const { data: userResult, error: userError } =
-    await supabase.auth.getUser(accessToken);
-  const user = userResult?.user;
-
-  if (userError || !user) throw new Error("INVALID_SESSION");
-
-  const { data: profileData, error: profileError } = await supabase
-    .from("ventiq_user_profiles")
-    .select("user_id, email, full_name, default_role, status")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (profileError) {
-    throw new Error(
-      `Unable to load VENTIQ profile: ${profileError.message}`
-    );
-  }
-
-  const profile = profileData as UserProfileRow | null;
-  if (!profile || profile.status !== "Active") {
-    throw new Error("PROFILE_NOT_ACTIVE");
+  if (!fundAccess || !fundAccess.can_view) {
+    throw new Error("FUND_VIEW_ACCESS_REQUIRED");
   }
 
   const allowedRoles = mode === "upload" ? UPLOAD_ROLES : VIEW_ROLES;
-  let role = String(profile.default_role || "").trim();
+  const role = String(fundAccess.role || "").trim();
 
   if (!allowedRoles.has(role)) {
-    const { data: membershipData, error: membershipError } =
-      await supabase
-        .from("ventiq_organisation_members")
-        .select("role")
-        .eq("user_id", user.id)
-        .eq("status", "Active")
-        .order("is_primary", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-    if (membershipError) {
-      throw new Error(
-        `Unable to load organisation membership: ${membershipError.message}`
-      );
-    }
-
-    role = String((membershipData as MembershipRow | null)?.role || "").trim();
+    throw new Error("ROLE_NOT_ALLOWED");
   }
 
-  if (!allowedRoles.has(role)) throw new Error("ROLE_NOT_ALLOWED");
-
-  if (role !== "fund_admin") {
-    const { data: accessData, error: accessError } = await supabase
-      .from("ventiq_user_fund_access")
-      .select("can_view, can_edit")
-      .eq("user_id", user.id)
-      .eq("status", "Active")
-      .ilike("fund_name", fundName)
-      .limit(1)
-      .maybeSingle();
-
-    if (accessError) {
-      throw new Error(`Unable to verify fund access: ${accessError.message}`);
-    }
-
-    const fundAccess = accessData as FundAccessRow | null;
-
-    if (!fundAccess?.can_view) {
-      throw new Error("FUND_VIEW_ACCESS_REQUIRED");
-    }
-
-    if (mode === "upload" && !fundAccess?.can_edit) {
-      throw new Error("FUND_EDIT_ACCESS_REQUIRED");
-    }
+  if (mode === "upload" && !fundAccess.can_edit) {
+    throw new Error("FUND_EDIT_ACCESS_REQUIRED");
   }
 
   return {
-    userId: String(user.id),
-    email: String(profile.email || user.email || ""),
-    fullName: String(
-      profile.full_name || user.email || "VENTIQ User"
-    ),
+    userId: actor.userId,
+    email: actor.email,
+    fullName: actor.fullName,
     role,
   };
 }
@@ -301,6 +225,19 @@ function getAuthErrorResponse(error: unknown) {
 
   if (
     message === "PROFILE_NOT_ACTIVE" ||
+    message === "ORGANISATION_MEMBERSHIP_REQUIRED" ||
+    message === "ORGANISATION_REQUIRED"
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Your VENTIQ account does not have an active organisation context.",
+      },
+      { status: 403 }
+    );
+  }
+
+  if (
     message === "ROLE_NOT_ALLOWED" ||
     message === "FUND_VIEW_ACCESS_REQUIRED" ||
     message === "FUND_EDIT_ACCESS_REQUIRED"
@@ -427,7 +364,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    await authoriseRequest(request, supabase, fundName, "view");
+    await authoriseRequest(request, fundName, "view");
 
     const { data: batchData, error: batchError } = await supabase
       .from("migration_intake_batches")
@@ -655,7 +592,6 @@ export async function POST(request: NextRequest) {
 
     const authorisedUser = await authoriseRequest(
       request,
-      supabase,
       fundName,
       "upload"
     );

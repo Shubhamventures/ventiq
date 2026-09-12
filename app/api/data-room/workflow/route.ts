@@ -229,51 +229,57 @@ async function authoriseRequest(
     throw new Error("ORGANISATION_REQUIRED");
   }
 
-  if (role !== "fund_admin") {
-    const {
-      data: rawFundAccess,
-      error: fundAccessError,
-    } = await supabase
-      .from("ventiq_user_fund_access")
-      .select(
-        "organisation_id,can_view,can_edit,investor_id,status"
-      )
-      .eq("user_id", user.id)
-      .eq("status", "Active")
-      .ilike("fund_name", fundName)
-      .limit(1)
-      .maybeSingle();
+  const {
+    data: rawFundAccess,
+    error: fundAccessError,
+  } = await supabase
+    .from("ventiq_user_fund_access")
+    .select(
+      "organisation_id,role,can_view,can_edit,investor_id,status"
+    )
+    .eq("organisation_id", organisationId)
+    .eq("user_id", user.id)
+    .eq("status", "Active")
+    .ilike("fund_name", fundName)
+    .limit(1)
+    .maybeSingle();
 
-    if (fundAccessError) {
-      throw new Error(
-        `Unable to verify fund access: ${fundAccessError.message}`
-      );
-    }
-
-    const fundAccess = rawFundAccess as unknown as DataRow | null;
-    const canView = Boolean(fundAccess?.can_view);
-    const canEdit = Boolean(fundAccess?.can_edit);
-    const fundOrganisationId = normalizeText(
-      fundAccess?.organisation_id
+  if (fundAccessError) {
+    throw new Error(
+      `Unable to verify governed fund access: ${fundAccessError.message}`
     );
+  }
 
-    fundAccessInvestorId = normalizeText(fundAccess?.investor_id);
+  const fundAccess = rawFundAccess as unknown as DataRow | null;
+  const fundOrganisationId = normalizeText(
+    fundAccess?.organisation_id
+  );
+  const governedRole = normalizeText(fundAccess?.role);
 
-    if (
-      fundOrganisationId &&
-      organisationId &&
-      fundOrganisationId !== organisationId
-    ) {
-      throw new Error("FUND_VIEW_ACCESS_REQUIRED");
-    }
+  if (
+    !fundAccess ||
+    !fundOrganisationId ||
+    fundOrganisationId !== organisationId
+  ) {
+    throw new Error("FUND_VIEW_ACCESS_REQUIRED");
+  }
 
-    if (!canView || (mode === "edit" && !canEdit)) {
-      throw new Error(
-        mode === "edit"
-          ? "FUND_EDIT_ACCESS_REQUIRED"
-          : "FUND_VIEW_ACCESS_REQUIRED"
-      );
-    }
+  if (!allowedRoles.has(governedRole)) {
+    throw new Error("ROLE_NOT_ALLOWED");
+  }
+
+  role = governedRole;
+  fundAccessInvestorId = normalizeText(fundAccess.investor_id);
+
+  const canView = Boolean(fundAccess.can_view);
+  const canEdit = Boolean(fundAccess.can_edit);
+
+  if (!canView || (mode === "edit" && !canEdit)) {
+    throw new Error(
+      mode === "edit"
+        ? "FUND_EDIT_ACCESS_REQUIRED"
+        : "FUND_VIEW_ACCESS_REQUIRED"
+    );
   }
 
   let investorCodes: string[] = [];
@@ -594,7 +600,7 @@ async function resolveSourceBatch(
       error,
     } = await supabase
       .from("migration_intake_batches")
-      .select("*")
+      .select("id,batch_name,total_files,investor_files,portfolio_files,fund_files,investor_pdf_files,compliance_data_files,compliance_evidence_files,status,created_at,fund_name,uploaded_files,updated_at,organisation_id,intake_mode,source_system,processing_status,processed_files,total_rows,inserted_rows,updated_rows,rejected_rows,warning_rows,validation_error_count,validation_warning_count,validation_summary,processing_summary,processing_started_at,processed_at,processed_by,note")
       .eq("id", requestedSourceBatchId)
       .maybeSingle();
 
@@ -634,7 +640,7 @@ async function resolveSourceBatch(
     error,
   } = await supabase
     .from("migration_intake_batches")
-    .select("*")
+    .select("id,batch_name,total_files,investor_files,portfolio_files,fund_files,investor_pdf_files,compliance_data_files,compliance_evidence_files,status,created_at,fund_name,uploaded_files,updated_at,organisation_id,intake_mode,source_system,processing_status,processed_files,total_rows,inserted_rows,updated_rows,rejected_rows,warning_rows,validation_error_count,validation_warning_count,validation_summary,processing_summary,processing_started_at,processed_at,processed_by,note")
     .ilike("fund_name", fundName)
     .eq("processing_status", "Completed")
     .ilike("intake_mode", "Canonical")
@@ -682,7 +688,7 @@ async function resolveDocument(
     error,
   } = await supabase
     .from("data_room_documents")
-    .select("*")
+    .select("id,file_name,file_size,file_type,detected_type,suggested_folder,access_level,status,ddq_impact,imported_at,uploaded_by,created_at,updated_at,fund_name,source_batch_id,investor_code,investor_name,document_name,storage_bucket,storage_path,storage_url,mime_type,document_status,metadata,created_by_email")
     .eq("id", documentId)
     .ilike("fund_name", fundName)
     .eq("source_batch_id", sourceBatchId)
@@ -726,7 +732,7 @@ async function resolveInvestorIdentity(
     error,
   } = await supabase
     .from("investor_master")
-    .select("*")
+    .select("id,batch_id,investor_code,investor_name,email,investor_type,country,tax_id,kyc_status,bank_status,onboarding_status,created_at,updated_at,fund_name,source_batch_id,source_file_name,source_row_number")
     .ilike("fund_name", fundName)
     .eq("source_batch_id", sourceBatchId)
     .eq("investor_code", investorCode)
@@ -766,7 +772,7 @@ async function loadQuestionForUpdate(
     error,
   } = await supabase
     .from("data_room_questions")
-    .select("*")
+    .select("id,investor_name,document_id,document_name,category,question,status,answer,asked_at,answered_at,created_at,updated_at,fund_name,source_batch_id,investor_code,investor_email,assigned_to,metadata,created_by,created_by_email")
     .eq("id", questionId)
     .ilike("fund_name", fundName)
     .eq("source_batch_id", sourceBatchId)
@@ -841,7 +847,7 @@ export async function GET(request: NextRequest) {
 
     let engagementQuery: any = supabase
       .from("data_room_engagement_events")
-      .select("*")
+      .select("id,investor_name,document_id,document_name,action,note,event_time,created_at,fund_name,source_batch_id,investor_code,investor_email,metadata,recorded_by,recorded_by_email")
       .ilike("fund_name", fundName)
       .eq("source_batch_id", sourceBatch.id)
       .order("event_time", { ascending: false })
@@ -849,7 +855,7 @@ export async function GET(request: NextRequest) {
 
     let questionQuery: any = supabase
       .from("data_room_questions")
-      .select("*")
+      .select("id,investor_name,document_id,document_name,category,question,status,answer,asked_at,answered_at,created_at,updated_at,fund_name,source_batch_id,investor_code,investor_email,assigned_to,metadata,created_by,created_by_email")
       .ilike("fund_name", fundName)
       .eq("source_batch_id", sourceBatch.id)
       .order("asked_at", { ascending: false })

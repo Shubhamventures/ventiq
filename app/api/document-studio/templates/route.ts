@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabaseAdmin
       .from("document_studio_templates")
-      .select("*")
+      .select("fund_name, organisation_id, updated_at")
       .eq("organisation_id", actor.organisationId)
       .eq("fund_name", actor.fundName)
       .order("updated_at", { ascending: false });

@@ -77,13 +77,44 @@ async function latestByFund(table: string, fundName: string) {
   return (result.data as DataRow | null) ?? null;
 }
 
-async function byId(table: string, id: string) {
+async function byId(table: string, id: string, fundName: string) {
   if (!id) return null;
+
+  if (table === "fund_data_migration_batches") {
+    const anchorResult = await supabaseAdmin
+      .from("fund_master")
+      .select("batch_id")
+      .eq("fund_name", fundName)
+      .eq("batch_id", id)
+      .limit(1)
+      .maybeSingle();
+
+    if (anchorResult.error) {
+      throw new Error(`fund_master: ${anchorResult.error.message}`);
+    }
+
+    if (!anchorResult.data) return null;
+
+    const fundBatchResult = await supabaseAdmin
+      .from("fund_data_migration_batches")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fundBatchResult.error) {
+      throw new Error(
+        `fund_data_migration_batches: ${fundBatchResult.error.message}`
+      );
+    }
+
+    return (fundBatchResult.data as DataRow | null) ?? null;
+  }
 
   const result = await supabaseAdmin
     .from(table)
     .select("*")
     .eq("id", id)
+    .eq("fund_name", fundName)
     .maybeSingle();
 
   if (result.error) {
@@ -108,14 +139,15 @@ async function latestFundBatchForFund(fundName: string) {
   }
 
   const batchId = normalizeText(anchorResult.data?.batch_id, 80);
-  return batchId ? byId("fund_data_migration_batches", batchId) : null;
+  return batchId ? byId("fund_data_migration_batches", batchId, fundName) : null;
 }
 
 function candidateLayerFromRow(
   key: LayerKey,
   row: DataRow | null,
   approvalStatus: string,
-  fundIsActive: boolean
+  fundIsActive: boolean,
+  calculationReady: boolean
 ): LayerSnapshot {
   const sourceBatchId = normalizeText(row?.id, 80);
   const batchName =
@@ -238,7 +270,11 @@ function candidateLayerFromRow(
 
   if (!sourceBatchId) blockers.push("SOURCE_BATCH_MISSING");
   if (!approved) blockers.push("CHECKER_APPROVAL_REQUIRED");
-  if (!fundIsActive) blockers.push("FUND_ACTIVATION_REQUIRED");
+  if (!fundIsActive) {
+    blockers.push("FUND_ACTIVATION_REQUIRED");
+  } else if (!calculationReady) {
+    blockers.push("CALCULATION_RECONCILIATION_REQUIRED");
+  }
 
   return {
     key,
@@ -258,7 +294,9 @@ function candidateLayerFromRow(
     data_ready: dataReady,
     approval_status: approvalStatus || "Draft",
     approved,
-    operational: Boolean(sourceBatchId && dataReady && approved && fundIsActive),
+    operational: Boolean(
+      sourceBatchId && dataReady && approved && fundIsActive && calculationReady
+    ),
     count,
     primary_metric: primaryMetric,
     secondary_metric: secondaryMetric,
@@ -312,6 +350,58 @@ export async function GET(request: NextRequest) {
     const activation = (activationResult.data as DataRow | null) ?? null;
     const fundIsActive = normalizeText(activation?.status, 80) === "Active";
     const approvedBatchMap = objectValue(activation?.approved_batch_map);
+    const calculationRunId = normalizeText(
+      approvedBatchMap.calculation_run,
+      80
+    );
+
+    let calculationRun: DataRow | null = null;
+    let reconciliationRows: DataRow[] = [];
+
+    if (calculationRunId) {
+      const calculationRunResult = await supabaseAdmin
+        .from("metric_calculation_runs")
+        .select(
+          "id, fund_name, as_of_date, calculation_status, completed_at, source_batch_ids"
+        )
+        .eq("id", calculationRunId)
+        .eq("fund_name", fundName)
+        .eq("calculation_status", "Completed")
+        .maybeSingle();
+
+      if (calculationRunResult.error) {
+        throw new Error(
+          `metric_calculation_runs: ${calculationRunResult.error.message}`
+        );
+      }
+
+      calculationRun =
+        (calculationRunResult.data as DataRow | null) ?? null;
+
+      if (calculationRun) {
+        const reconciliationResult = await supabaseAdmin
+          .from("metric_reconciliation_results")
+          .select("reconciliation_status")
+          .eq("calculation_run_id", calculationRunId);
+
+        if (reconciliationResult.error) {
+          throw new Error(
+            `metric_reconciliation_results: ${reconciliationResult.error.message}`
+          );
+        }
+
+        reconciliationRows = (reconciliationResult.data ?? []) as DataRow[];
+      }
+    }
+
+    const passedReconciliationCount = reconciliationRows.filter(
+      (row) =>
+        normalizeText(row.reconciliation_status, 80).toLowerCase() === "pass"
+    ).length;
+    const calculationReady =
+      Boolean(calculationRun) &&
+      reconciliationRows.length > 0 &&
+      passedReconciliationCount === reconciliationRows.length;
 
     const frozenBatchIds: Record<LayerKey, string> = {
       investor: normalizeText(approvedBatchMap.investor, 80),
@@ -338,28 +428,42 @@ export async function GET(request: NextRequest) {
     const selectedRows: Record<LayerKey, DataRow | null> = {
       investor:
         fundIsActive && frozenBatchIds.investor
-          ? await byId("investor_import_batches", frozenBatchIds.investor)
+          ? await byId(
+              "investor_import_batches",
+              frozenBatchIds.investor,
+              fundName
+            )
           : latestInvestor,
       pdf:
         fundIsActive && frozenBatchIds.pdf
-          ? await byId("pdf_intelligence_batches", frozenBatchIds.pdf)
+          ? await byId(
+              "pdf_intelligence_batches",
+              frozenBatchIds.pdf,
+              fundName
+            )
           : latestPdf,
       portfolio:
         fundIsActive && frozenBatchIds.portfolio
           ? await byId(
               "portfolio_data_migration_batches",
-              frozenBatchIds.portfolio
+              frozenBatchIds.portfolio,
+              fundName
             )
           : latestPortfolio,
       fund:
         fundIsActive && frozenBatchIds.fund
-          ? await byId("fund_data_migration_batches", frozenBatchIds.fund)
+          ? await byId(
+              "fund_data_migration_batches",
+              frozenBatchIds.fund,
+              fundName
+            )
           : latestFund,
       compliance:
         fundIsActive && frozenBatchIds.compliance
           ? await byId(
               "compliance_data_migration_batches",
-              frozenBatchIds.compliance
+              frozenBatchIds.compliance,
+              fundName
             )
           : latestCompliance,
     };
@@ -426,7 +530,8 @@ export async function GET(request: NextRequest) {
         key,
         selectedRows[key],
         approvalStatusFor(key, selectedRows[key]),
-        fundIsActive
+        fundIsActive,
+        calculationReady
       )
     );
 
@@ -450,12 +555,21 @@ export async function GET(request: NextRequest) {
         activated_by: normalizeText(activation?.activated_by, 240),
         is_active: fundIsActive,
         using_frozen_batch_map: fundIsActive,
+        calculation_run_id: calculationRunId,
+        calculation_ready: calculationReady,
+        calculation_as_of_date: normalizeText(calculationRun?.as_of_date, 80),
+        reconciliation_controls: reconciliationRows.length,
+        reconciliation_passed: passedReconciliationCount,
       },
       layers,
       summary: {
         operational_layers: operationalLayerCount,
         total_layers: layers.length,
-        launch_gate_open: fundIsActive && operationalLayerCount === layers.length,
+        calculation_ready: calculationReady,
+        launch_gate_open:
+          fundIsActive &&
+          calculationReady &&
+          operationalLayerCount === layers.length,
       },
     });
   } catch (error) {

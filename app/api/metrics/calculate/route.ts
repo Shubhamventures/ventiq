@@ -339,36 +339,36 @@ async function authoriseRequest(
     throw new Error("ROLE_NOT_ALLOWED");
   }
 
-  if (role !== "fund_admin") {
-    const {
-      data: fundAccess,
-      error: fundAccessError,
-    } = await supabase
-      .from("ventiq_user_fund_access")
-      .select("can_view, can_edit")
-      .eq("user_id", user.id)
-      .eq("status", "Active")
-      .eq("fund_name", fundName)
-      .limit(1)
-      .maybeSingle();
+  const {
+    data: fundAccess,
+    error: fundAccessError,
+  } = await supabase
+    .from("ventiq_user_fund_access")
+    .select("can_view, can_edit")
+    .eq("user_id", user.id)
+    .eq("status", "Active")
+    .eq("fund_name", fundName)
+    .limit(1)
+    .maybeSingle();
 
-    if (fundAccessError) {
-      throw new Error(
-        `Unable to verify fund access: ${fundAccessError.message}`
-      );
-    }
+  if (fundAccessError) {
+    throw new Error(
+      `Unable to verify fund access: ${fundAccessError.message}`
+    );
+  }
 
-    const hasRequiredAccess =
-      Boolean(fundAccess?.can_view) &&
-      (mode === "view" || Boolean(fundAccess?.can_edit));
+  // Fund Admin is a role, not a cross-fund bypass. All metric reads and
+  // calculations must be authorised against the exact governed fund.
+  const hasRequiredAccess =
+    Boolean(fundAccess?.can_view) &&
+    (mode === "view" || Boolean(fundAccess?.can_edit));
 
-    if (!hasRequiredAccess) {
-      throw new Error(
-        mode === "calculate"
-          ? "FUND_EDIT_ACCESS_REQUIRED"
-          : "FUND_VIEW_ACCESS_REQUIRED"
-      );
-    }
+  if (!hasRequiredAccess) {
+    throw new Error(
+      mode === "calculate"
+        ? "FUND_EDIT_ACCESS_REQUIRED"
+        : "FUND_VIEW_ACCESS_REQUIRED"
+    );
   }
 
   return {
@@ -933,6 +933,33 @@ function makeReconciliation(input: {
   };
 }
 
+async function hasOpenSourceBatchValidationErrors(
+  supabase: SupabaseAdmin,
+  fundName: string,
+  sourceBatchId: string
+) {
+  const {
+    data: openError,
+    error: openErrorLookupError,
+  } = await supabase
+    .from("migration_validation_issues")
+    .select("id")
+    .eq("batch_id", sourceBatchId)
+    .eq("fund_name", fundName)
+    .eq("severity", "Error")
+    .eq("resolution_status", "Open")
+    .limit(1)
+    .maybeSingle();
+
+  if (openErrorLookupError) {
+    throw new Error(
+      `Unable to verify source-batch validation issues: ${openErrorLookupError.message}`
+    );
+  }
+
+  return Boolean(openError?.id);
+}
+
 async function resolveSourceBatchId(
   supabase: SupabaseAdmin,
   fundName: string,
@@ -944,7 +971,9 @@ async function resolveSourceBatchId(
       error: requestedBatchError,
     } = await supabase
       .from("migration_intake_batches")
-      .select("id, processing_status, status, total_rows")
+      .select(
+        "id, intake_mode, processing_status, status, total_rows, validation_error_count"
+      )
       .eq("id", requestedSourceBatchId)
       .eq("fund_name", fundName)
       .maybeSingle();
@@ -957,10 +986,23 @@ async function resolveSourceBatchId(
 
     if (
       !requestedBatch ||
+      requestedBatch.intake_mode !== "Canonical" ||
       requestedBatch.processing_status !== "Completed" ||
-      toNumber(requestedBatch.total_rows) <= 0
+      requestedBatch.status !== "Processed" ||
+      toNumber(requestedBatch.total_rows) <= 0 ||
+      toNumber(requestedBatch.validation_error_count) !== 0
     ) {
       throw new Error("SOURCE_BATCH_NOT_AVAILABLE");
+    }
+
+    if (
+      await hasOpenSourceBatchValidationErrors(
+        supabase,
+        fundName,
+        String(requestedBatch.id)
+      )
+    ) {
+      throw new Error("SOURCE_BATCH_VALIDATION_BLOCKED");
     }
 
     return String(requestedBatch.id);
@@ -971,10 +1013,14 @@ async function resolveSourceBatchId(
     error: latestBatchError,
   } = await supabase
     .from("migration_intake_batches")
-    .select("id, processing_status, status, total_rows, processed_at, created_at")
+    .select(
+      "id, intake_mode, processing_status, status, total_rows, validation_error_count, processed_at, created_at"
+    )
     .eq("fund_name", fundName)
-    .eq("processing_status", "Completed")
     .eq("intake_mode", "Canonical")
+    .eq("processing_status", "Completed")
+    .eq("status", "Processed")
+    .eq("validation_error_count", 0)
     .gt("total_rows", 0)
     .order("processed_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
@@ -983,12 +1029,22 @@ async function resolveSourceBatchId(
 
   if (latestBatchError) {
     throw new Error(
-      `Unable to identify the latest completed canonical batch: ${latestBatchError.message}`
+      `Unable to identify the latest validated canonical batch: ${latestBatchError.message}`
     );
   }
 
   if (!latestBatch?.id) {
     throw new Error("SOURCE_BATCH_NOT_AVAILABLE");
+  }
+
+  if (
+    await hasOpenSourceBatchValidationErrors(
+      supabase,
+      fundName,
+      String(latestBatch.id)
+    )
+  ) {
+    throw new Error("SOURCE_BATCH_VALIDATION_BLOCKED");
   }
 
   return String(latestBatch.id);
@@ -2202,7 +2258,7 @@ export async function GET(request: NextRequest) {
 
     let portfolioValuationQuery = supabase
       .from("portfolio_valuations")
-      .select("*")
+      .select("id,valuation_code,fund_name,portfolio_code,portfolio_company,instrument_code,instrument_type,valuation_date,reporting_period,valuation_method,valuation_basis,currency,investment_cost,fair_value,realised_value_to_date,accrued_interest,principal_outstanding,impairment_amount,ownership_percent,expected_exit_value,expected_exit_date,gross_moic_reference,valuation_status,is_final,approved_by,approved_at,source_batch_id,source_file_name,source_row_number,migration_status,created_at,updated_at")
       .eq("fund_name", fundName)
       .lte("valuation_date", run.as_of_date)
       .order("valuation_date", { ascending: false });
@@ -2223,22 +2279,22 @@ export async function GET(request: NextRequest) {
     ] = await Promise.all([
       supabase
         .from("calculated_fund_performance_metrics")
-        .select("*")
+        .select("id,calculation_run_id,fund_name,as_of_date,currency,total_commitments,paid_in_capital,total_distributions,uncalled_commitment,latest_gross_nav,latest_net_nav,portfolio_investment_cost,portfolio_realised_proceeds,portfolio_terminal_fair_value,gross_irr,net_irr,gross_moic,dpi,rvpi,tvpi,source_nav_date,source_valuation_date,portfolio_count,investor_count,calculation_status,calculation_note,created_at,updated_at,gross_distributions,withholding_tax,net_distributions,performance_distribution_basis")
         .eq("calculation_run_id", run.id)
         .maybeSingle(),
       supabase
         .from("portfolio_performance_metrics")
-        .select("*")
+        .select("id,calculation_run_id,fund_name,portfolio_code,portfolio_company,instrument_code,instrument_type,as_of_date,currency,invested_capital,realised_proceeds,terminal_fair_value,total_value,gross_profit,gross_moic,gross_irr,cashflow_count,first_cashflow_date,last_cashflow_date,valuation_date,calculation_status,calculation_note,created_at,updated_at")
         .eq("calculation_run_id", run.id)
         .order("gross_irr", { ascending: false, nullsFirst: false }),
       supabase
         .from("investor_performance_metrics")
-        .select("*")
+        .select("id,calculation_run_id,fund_name,investor_code,investor_name,class_name,as_of_date,currency,commitment_amount,paid_in_capital,total_distributions,uncalled_commitment,nav_allocation_percentage,allocated_nav,dpi,rvpi,tvpi,net_irr,cashflow_count,nav_allocation_method,calculation_status,calculation_note,created_at,updated_at,gross_distributions,withholding_tax,net_distributions,performance_distribution_basis")
         .eq("calculation_run_id", run.id)
         .order("tvpi", { ascending: false, nullsFirst: false }),
       supabase
         .from("metric_reconciliation_results")
-        .select("*")
+        .select("id,calculation_run_id,fund_name,as_of_date,reconciliation_type,metric_name,source_value,calculated_value,difference_amount,difference_percentage,amount_tolerance,percentage_tolerance,reconciliation_status,source_reference,calculation_reference,details,created_at,updated_at")
         .eq("calculation_run_id", run.id)
         .order("reconciliation_type", { ascending: true })
         .order("metric_name", { ascending: true }),
@@ -2336,7 +2392,7 @@ export async function POST(request: NextRequest) {
       error: settingsError,
     } = await supabase
       .from("metric_calculation_settings")
-      .select("*")
+      .select("fund_name,base_currency,nav_allocation_method,require_final_portfolio_valuations,include_cashflow_statuses,xirr_initial_guess,xirr_tolerance,xirr_max_iterations,reconciliation_amount_tolerance,reconciliation_percentage_tolerance,is_active,created_at,updated_at,performance_distribution_basis,nav_distribution_basis")
       .eq("fund_name", fundName)
       .eq("is_active", true)
       .maybeSingle();
@@ -2514,7 +2570,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "No completed canonical migration batch with structured data is available for this fund.",
+            "No fully validated Completed canonical migration batch with structured data is available for this fund.",
+        },
+        { status: 409 }
+      );
+    }
+
+    if (message === "SOURCE_BATCH_VALIDATION_BLOCKED") {
+      return NextResponse.json(
+        {
+          error:
+            "The canonical source batch still has open Error validation issues. Resolve those issues before running performance calculations.",
         },
         { status: 409 }
       );

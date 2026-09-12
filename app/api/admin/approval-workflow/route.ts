@@ -346,10 +346,22 @@ async function getFundMemorySnapshotWithAccess(
   };
 }
 
+type ComplianceBatchSummarySnapshot = {
+  id: string;
+  fundName: string;
+  totalItems: number;
+  evidenceAvailableCount: number;
+  pendingReviewCount: number;
+  highRiskCount: number;
+  readyCount: number;
+  updatedAt: unknown;
+};
+
 type ComplianceItemApprovalSnapshot = {
   complianceItemId: string;
   previousFilingStatus: string | null;
   previousRemarks: string | null;
+  batchSnapshot: ComplianceBatchSummarySnapshot | null;
 };
 
 function isComplianceItemApprovalRecord(approval: Record<string, unknown>) {
@@ -368,7 +380,7 @@ async function getComplianceItemWithAccess(
 ) {
   const { data: item, error: itemError } = await supabase
     .from("compliance_items")
-    .select("*")
+    .select("id,batch_id,compliance_code,item_type,document_name,fund_name,period,authority,due_date,filing_status,evidence_available,owner,category,risk_level,remarks,migration_status,created_at,updated_at,source_batch_id,source_file_name,source_row_number")
     .eq("id", complianceItemId)
     .maybeSingle();
 
@@ -423,6 +435,150 @@ async function getComplianceItemWithAccess(
   };
 }
 
+const COMPLIANCE_FINAL_STATUSES = new Set([
+  "filed",
+  "completed",
+  "closed",
+  "approved",
+  "resolved",
+  "not applicable",
+]);
+
+function isOpenComplianceStatus(row: Record<string, unknown>) {
+  const status = normalizeText(row.filing_status, 80).toLowerCase();
+  return !COMPLIANCE_FINAL_STATUSES.has(status);
+}
+
+function isHighRiskComplianceItem(row: Record<string, unknown>) {
+  return normalizeText(row.risk_level, 40).toLowerCase() === "high";
+}
+
+async function snapshotComplianceBatchSummary(
+  supabase: SupabaseAdmin,
+  item: Record<string, unknown>
+): Promise<ComplianceBatchSummarySnapshot | null> {
+  const batchId = normalizeText(item.batch_id, 100);
+  const fundName = normalizeText(item.fund_name, 240);
+
+  if (!batchId || !fundName) return null;
+
+  const { data: batch, error: batchError } = await supabase
+    .from("compliance_data_migration_batches")
+    .select(
+      "id,fund_name,total_items,evidence_available_count,pending_review_count,high_risk_count,ready_count,updated_at"
+    )
+    .eq("id", batchId)
+    .eq("fund_name", fundName)
+    .maybeSingle();
+
+  if (batchError) {
+    throw new Error(`Unable to load Compliance summary batch: ${batchError.message}`);
+  }
+
+  if (!batch) {
+    throw new Error("Compliance summary batch not found.");
+  }
+
+  return {
+    id: normalizeText(batch.id, 100),
+    fundName: normalizeText(batch.fund_name, 240),
+    totalItems: Number(batch.total_items ?? 0),
+    evidenceAvailableCount: Number(batch.evidence_available_count ?? 0),
+    pendingReviewCount: Number(batch.pending_review_count ?? 0),
+    highRiskCount: Number(batch.high_risk_count ?? 0),
+    readyCount: Number(batch.ready_count ?? 0),
+    updatedAt: batch.updated_at ?? null,
+  };
+}
+
+async function refreshComplianceBatchSummary(
+  supabase: SupabaseAdmin,
+  item: Record<string, unknown>
+) {
+  const batchId = normalizeText(item.batch_id, 100);
+  const fundName = normalizeText(item.fund_name, 240);
+
+  if (!batchId || !fundName) return;
+
+  const { data: itemRows, error: itemRowsError } = await supabase
+    .from("compliance_items")
+    .select("filing_status,evidence_available,risk_level")
+    .eq("batch_id", batchId)
+    .eq("fund_name", fundName)
+    .limit(2000);
+
+  if (itemRowsError) {
+    throw new Error(`Unable to recalculate Compliance summary: ${itemRowsError.message}`);
+  }
+
+  const complianceRows = (itemRows || []) as Array<Record<string, unknown>>;
+  const totalItems = complianceRows.length;
+  const evidenceAvailableCount = complianceRows.filter(
+    (row) => row.evidence_available === true
+  ).length;
+  const pendingReviewCount = complianceRows.filter(isOpenComplianceStatus).length;
+  const highRiskCount = complianceRows.filter(isHighRiskComplianceItem).length;
+  const readyCount = complianceRows.filter(
+    (row) =>
+      row.evidence_available === true &&
+      !isOpenComplianceStatus(row) &&
+      !isHighRiskComplianceItem(row)
+  ).length;
+
+  const { data: updatedBatch, error: updateError } = await supabase
+    .from("compliance_data_migration_batches")
+    .update({
+      total_items: totalItems,
+      evidence_available_count: evidenceAvailableCount,
+      pending_review_count: pendingReviewCount,
+      high_risk_count: highRiskCount,
+      ready_count: readyCount,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", batchId)
+    .eq("fund_name", fundName)
+    .select("id")
+    .maybeSingle();
+
+  if (updateError) {
+    throw new Error(`Unable to update Compliance summary batch: ${updateError.message}`);
+  }
+
+  if (!updatedBatch) {
+    throw new Error("Compliance summary batch changed before it could be refreshed.");
+  }
+}
+
+async function rollbackComplianceBatchSummary(
+  supabase: SupabaseAdmin,
+  snapshot: ComplianceBatchSummarySnapshot | null
+) {
+  if (!snapshot) return;
+
+  const { data: restoredBatch, error } = await supabase
+    .from("compliance_data_migration_batches")
+    .update({
+      total_items: snapshot.totalItems,
+      evidence_available_count: snapshot.evidenceAvailableCount,
+      pending_review_count: snapshot.pendingReviewCount,
+      high_risk_count: snapshot.highRiskCount,
+      ready_count: snapshot.readyCount,
+      updated_at: snapshot.updatedAt,
+    })
+    .eq("id", snapshot.id)
+    .eq("fund_name", snapshot.fundName)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Unable to roll back Compliance summary batch: ${error.message}`);
+  }
+
+  if (!restoredBatch) {
+    throw new Error("Compliance summary batch could not be restored.");
+  }
+}
+
 async function applyComplianceItemDecision(
   supabase: SupabaseAdmin,
   user: AuthorisedUser,
@@ -447,6 +603,11 @@ async function applyComplianceItemDecision(
     ? `${previousRemarks}\n${decisionNote}`.slice(0, 4000)
     : decisionNote;
 
+  const batchSnapshot = await snapshotComplianceBatchSummary(
+    supabase,
+    item as Record<string, unknown>
+  );
+
   const { error } = await supabase
     .from("compliance_items")
     .update({
@@ -459,10 +620,52 @@ async function applyComplianceItemDecision(
     throw new Error(`Unable to apply Compliance approval decision: ${error.message}`);
   }
 
+  try {
+    await refreshComplianceBatchSummary(
+      supabase,
+      item as Record<string, unknown>
+    );
+  } catch (summaryError) {
+    const rollbackErrors: string[] = [];
+
+    const { error: itemRollbackError } = await supabase
+      .from("compliance_items")
+      .update({
+        filing_status: previousFilingStatus,
+        remarks: previousRemarks,
+      })
+      .eq("id", complianceItemId);
+
+    if (itemRollbackError) {
+      rollbackErrors.push(
+        `Compliance item rollback failed: ${itemRollbackError.message}`
+      );
+    }
+
+    try {
+      await rollbackComplianceBatchSummary(supabase, batchSnapshot);
+    } catch (batchRollbackError) {
+      rollbackErrors.push(
+        batchRollbackError instanceof Error
+          ? batchRollbackError.message
+          : "Compliance summary rollback failed."
+      );
+    }
+
+    if (rollbackErrors.length > 0) {
+      throw new Error(
+        `${summaryError instanceof Error ? summaryError.message : "Compliance summary refresh failed."} ${rollbackErrors.join(" ")}`
+      );
+    }
+
+    throw summaryError;
+  }
+
   return {
     complianceItemId,
     previousFilingStatus,
     previousRemarks,
+    batchSnapshot,
   };
 }
 
@@ -470,13 +673,37 @@ async function rollbackComplianceItemDecision(
   supabase: SupabaseAdmin,
   snapshot: ComplianceItemApprovalSnapshot
 ) {
-  await supabase
+  const rollbackErrors: string[] = [];
+
+  const { error: itemRollbackError } = await supabase
     .from("compliance_items")
     .update({
       filing_status: snapshot.previousFilingStatus,
       remarks: snapshot.previousRemarks,
     })
     .eq("id", snapshot.complianceItemId);
+
+  if (itemRollbackError) {
+    rollbackErrors.push(
+      `Compliance item rollback failed: ${itemRollbackError.message}`
+    );
+  }
+
+  try {
+    await rollbackComplianceBatchSummary(supabase, snapshot.batchSnapshot);
+  } catch (batchRollbackError) {
+    rollbackErrors.push(
+      batchRollbackError instanceof Error
+        ? batchRollbackError.message
+        : "Compliance summary rollback failed."
+    );
+  }
+
+  if (rollbackErrors.length > 0) {
+    throw new Error(
+      `Unable to fully roll back Compliance approval disposition. ${rollbackErrors.join(" ")}`
+    );
+  }
 }
 
 async function getCapitalCallWithAccess(
@@ -841,7 +1068,7 @@ async function insertAuditLog(
 async function loadWorkflow(supabase: SupabaseAdmin, user: AuthorisedUser) {
   const { data: approvals, error: approvalsError } = await supabase
     .from("ventiq_approval_requests")
-    .select("*")
+    .select("id,fund_id,source_module,linked_record_id,linked_record_type,action_type,action_title,action_description,requested_by_name,requested_by_email,maker_role,checker_role,approver_role,priority,approval_status,current_step,business_impact,metadata,requested_at,approved_at,rejected_at,created_at,updated_at,organisation_id")
     .eq("organisation_id", user.organisationId)
     .order("created_at", { ascending: false })
     .limit(500);
@@ -856,7 +1083,7 @@ async function loadWorkflow(supabase: SupabaseAdmin, user: AuthorisedUser) {
   if (approvalIds.length > 0) {
     const { data: stepRows, error: stepsError } = await supabase
       .from("ventiq_approval_steps")
-      .select("*")
+      .select("id,approval_request_id,step_order,step_name,assigned_role,assigned_to_name,assigned_to_email,step_status,actioned_by_name,actioned_by_email,actioned_at,comments,created_at,updated_at")
       .in("approval_request_id", approvalIds)
       .order("step_order", { ascending: true })
       .limit(1500);
@@ -870,7 +1097,7 @@ async function loadWorkflow(supabase: SupabaseAdmin, user: AuthorisedUser) {
 
   const { data: auditLogs, error: auditError } = await supabase
     .from("ventiq_enterprise_audit_logs")
-    .select("*")
+    .select("id,fund_id,source_module,linked_record_id,linked_record_type,event_type,event_title,event_description,actor_name,actor_email,actor_role,event_status,risk_level,before_state,after_state,evidence_url,ip_address,user_agent,created_at,organisation_id")
     .eq("organisation_id", user.organisationId)
     .order("created_at", { ascending: false })
     .limit(500);
@@ -1275,7 +1502,7 @@ async function decideRequest(
 
   const { data: approval, error: approvalError } = await supabase
     .from("ventiq_approval_requests")
-    .select("*")
+    .select("id,fund_id,source_module,linked_record_id,linked_record_type,action_type,action_title,action_description,requested_by_name,requested_by_email,maker_role,checker_role,approver_role,priority,approval_status,current_step,business_impact,metadata,requested_at,approved_at,rejected_at,created_at,updated_at,organisation_id")
     .eq("id", approvalId)
     .eq("organisation_id", user.organisationId)
     .maybeSingle();

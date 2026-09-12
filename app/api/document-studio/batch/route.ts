@@ -589,11 +589,190 @@ async function loadBatchExceptions(args: {
   documentType: string;
 }) {
   if (!SNAPSHOT_DOCUMENT_TYPES.has(args.documentType)) return [] as BatchException[];
-  const evaluation = await evaluateFundMemory({
+  const evaluation = await evaluateFundMemoryPoint9Get({
     organisationId: args.organisationId,
     fundName: args.fundName,
   });
   return evaluation.exceptions;
+}
+
+
+// B9-86 Point-9 GET-only read-model helpers.
+// Original shared helpers remain unchanged for POST/action callers.
+
+async function loadApprovedSnapshotsPoint9Get(args: {
+  organisationId: string;
+  fundName: string;
+  controls: SnapshotControlRow[];
+}) {
+  const { organisationId, fundName, controls } = args;
+  const snapshotIds = controls.map((control) => control.snapshot_id).filter(Boolean);
+  const result = new Map<string, DataRow>();
+
+  for (const snapshotIdChunk of chunk(snapshotIds, 100)) {
+    if (snapshotIdChunk.length === 0) continue;
+
+    const { data, error } = await supabaseAdmin
+      .from("investor_position_snapshots")
+      .select("approval_status, fund_name, organisation_id, superseded_at")
+      .eq("organisation_id", organisationId)
+      .eq("fund_name", fundName)
+      .eq("approval_status", "approved")
+      .is("superseded_at", null)
+      .in("id", snapshotIdChunk);
+
+    if (error) {
+      throw new Error(`Unable to load canonical Fund Memory: ${error.message}`);
+    }
+
+    for (const snapshot of (data ?? []) as DataRow[]) {
+      const id = getString(snapshot, ["id"]);
+      if (id) result.set(id, snapshot);
+    }
+  }
+
+  return result;
+}
+
+
+// B9-86D Point-9 GET-only cashflow read helper.
+async function loadCashflowsPoint9Get(args: {
+  fundName: string;
+  investorId: string;
+  reportingDate: string;
+}) {
+  const { fundName, investorId, reportingDate } = args;
+
+  const { data, error } = await supabaseAdmin
+    .from("investor_cashflows")
+    .select("amount, cashflow_amount, cashflow_code, cashflow_date, cashflow_type, class_name, created_at, currency, description, direction, financial_batch_id, fund_name, id, investor_code, investor_id, investor_name, migration_status, source_batch_id, source_file_name, source_row_number, status")
+    .eq("fund_name", fundName)
+    .eq("investor_id", investorId)
+    .lte("cashflow_date", reportingDate)
+    .order("cashflow_date", { ascending: false })
+    .limit(25);
+
+  if (error) {
+    throw new Error(
+      `Unable to load point-in-time investor cashflows: ${error.message}`
+    );
+  }
+
+  return (data ?? []) as DataRow[];
+}
+
+async function evaluateFundMemoryPoint9Get(args: {
+  organisationId: string;
+  fundName: string;
+}) {
+  const { organisationId, fundName } = args;
+
+  const { data: investorData, error: investorError } = await supabaseAdmin
+    .from("investor_master")
+    .select("fund_name, investor_code")
+    .eq("fund_name", fundName)
+    .order("investor_code", { ascending: true })
+    .limit(500);
+
+  if (investorError) {
+    throw new Error(`Unable to load governed fund investors: ${investorError.message}`);
+  }
+
+  const investors = ((investorData ?? []) as DataRow[]).filter((row) =>
+    Boolean(getString(row, ["id"]))
+  );
+  const investorIds = investors.map((row) => getString(row, ["id"]));
+
+  const [eligibleControls, latestControls] = await Promise.all([
+    loadControls({ organisationId, fundName, investorIds, eligibleOnly: true }),
+    loadControls({ organisationId, fundName, investorIds, eligibleOnly: false }),
+  ]);
+
+  const approvedSnapshots = await loadApprovedSnapshotsPoint9Get({
+    organisationId,
+    fundName,
+    controls: Array.from(eligibleControls.values()),
+  });
+
+  const readyWithoutCashflows: Array<{
+    investor: DataRow;
+    control: SnapshotControlRow;
+    snapshot: DataRow;
+  }> = [];
+  const exceptions: BatchException[] = [];
+
+  for (const investor of investors) {
+    const investorId = getString(investor, ["id"]);
+    const investorCode = getString(investor, ["investor_code", "code"]);
+    const investorName = getString(investor, [
+      "investor_name",
+      "name",
+      "full_name",
+    ]);
+    const eligibleControl = eligibleControls.get(investorId);
+
+    if (!eligibleControl) {
+      const latestControl = latestControls.get(investorId);
+      exceptions.push({
+        investor_id: investorId,
+        investor_code: investorCode,
+        investor_name: investorName,
+        code: latestControl
+          ? "FUND_MEMORY_NOT_STATEMENT_ELIGIBLE"
+          : "FUND_MEMORY_SNAPSHOT_REQUIRED",
+        blockers: latestControl ? blockerList(latestControl.blocker_codes) : [],
+        message: latestControl
+          ? "Latest Fund Memory is not statement eligible."
+          : "No canonical Fund Memory snapshot exists for this investor.",
+      });
+      continue;
+    }
+
+    const snapshot = approvedSnapshots.get(eligibleControl.snapshot_id);
+    if (!snapshot) {
+      exceptions.push({
+        investor_id: investorId,
+        investor_code: investorCode,
+        investor_name: investorName,
+        code: "ELIGIBLE_FUND_MEMORY_NOT_FOUND",
+        blockers: [],
+        message:
+          "Fund Memory eligibility passed, but the approved canonical snapshot could not be loaded.",
+      });
+      continue;
+    }
+
+    const reportingDate = getString(snapshot, ["reporting_date"]);
+    if (!reportingDate) {
+      exceptions.push({
+        investor_id: investorId,
+        investor_code: investorCode,
+        investor_name: investorName,
+        code: "FUND_MEMORY_REPORTING_DATE_REQUIRED",
+        blockers: [],
+        message:
+          "The approved Fund Memory snapshot does not contain an authoritative reporting date.",
+      });
+      continue;
+    }
+
+    readyWithoutCashflows.push({ investor, control: eligibleControl, snapshot });
+  }
+
+  const ready: CanonicalReadyInvestor[] = [];
+  for (const group of chunk(readyWithoutCashflows, 20)) {
+    const groupResults = await Promise.all(
+      group.map(async (entry) => {
+        const investorId = getString(entry.investor, ["id"]);
+        const reportingDate = getString(entry.snapshot, ["reporting_date"]);
+        const cashflows = await loadCashflowsPoint9Get({ fundName, investorId, reportingDate });
+        return { ...entry, cashflows };
+      })
+    );
+    ready.push(...groupResults);
+  }
+
+  return { investors, ready, exceptions };
 }
 
 export async function GET(request: NextRequest) {
@@ -625,7 +804,7 @@ export async function GET(request: NextRequest) {
 
     let batchQuery = supabaseAdmin
       .from("document_studio_generation_batches")
-      .select("*")
+      .select("batch_name, created_at, created_by, document_type, fund_name, generated_count, id, organisation_id, published_count, ready_count, review_count, status, template_id, total_investors, updated_at")
       .eq("organisation_id", actor.organisationId)
       .eq("fund_name", actor.fundName);
 
@@ -656,7 +835,7 @@ export async function GET(request: NextRequest) {
 
     const { data: documents, error: documentsError } = await supabaseAdmin
       .from("document_studio_generated_documents")
-      .select("*")
+      .select("batch_id, created_at, created_by, document_name, document_type, email, file_name, file_url, fund_name, generated_at, generation_status, id, investor_code, investor_id, investor_name, organisation_id, portal_publish_status, preview_data, published_at, storage_bucket, storage_path, template_id")
       .eq("batch_id", batch.id)
       .eq("organisation_id", actor.organisationId)
       .eq("fund_name", actor.fundName)

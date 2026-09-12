@@ -136,6 +136,72 @@ function authErrorResponse(error: unknown) {
   return null;
 }
 
+const DEFAULT_CALCULATION_SETTINGS = {
+  base_currency: "INR",
+  nav_allocation_method: "Paid-in Capital Pro Rata",
+  require_final_portfolio_valuations: true,
+  include_cashflow_statuses: ["Confirmed", "Received", "Paid"],
+  xirr_initial_guess: 0.15,
+  xirr_tolerance: 1e-7,
+  xirr_max_iterations: 200,
+  reconciliation_amount_tolerance: 1,
+  reconciliation_percentage_tolerance: 0.01,
+  is_active: true,
+  performance_distribution_basis: "Net Cash",
+  nav_distribution_basis: "Gross Distribution",
+} as const;
+
+async function createDefaultCalculationSettingsForNewFund(fundName: string) {
+  const { data: existingSettings, error: existingSettingsError } =
+    await supabaseAdmin
+      .from("metric_calculation_settings")
+      .select("fund_name, is_active, created_at")
+      .eq("fund_name", fundName)
+      .limit(2);
+
+  if (existingSettingsError) {
+    throw new Error(
+      `Unable to check calculation settings: ${existingSettingsError.message}`
+    );
+  }
+
+  if ((existingSettings || []).length > 0) {
+    throw new Error(
+      "Calculation settings already exist for this fund name. Fund creation will not reuse another settings record."
+    );
+  }
+
+  const createdAt = new Date().toISOString();
+
+  const { data: createdSettings, error: createSettingsError } =
+    await supabaseAdmin
+      .from("metric_calculation_settings")
+      .insert({
+        fund_name: fundName,
+        ...DEFAULT_CALCULATION_SETTINGS,
+        created_at: createdAt,
+        updated_at: createdAt,
+      })
+      .select("fund_name, created_at, is_active")
+      .single();
+
+  if (createSettingsError || !createdSettings) {
+    throw new Error(
+      `Fund was created but default calculation settings could not be established: ${
+        createSettingsError?.message || "No calculation-settings row returned"
+      }`
+    );
+  }
+
+  if (createdSettings.is_active !== true) {
+    throw new Error(
+      "Fund was created but the default calculation settings row is not active."
+    );
+  }
+
+  return normalizeText(createdSettings.created_at, 80) || createdAt;
+}
+
 export async function POST(request: NextRequest) {
   let actor: AuthorisedFundAdmin;
 
@@ -162,6 +228,7 @@ export async function POST(request: NextRequest) {
   let createdCanonicalFundCode = "";
   let createdAccessAuditId = "";
   let createdEnterpriseAuditId = "";
+  let createdCalculationSettingsCreatedAt = "";
   let enterpriseAuditAttempted = false;
   let accessCreated = false;
   let fundName = "";
@@ -310,6 +377,9 @@ export async function POST(request: NextRequest) {
     createdCanonicalFundCode =
       normalizeText(canonicalFund.fund_code, 80) || createdFundId;
 
+    createdCalculationSettingsCreatedAt =
+      await createDefaultCalculationSettingsForNewFund(fundName);
+
     const { error: accessError } = await supabaseAdmin
       .from("ventiq_user_fund_access")
       .insert({
@@ -443,6 +513,14 @@ export async function POST(request: NextRequest) {
         .eq("organisation_id", actor.organisationId)
         .eq("user_id", actor.userId)
         .eq("fund_name", fundName);
+    }
+
+    if (createdCalculationSettingsCreatedAt && fundName) {
+      await supabaseAdmin
+        .from("metric_calculation_settings")
+        .delete()
+        .eq("fund_name", fundName)
+        .eq("created_at", createdCalculationSettingsCreatedAt);
     }
 
     if (createdCanonicalFundCode) {

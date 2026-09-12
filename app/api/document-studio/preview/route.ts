@@ -342,7 +342,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabaseAdmin
       .from("investor_master")
-      .select("*")
+      .select("fund_name")
       .eq("fund_name", actor.fundName)
       .limit(1000);
 

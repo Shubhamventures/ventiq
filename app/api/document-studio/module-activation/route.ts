@@ -145,12 +145,137 @@ async function getModuleReadiness(args: {
   };
 }
 
+
+// B9-86 Point-9 GET-only read-model helpers.
+// Original shared helpers remain unchanged for POST/action callers.
+
+async function getModuleReadinessPoint9Get(args: {
+  organisationId: string;
+  fundName: string;
+}) {
+  const { organisationId, fundName } = args;
+
+  const [investorResult, controlsResult, generatedResult, activationResult] =
+    await Promise.all([
+      // investor_master is a legacy fund-scoped table and does not carry
+      // organisation_id. Organisation isolation is established by the
+      // authenticated fund-access check plus the organisation-scoped
+      // Fund Memory / generated-document controls below.
+      supabaseAdmin
+        .from("investor_master")
+        .select("id, investor_code", { count: "exact" })
+        .eq("fund_name", fundName),
+      supabaseAdmin
+        .from("investor_position_snapshot_controls")
+        .select("snapshot_id, investor_id, investor_statement_eligible", {
+          count: "exact",
+        })
+        .eq("organisation_id", organisationId)
+        .eq("fund_name", fundName)
+        .eq("investor_statement_eligible", true),
+      supabaseAdmin
+        .from("document_studio_generated_documents")
+        .select("id, investor_id, investor_code, generation_status, preview_data")
+        .eq("organisation_id", organisationId)
+        .eq("fund_name", fundName)
+        .in("generation_status", ["Generated", "Published"])
+        .limit(500),
+      supabaseAdmin
+        .from("ventiq_module_activation_status")
+        .select("fund_name, module_key, organisation_id")
+        .eq("organisation_id", organisationId)
+        .eq("fund_name", fundName)
+        .eq("module_key", MODULE_KEY)
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+  if (investorResult.error) {
+    throw new Error(`Unable to verify governed investors: ${investorResult.error.message}`);
+  }
+  if (controlsResult.error) {
+    throw new Error(`Unable to verify Fund Memory eligibility: ${controlsResult.error.message}`);
+  }
+  if (generatedResult.error) {
+    throw new Error(`Unable to verify generated documents: ${generatedResult.error.message}`);
+  }
+  if (activationResult.error) {
+    throw new Error(`Unable to load module activation: ${activationResult.error.message}`);
+  }
+
+  const generatedRows = (generatedResult.data ?? []) as DataRow[];
+  const canonicalGeneratedRows = generatedRows.filter((row) => {
+    const preview = asRecord(row.preview_data);
+    const fundMemory = asRecord(preview.fundMemory);
+    return preview.canonical === true && Boolean(normalizeText(fundMemory.snapshot_id, 80));
+  });
+
+  const investorCount = Number(investorResult.count ?? (investorResult.data ?? []).length);
+  const eligibleSnapshotCount = Number(
+    controlsResult.count ?? (controlsResult.data ?? []).length
+  );
+  const canonicalGeneratedCount = canonicalGeneratedRows.length;
+
+  const criteria = [
+    {
+      key: "governed_investor",
+      label: "Governed investor identity",
+      passed: investorCount > 0,
+      detail: `${investorCount} governed investor(s) available for this fund.`,
+    },
+    {
+      key: "approved_fund_memory",
+      label: "Approved Fund Memory",
+      passed: eligibleSnapshotCount > 0,
+      detail: `${eligibleSnapshotCount} investor statement-eligible snapshot(s) available.`,
+    },
+    {
+      key: "canonical_generated_pdf",
+      label: "Canonical generated PDF",
+      passed: canonicalGeneratedCount > 0,
+      detail: `${canonicalGeneratedCount} generated/published PDF(s) carry canonical Fund Memory lineage.`,
+    },
+  ];
+
+  const passedCount = criteria.filter((criterion) => criterion.passed).length;
+  const readinessScore = Math.round((passedCount / criteria.length) * 100);
+  const ready = criteria.every((criterion) => criterion.passed);
+  const persisted = (activationResult.data as DataRow | null) ?? null;
+  const status =
+    normalizeText(persisted?.status, 80) === "Active"
+      ? "Active"
+      : ready
+        ? "Ready for Activation"
+        : "Setup Not Started";
+
+  return {
+    module_key: MODULE_KEY,
+    module_name: MODULE_NAME,
+    status,
+    readiness_score: readinessScore,
+    ready,
+    criteria,
+    counts: {
+      governed_investors: investorCount,
+      eligible_snapshots: eligibleSnapshotCount,
+      canonical_generated_pdfs: canonicalGeneratedCount,
+    },
+    activation: persisted,
+    canonical_generated_document_ids: canonicalGeneratedRows
+      .map((row) => normalizeText(row.id, 80))
+      .filter(Boolean),
+    eligible_snapshot_ids: ((controlsResult.data ?? []) as DataRow[])
+      .map((row) => normalizeText(row.snapshot_id, 80))
+      .filter(Boolean),
+  };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const baseActor = await authenticateDocumentStudioUser(request);
     const fundName = normalizeText(request.nextUrl.searchParams.get("fund_name"), 240);
     const actor = await requireDocumentStudioFundAccess(baseActor, fundName, "view");
-    const readiness = await getModuleReadiness({
+    const readiness = await getModuleReadinessPoint9Get({
       organisationId: actor.organisationId,
       fundName: actor.fundName,
     });
