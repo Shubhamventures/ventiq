@@ -96,94 +96,6 @@ const emptyApprovalForm: ApprovalForm = {
   businessImpact: "",
 };
 
-const sampleApprovals: ApprovalRequest[] = [
-  {
-    id: "approval-demo-001",
-    sourceModule: "Debt LMS",
-    linkedRecordId: "demo-record-001",
-    linkedRecordType: "Repayment Schedule",
-    actionType: "Receipt Update",
-    actionTitle: "Approve repayment receipt update",
-    actionDescription:
-      "A maker submits a controlled action, a checker reviews it, and a final approver completes the workflow.",
-    requestedByName: "Demo Maker",
-    requestedByEmail: "demo@useventiq.com",
-    makerRole: "maker",
-    checkerRole: "checker",
-    approverRole: "finance_head / compliance_team / managing_partner",
-    priority: "High",
-    approvalStatus: "Pending Review",
-    currentStep: "Checker Review",
-    businessImpact: "Demonstrates the controlled approval path without writing to the database.",
-    requestedAt: new Date().toISOString().slice(0, 10),
-    approvedAt: "",
-    rejectedAt: "",
-  },
-];
-
-const sampleSteps: ApprovalStep[] = [
-  {
-    id: "step-demo-001",
-    approvalRequestId: "approval-demo-001",
-    stepOrder: 1,
-    stepName: "Maker Submitted",
-    assignedRole: "maker",
-    assignedToName: "Demo Maker",
-    assignedToEmail: "demo@useventiq.com",
-    stepStatus: "Completed",
-    actionedByName: "Demo Maker",
-    actionedByEmail: "demo@useventiq.com",
-    actionedAt: new Date().toISOString().slice(0, 10),
-    comments: "Demonstration record only.",
-  },
-  {
-    id: "step-demo-002",
-    approvalRequestId: "approval-demo-001",
-    stepOrder: 2,
-    stepName: "Checker Review",
-    assignedRole: "checker",
-    assignedToName: "",
-    assignedToEmail: "",
-    stepStatus: "Pending",
-    actionedByName: "",
-    actionedByEmail: "",
-    actionedAt: "",
-    comments: "",
-  },
-  {
-    id: "step-demo-003",
-    approvalRequestId: "approval-demo-001",
-    stepOrder: 3,
-    stepName: "Final Approval",
-    assignedRole: "finance_head / compliance_team / managing_partner",
-    assignedToName: "",
-    assignedToEmail: "",
-    stepStatus: "Pending",
-    actionedByName: "",
-    actionedByEmail: "",
-    actionedAt: "",
-    comments: "",
-  },
-];
-
-const sampleAuditLogs: AuditLog[] = [
-  {
-    id: "audit-demo-001",
-    sourceModule: "Debt LMS",
-    linkedRecordId: "demo-record-001",
-    linkedRecordType: "Repayment Schedule",
-    eventType: "Approval Requested",
-    eventTitle: "Demo approval request",
-    eventDescription: "Demonstration event only. No database record was created.",
-    actorName: "Demo Maker",
-    actorEmail: "demo@useventiq.com",
-    actorRole: "maker",
-    eventStatus: "Recorded",
-    riskLevel: "Medium",
-    evidenceUrl: "",
-    createdAt: new Date().toISOString().slice(0, 10),
-  },
-];
 
 const criticalActions = [
   "Bank transaction approval",
@@ -359,13 +271,15 @@ export default function AuditWorkflowPage() {
 
   const loadWorkflowData = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) {
-      setApprovals(sampleApprovals);
-      setApprovalSteps(sampleSteps);
-      setAuditLogs(sampleAuditLogs);
+      setApprovals([]);
+      setApprovalSteps([]);
+      setAuditLogs([]);
       setActor(null);
       setCapabilities({ canCreate: false, canCheckerReview: false, canFinalApprove: false });
-      setSelectedApprovalId(sampleApprovals[0].id);
-      setDataMessage("Demo-only mode. Configure Supabase and sign in to use secured workflow actions.");
+      setSelectedApprovalId("");
+      setDataMessage(
+        "Supabase is not configured. No approval workflow or audit records are displayed."
+      );
       setLoading(false);
       return;
     }

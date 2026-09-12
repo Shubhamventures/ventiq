@@ -85,165 +85,6 @@ type DataRequestForm = {
   relatedModule: string;
 };
 
-const sampleControls: ProtectionControl[] = [
-  {
-    id: "ctrl-001",
-    controlArea: "Access Control",
-    controlName: "Role-based dashboard access",
-    controlDescription:
-      "Stakeholders should only access dashboards mapped to their role and fund/scheme scope.",
-    controlOwner: "Fund Admin",
-    controlStatus: "Implemented",
-    evidenceStatus: "Evidence Available",
-    lastReviewedAt: "2026-08-02",
-    nextReviewDue: "2026-09-02",
-  },
-  {
-    id: "ctrl-002",
-    controlArea: "Authentication",
-    controlName: "Secure invite link flow",
-    controlDescription:
-      "Users should set their own password through invite links. Passwords should not be shared manually.",
-    controlOwner: "Implementation Admin",
-    controlStatus: "Implemented",
-    evidenceStatus: "Evidence Available",
-    lastReviewedAt: "2026-08-02",
-    nextReviewDue: "2026-09-02",
-  },
-  {
-    id: "ctrl-003",
-    controlArea: "Audit Trail",
-    controlName: "Access and workflow event logs",
-    controlDescription:
-      "Key operational events should be recorded with actor, timestamp, module and event description.",
-    controlOwner: "Compliance Officer",
-    controlStatus: "In Progress",
-    evidenceStatus: "Partial Evidence",
-    lastReviewedAt: "2026-08-02",
-    nextReviewDue: "2026-09-02",
-  },
-  {
-    id: "ctrl-004",
-    controlArea: "Data Segregation",
-    controlName: "Fund and scheme-level isolation",
-    controlDescription:
-      "Client data should be logically segregated by fund, scheme and user role before real data onboarding.",
-    controlOwner: "Product Admin",
-    controlStatus: "Planned",
-    evidenceStatus: "Pending Evidence",
-    lastReviewedAt: "",
-    nextReviewDue: "2026-09-15",
-  },
-];
-
-const sampleSensitiveFields: SensitiveField[] = [
-  {
-    id: "field-001",
-    moduleName: "Fund Onboarding",
-    fieldName: "Stakeholder email",
-    dataCategory: "Contact data",
-    sensitivityLevel: "Personal Data",
-    protectionMeasure: "Role access + invite flow + audit log",
-    retentionPeriod: "Client contract period + legal retention",
-    accessRoles: "Fund Admin, Compliance Officer",
-  },
-  {
-    id: "field-002",
-    moduleName: "Bank MIS",
-    fieldName: "Bank narration / reference",
-    dataCategory: "Financial transaction data",
-    sensitivityLevel: "Confidential",
-    protectionMeasure: "Restricted finance role access + audit log",
-    retentionPeriod: "Fund accounting retention period",
-    accessRoles: "Finance Head, Fund Admin, Auditor read-only",
-  },
-  {
-    id: "field-003",
-    moduleName: "Debt LMS",
-    fieldName: "Borrower repayment schedule",
-    dataCategory: "Commercial financial data",
-    sensitivityLevel: "Confidential",
-    protectionMeasure: "Role-based access + approval workflow",
-    retentionPeriod: "Loan life + audit retention",
-    accessRoles: "Finance Head, Investment Team, Managing Partner",
-  },
-  {
-    id: "field-004",
-    moduleName: "Investor Portal",
-    fieldName: "Investor statements and notices",
-    dataCategory: "Investor communication data",
-    sensitivityLevel: "Personal / Confidential",
-    protectionMeasure: "Investor-specific portal access + document logs",
-    retentionPeriod: "Client contract period + regulatory retention",
-    accessRoles: "Investor / LP, Investor Relations, Fund Admin",
-  },
-];
-
-const sampleRetentionPolicies: RetentionPolicy[] = [
-  {
-    id: "ret-001",
-    policyName: "Stakeholder access data retention",
-    moduleName: "Fund Onboarding",
-    retentionPeriod: "Client contract period + agreed archival period",
-    deletionTrigger: "Client offboarding / access revocation / legal review",
-    policyStatus: "Draft",
-  },
-  {
-    id: "ret-002",
-    policyName: "Bank MIS transaction data retention",
-    moduleName: "Bank MIS",
-    retentionPeriod: "Fund accounting and audit retention period",
-    deletionTrigger: "Client offboarding subject to audit/legal hold",
-    policyStatus: "Draft",
-  },
-  {
-    id: "ret-003",
-    policyName: "Debt LMS servicing data retention",
-    moduleName: "Debt LMS",
-    retentionPeriod: "Loan life + audit retention period",
-    deletionTrigger: "Loan closure + client retention policy approval",
-    policyStatus: "Draft",
-  },
-];
-
-const sampleIncidents: IncidentRow[] = [
-  {
-    id: "inc-001",
-    incidentTitle: "No active incidents",
-    incidentType: "Readiness placeholder",
-    severity: "Low",
-    incidentStatus: "Closed",
-    reportedBy: "VENTIQ Admin",
-    reportedAt: "2026-08-02",
-    description: "Placeholder incident row for readiness demonstration.",
-  },
-];
-
-const sampleRequests: DataRequestRow[] = [
-  {
-    id: "req-001",
-    requesterName: "Demo Investor",
-    requesterEmail: "investor@example.com",
-    requestType: "Access request",
-    relatedModule: "Investor Portal",
-    requestStatus: "Open",
-    receivedAt: "2026-08-02",
-    dueDate: "2026-08-09",
-  },
-];
-
-const sampleAuditRows: AccessAuditRow[] = [
-  {
-    id: "audit-001",
-    eventType: "Access Control",
-    eventTitle: "Data Protection Console opened",
-    eventDescription: "Fund Admin reviewed data protection and access readiness controls.",
-    actorName: "VENTIQ Admin",
-    actorEmail: "admin@useventiq.com",
-    createdAt: "2026-08-02",
-  },
-];
-
 const emptyIncidentForm: IncidentForm = {
   incidentTitle: "",
   incidentType: "Access issue",
@@ -378,15 +219,12 @@ function mapAudit(row: DataRow): AccessAuditRow {
 }
 
 export default function DataProtectionPage() {
-  const [controls, setControls] = useState<ProtectionControl[]>(sampleControls);
-  const [sensitiveFields, setSensitiveFields] =
-    useState<SensitiveField[]>(sampleSensitiveFields);
-  const [retentionPolicies, setRetentionPolicies] =
-    useState<RetentionPolicy[]>(sampleRetentionPolicies);
-  const [incidents, setIncidents] = useState<IncidentRow[]>(sampleIncidents);
-  const [dataRequests, setDataRequests] =
-    useState<DataRequestRow[]>(sampleRequests);
-  const [auditRows, setAuditRows] = useState<AccessAuditRow[]>(sampleAuditRows);
+  const [controls, setControls] = useState<ProtectionControl[]>([]);
+  const [sensitiveFields, setSensitiveFields] = useState<SensitiveField[]>([]);
+  const [retentionPolicies, setRetentionPolicies] = useState<RetentionPolicy[]>([]);
+  const [incidents, setIncidents] = useState<IncidentRow[]>([]);
+  const [dataRequests, setDataRequests] = useState<DataRequestRow[]>([]);
+  const [auditRows, setAuditRows] = useState<AccessAuditRow[]>([]);
 
   const [incidentForm, setIncidentForm] =
     useState<IncidentForm>(emptyIncidentForm);
@@ -406,8 +244,14 @@ export default function DataProtectionPage() {
   useEffect(() => {
     async function loadDataProtectionWorkspace() {
       if (!isSupabaseConfigured || !supabase) {
+        setControls([]);
+        setSensitiveFields([]);
+        setRetentionPolicies([]);
+        setIncidents([]);
+        setDataRequests([]);
+        setAuditRows([]);
         setDataMessage(
-          "Using sample data protection controls. Supabase is not configured."
+          "Supabase is not configured. No data protection records are displayed."
         );
         setLoading(false);
         return;
@@ -440,49 +284,45 @@ export default function DataProtectionPage() {
         if (requestsResult.error) throw new Error(requestsResult.error.message);
         if (auditResult.error) throw new Error(auditResult.error.message);
 
-        setControls(
-          controlsResult.data && controlsResult.data.length > 0
-            ? (controlsResult.data as DataRow[]).map(mapControl)
-            : sampleControls
+        const nextControls = (controlsResult.data ?? []) as DataRow[];
+        const nextFields = (fieldsResult.data ?? []) as DataRow[];
+        const nextRetention = (retentionResult.data ?? []) as DataRow[];
+        const nextIncidents = (incidentsResult.data ?? []) as DataRow[];
+        const nextRequests = (requestsResult.data ?? []) as DataRow[];
+        const nextAudit = (auditResult.data ?? []) as DataRow[];
+
+        setControls(nextControls.map(mapControl));
+        setSensitiveFields(nextFields.map(mapSensitiveField));
+        setRetentionPolicies(nextRetention.map(mapRetentionPolicy));
+        setIncidents(nextIncidents.map(mapIncident));
+        setDataRequests(nextRequests.map(mapDataRequest));
+        setAuditRows(nextAudit.map(mapAudit));
+
+        const liveRecordCount =
+          nextControls.length +
+          nextFields.length +
+          nextRetention.length +
+          nextIncidents.length +
+          nextRequests.length +
+          nextAudit.length;
+
+        setDataMessage(
+          liveRecordCount > 0
+            ? "Connected to VENTIQ data protection records."
+            : "Connected to VENTIQ. No data protection records have been created yet."
         );
-        setSensitiveFields(
-          fieldsResult.data && fieldsResult.data.length > 0
-            ? (fieldsResult.data as DataRow[]).map(mapSensitiveField)
-            : sampleSensitiveFields
-        );
-        setRetentionPolicies(
-          retentionResult.data && retentionResult.data.length > 0
-            ? (retentionResult.data as DataRow[]).map(mapRetentionPolicy)
-            : sampleRetentionPolicies
-        );
-        setIncidents(
-          incidentsResult.data && incidentsResult.data.length > 0
-            ? (incidentsResult.data as DataRow[]).map(mapIncident)
-            : sampleIncidents
-        );
-        setDataRequests(
-          requestsResult.data && requestsResult.data.length > 0
-            ? (requestsResult.data as DataRow[]).map(mapDataRequest)
-            : sampleRequests
-        );
-        setAuditRows(
-          auditResult.data && auditResult.data.length > 0
-            ? (auditResult.data as DataRow[]).map(mapAudit)
-            : sampleAuditRows
-        );
-        setDataMessage("Connected to VENTIQ data protection records.");
       } catch (error) {
         setDataMessage(
           error instanceof Error
-            ? `Data protection database issue: ${error.message}`
-            : "Unable to load data protection workspace. Showing sample data."
+            ? `Data protection database issue: ${error.message}. No fallback records were substituted.`
+            : "Unable to load data protection workspace. No fallback records were substituted."
         );
-        setControls(sampleControls);
-        setSensitiveFields(sampleSensitiveFields);
-        setRetentionPolicies(sampleRetentionPolicies);
-        setIncidents(sampleIncidents);
-        setDataRequests(sampleRequests);
-        setAuditRows(sampleAuditRows);
+        setControls([]);
+        setSensitiveFields([]);
+        setRetentionPolicies([]);
+        setIncidents([]);
+        setDataRequests([]);
+        setAuditRows([]);
       } finally {
         setLoading(false);
       }

@@ -329,12 +329,12 @@ export default function ClientReadinessPage() {
         const [clientsResult, itemsResult] = await Promise.all([
           db
             .from("ventiq_pilot_clients")
-            .select("*")
+            .select("client_name,created_at,data_mode,fund_type,id,jurisdiction,pilot_stage,primary_contact_email,primary_contact_name,readiness_score,risk_status,selected_modules,target_onboarding_date")
             .order("created_at", { ascending: false }),
 
           db
             .from("ventiq_client_readiness_items")
-            .select("*")
+            .select("checklist_item,client_id,created_at,due_date,evidence_notes,id,owner_role,priority,readiness_area,readiness_status")
             .order("created_at", { ascending: false }),
         ]);
 

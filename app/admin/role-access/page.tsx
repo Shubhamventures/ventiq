@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../../lib/supabaseClient";
+import {
+  VENTIQ_ROLES,
+  getRoleLabel,
+} from "../../../lib/auth/types";
 
 type DataRow = Record<string, unknown>;
 
@@ -46,40 +50,10 @@ type PermissionForm = {
   notes: string;
 };
 
-const roleOptions = [
-  {
-    roleKey: "fund_admin",
-    roleLabel: "Fund Admin",
-  },
-  {
-    roleKey: "managing_partner",
-    roleLabel: "Managing Partner",
-  },
-  {
-    roleKey: "finance_head",
-    roleLabel: "Finance Head",
-  },
-  {
-    roleKey: "investment_team",
-    roleLabel: "Investment Team",
-  },
-  {
-    roleKey: "compliance_officer",
-    roleLabel: "Compliance Officer",
-  },
-  {
-    roleKey: "investor_relations",
-    roleLabel: "Investor Relations",
-  },
-  {
-    roleKey: "investor_lp",
-    roleLabel: "Investor / LP",
-  },
-  {
-    roleKey: "auditor_trustee",
-    roleLabel: "Auditor / Trustee",
-  },
-];
+const roleOptions = VENTIQ_ROLES.map((roleKey) => ({
+  roleKey,
+  roleLabel: getRoleLabel(roleKey),
+}));
 
 const routeOptions = [
   {
@@ -127,6 +101,10 @@ const routeOptions = [
     routeLabel: "Investment Team Dashboard",
   },
   {
+    routePath: "/fundraising-ai",
+    routeLabel: "Investor Relations Dashboard",
+  },
+  {
     routePath: "/investor-portal",
     routeLabel: "Investor Portal",
   },
@@ -149,117 +127,6 @@ const emptyPermissionForm: PermissionForm = {
   notes: "",
 };
 
-const samplePermissions: RoutePermission[] = [
-  {
-    id: "perm-001",
-    roleKey: "finance_head",
-    roleLabel: "Finance Head",
-    routePath: "/finance-head-ai",
-    routeLabel: "Finance Head Dashboard",
-    accessType: "Operations",
-    canView: true,
-    canEdit: true,
-    canApprove: true,
-    guardStatus: "Active",
-    notes: "Primary finance workspace.",
-    createdAt: "2026-08-03",
-  },
-  {
-    id: "perm-002",
-    roleKey: "finance_head",
-    roleLabel: "Finance Head",
-    routePath: "/bank-reconciliation",
-    routeLabel: "Bank MIS",
-    accessType: "Operations",
-    canView: true,
-    canEdit: true,
-    canApprove: true,
-    guardStatus: "Active",
-    notes: "Daily cash and reconciliation control.",
-    createdAt: "2026-08-03",
-  },
-  {
-    id: "perm-003",
-    roleKey: "finance_head",
-    roleLabel: "Finance Head",
-    routePath: "/debt-lms",
-    routeLabel: "Debt LMS",
-    accessType: "Operations",
-    canView: true,
-    canEdit: true,
-    canApprove: true,
-    guardStatus: "Active",
-    notes: "Receipts, notices and repayment monitoring.",
-    createdAt: "2026-08-03",
-  },
-  {
-    id: "perm-004",
-    roleKey: "managing_partner",
-    roleLabel: "Managing Partner",
-    routePath: "/managing-partner-ai",
-    routeLabel: "Managing Partner Dashboard",
-    accessType: "Executive",
-    canView: true,
-    canEdit: false,
-    canApprove: true,
-    guardStatus: "Active",
-    notes: "Executive fund-level view.",
-    createdAt: "2026-08-03",
-  },
-  {
-    id: "perm-005",
-    roleKey: "investor_lp",
-    roleLabel: "Investor / LP",
-    routePath: "/investor-portal",
-    routeLabel: "Investor Portal",
-    accessType: "Read Only",
-    canView: true,
-    canEdit: false,
-    canApprove: false,
-    guardStatus: "Active",
-    notes: "Investor-facing restricted access.",
-    createdAt: "2026-08-03",
-  },
-  {
-    id: "perm-006",
-    roleKey: "auditor_trustee",
-    roleLabel: "Auditor / Trustee",
-    routePath: "/document-studio",
-    routeLabel: "Document Studio",
-    accessType: "Evidence Read Only",
-    canView: true,
-    canEdit: false,
-    canApprove: false,
-    guardStatus: "Active",
-    notes: "Evidence and document review access.",
-    createdAt: "2026-08-03",
-  },
-];
-
-const sampleStakeholders: Stakeholder[] = [
-  {
-    id: "stake-001",
-    fullName: "Finance Head",
-    email: "finance@example.com",
-    roleKey: "finance_head",
-    roleLabel: "Finance Head",
-    dashboardPath: "/finance-head-ai",
-    accessLevel: "Finance Operations",
-    inviteStatus: "Activated",
-    accessStatus: "Active",
-  },
-  {
-    id: "stake-002",
-    fullName: "Managing Partner",
-    email: "mp@example.com",
-    roleKey: "managing_partner",
-    roleLabel: "Managing Partner",
-    dashboardPath: "/managing-partner-ai",
-    accessLevel: "Executive View",
-    inviteStatus: "Activated",
-    accessStatus: "Active",
-  },
-];
 
 function getString(row: DataRow, keys: string[], fallback = "") {
   for (const key of keys) {
@@ -339,10 +206,8 @@ function getAllowedRoutes(roleKey: string, permissions: RoutePermission[]) {
 }
 
 export default function RoleAccessPage() {
-  const [permissions, setPermissions] =
-    useState<RoutePermission[]>(samplePermissions);
-  const [stakeholders, setStakeholders] =
-    useState<Stakeholder[]>(sampleStakeholders);
+  const [permissions, setPermissions] = useState<RoutePermission[]>([]);
+  const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
 
   const [permissionForm, setPermissionForm] =
     useState<PermissionForm>(emptyPermissionForm);
@@ -357,7 +222,11 @@ export default function RoleAccessPage() {
   useEffect(() => {
     async function loadAccessData() {
       if (!isSupabaseConfigured || !supabase) {
-        setDataMessage("Using sample access data. Supabase is not configured.");
+        setPermissions([]);
+        setStakeholders([]);
+        setDataMessage(
+          "Supabase is not configured. No role access or stakeholder records are displayed."
+        );
         setLoading(false);
         return;
       }
@@ -369,12 +238,12 @@ export default function RoleAccessPage() {
         const [permissionsResult, stakeholdersResult] = await Promise.all([
           db
             .from("ventiq_role_route_permissions")
-            .select("*")
+            .select("access_type,can_approve,can_edit,can_view,created_at,guard_status,id,notes,role_key,role_label,route_label,route_path")
             .order("created_at", { ascending: false }),
 
           db
             .from("ventiq_stakeholders")
-            .select("*")
+            .select("access_level,access_status,created_at,dashboard_path,email,full_name,id,invite_status,role_key,role_label")
             .order("created_at", { ascending: false }),
         ]);
 
@@ -386,32 +255,30 @@ export default function RoleAccessPage() {
           throw new Error(stakeholdersResult.error.message);
         }
 
-        const nextPermissions =
-          permissionsResult.data && permissionsResult.data.length > 0
-            ? (permissionsResult.data as DataRow[]).map(mapPermission)
-            : samplePermissions;
+        const nextPermissions = ((permissionsResult.data ?? []) as DataRow[]).map(
+          mapPermission
+        );
 
-        const nextStakeholders =
-          stakeholdersResult.data && stakeholdersResult.data.length > 0
-            ? (stakeholdersResult.data as DataRow[]).map(mapStakeholder)
-            : sampleStakeholders;
+        const nextStakeholders = ((stakeholdersResult.data ?? []) as DataRow[]).map(
+          mapStakeholder
+        );
 
         setPermissions(nextPermissions);
         setStakeholders(nextStakeholders);
 
         setDataMessage(
-          permissionsResult.data && permissionsResult.data.length > 0
-            ? "Connected to Supabase route permission records."
-            : "Route permission table is ready. Showing sample access rules until rules are created."
+          nextPermissions.length > 0 || nextStakeholders.length > 0
+            ? "Connected to Supabase role access records."
+            : "Connected to Supabase. No role access or stakeholder records have been created yet."
         );
       } catch (error) {
         setDataMessage(
           error instanceof Error
-            ? `Role access database issue: ${error.message}`
-            : "Unable to load role access data. Showing sample data."
+            ? `Role access database issue: ${error.message}. No fallback records were substituted.`
+            : "Unable to load role access data. No fallback records were substituted."
         );
-        setPermissions(samplePermissions);
-        setStakeholders(sampleStakeholders);
+        setPermissions([]);
+        setStakeholders([]);
       } finally {
         setLoading(false);
       }
