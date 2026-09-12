@@ -414,7 +414,7 @@ const basePageSettings: PageSettings = {
   marginBottom: 15,
   showGrid: true,
   showRulers: true,
-  showSampleValues: true,
+  showSampleValues: false,
   zoom: 100,
 };
 
@@ -1123,6 +1123,7 @@ function DocumentStudioWorkspace() {
   const { session } = useVentiqAuth();
   const {
     activeFundName,
+    availableFundNames,
     setActiveFundName,
     isReady: activeFundReady,
   } = useActiveFund("");
@@ -1170,6 +1171,16 @@ function DocumentStudioWorkspace() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedInvestor = investors.find((investor) => investor.id === selectedInvestorId) ?? investors[0];
+
+  function getBuilderDisplayValue(code: string) {
+    if (code === "fund_name" && activeFundName.trim()) {
+      return activeFundName;
+    }
+
+    return pageSettings.showSampleValues
+      ? getInvestorValue(selectedInvestor, code, activeFundName)
+      : `{${code}}`;
+  }
   const selectedGovernedInvestor = useMemo(
     () =>
       governedInvestors.find(
@@ -1330,11 +1341,9 @@ const failedBatchDocumentIds = useMemo(() => {
         );
 
         if (!currentFundIsAllowed) {
-          const nextFund = funds[0].fund_name;
           setActiveTemplateId("");
-          setActiveFundName(nextFund);
           setFundAccessMessage(
-            `Document Studio moved to your first authorised fund: ${nextFund}.`
+            "Document Studio could not confirm access metadata for the globally selected fund. Refresh access or choose another authorised fund from the global selector."
           );
         }
 
@@ -1369,11 +1378,7 @@ const failedBatchDocumentIds = useMemo(() => {
       return;
     }
 
-    loadSavedTemplates();
-    loadGovernedInvestors();
-
-    const rememberedBatchId = readRememberedBatchId(activeFundName);
-    loadGovernedBatch(rememberedBatchId, false, true);
+    void loadDocumentStudioInitialReadModel();
   }, [
     accessToken,
     activeFundName,
@@ -1447,17 +1452,71 @@ const failedBatchDocumentIds = useMemo(() => {
     );
   }
 
-  async function loadGovernedInvestors() {
+  function documentStudioEnvelopeResponse(envelope: { status?: unknown; body?: unknown } | null | undefined) {
+    const status =
+      typeof envelope?.status === "number" &&
+      envelope.status >= 100 &&
+      envelope.status <= 599
+        ? envelope.status
+        : 500;
+
+    return new Response(JSON.stringify(envelope?.body ?? {}), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  async function loadDocumentStudioInitialReadModel() {
+    const rememberedBatchId = readRememberedBatchId(activeFundName);
+    const query = new URLSearchParams({ fund_name: activeFundName });
+    if (rememberedBatchId) query.set("batch_id", rememberedBatchId);
+
     try {
       const response = await fetch(
-        `/api/document-studio/preview?fund_name=${encodeURIComponent(
-          activeFundName
-        )}`,
-        {
-          cache: "no-store",
-          headers: authorisedHeaders(),
-        }
+        `/api/document-studio/overview?${query.toString()}`,
+        { cache: "no-store", headers: authorisedHeaders() }
       );
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.error || "Unable to load the Document Studio read model."
+        );
+      }
+
+      void loadSavedTemplates(documentStudioEnvelopeResponse(result.templates));
+      void loadGovernedInvestors(documentStudioEnvelopeResponse(result.investors));
+      void loadGovernedBatch(
+        rememberedBatchId,
+        false,
+        true,
+        documentStudioEnvelopeResponse(result.batch)
+      );
+    } catch (error) {
+      console.warn(
+        "Document Studio consolidated read model unavailable; using governed read fallback:",
+        error
+      );
+
+      loadSavedTemplates();
+      loadGovernedInvestors();
+      loadGovernedBatch(rememberedBatchId, false, true);
+    }
+  }
+
+  async function loadGovernedInvestors(prefetchedResponse?: Response) {
+    try {
+      const response =
+        prefetchedResponse ??
+        (await fetch(
+          `/api/document-studio/preview?fund_name=${encodeURIComponent(
+            activeFundName
+          )}`,
+          {
+            cache: "no-store",
+            headers: authorisedHeaders(),
+          }
+        ));
       const result = await response.json();
 
       if (!response.ok) {
@@ -1494,12 +1553,14 @@ const failedBatchDocumentIds = useMemo(() => {
     }
   }
 
-  async function loadSavedTemplates() {
+  async function loadSavedTemplates(prefetchedResponse?: Response) {
     try {
-      const response = await fetch(
-        `/api/document-studio/templates?fund_name=${encodeURIComponent(activeFundName)}`,
-        { cache: "no-store", headers: authorisedHeaders() }
-      );
+      const response =
+        prefetchedResponse ??
+        (await fetch(
+          `/api/document-studio/templates?fund_name=${encodeURIComponent(activeFundName)}`,
+          { cache: "no-store", headers: authorisedHeaders() }
+        ));
       const result = await response.json();
 
       if (!response.ok) throw new Error(result.error || "Unable to load templates.");
@@ -1960,7 +2021,9 @@ function startDocumentPreset(preset: DocumentPreset) {
   }
 
   function renderContentWithSampleValues(content: string) {
-    return content.replace(/\{([^}]+)\}/g, (_match, code: string) => getInvestorValue(selectedInvestor, code.trim(), activeFundName));
+    return content.replace(/\{([^}]+)\}/g, (_match, code: string) =>
+      getBuilderDisplayValue(code.trim())
+    );
   }
 
   function fallbackImportedBlocks(): TemplateBlock[] {
@@ -2046,7 +2109,7 @@ function startDocumentPreset(preset: DocumentPreset) {
           document_type: selectedDocumentType,
           template_status: "Draft",
           source_type: importDone ? "Imported Word/PDF" : "Created in VENTIQ",
-          import_confidence: importDone ? importResult?.importConfidence ?? 87 : 0,
+          import_confidence: importDone ? importResult?.importConfidence ?? 0 : 0,
           layout_json: {
             page_size: "A4",
             orientation: "Portrait",
@@ -2161,7 +2224,8 @@ function startDocumentPreset(preset: DocumentPreset) {
   async function loadGovernedBatch(
     batchId = "",
     announce = true,
-    fallbackToLatestIfMissing = false
+    fallbackToLatestIfMissing = false,
+    prefetchedResponse?: Response
   ) {
     try {
       if (!activeFundName || !accessToken) return;
@@ -2178,10 +2242,12 @@ function startDocumentPreset(preset: DocumentPreset) {
       const query = new URLSearchParams({ fund_name: activeFundName });
       if (batchId) query.set("batch_id", batchId);
 
-      const response = await fetch(
-        `/api/document-studio/batch?${query.toString()}`,
-        { cache: "no-store", headers: authorisedHeaders() }
-      );
+      const response =
+        prefetchedResponse ??
+        (await fetch(
+          `/api/document-studio/batch?${query.toString()}`,
+          { cache: "no-store", headers: authorisedHeaders() }
+        ));
       const result = await response.json();
 
       if (!response.ok) {
@@ -2736,7 +2802,7 @@ async function openPrivatePdf(documentId?: string) {
           <div className="ids-ribbon-group wide">
             <label className="ids-check-row"><input checked={pageSettings.showGrid} onChange={(event) => updatePageSettings({ showGrid: event.target.checked })} type="checkbox" /> Grid</label>
             <label className="ids-check-row"><input checked={pageSettings.showRulers} onChange={(event) => updatePageSettings({ showRulers: event.target.checked })} type="checkbox" /> Rulers</label>
-            <label className="ids-check-row"><input checked={pageSettings.showSampleValues} onChange={(event) => updatePageSettings({ showSampleValues: event.target.checked })} type="checkbox" /> Sample values</label>
+            <label className="ids-check-row"><input checked={pageSettings.showSampleValues} onChange={(event) => updatePageSettings({ showSampleValues: event.target.checked })} type="checkbox" /> Design example values (not production data)</label>
             <div className="ids-group-label">Show / hide</div>
           </div>
 
@@ -2882,7 +2948,7 @@ async function openPrivatePdf(documentId?: string) {
         {block.kind === "letterhead" && (
           <div className="ids-letterhead">
             <div>
-              <strong>{getInvestorValue(selectedInvestor, "fund_name", activeFundName)}</strong>
+              <strong>{getBuilderDisplayValue("fund_name")}</strong>
               <span>{block.content || "Registered AIF | GIFT City"}</span>
             </div>
             <div className="ids-logo-box">VENTIQ</div>
@@ -2891,10 +2957,10 @@ async function openPrivatePdf(documentId?: string) {
 
         {block.kind === "identity" && (
           <div className="ids-identity-grid">
-            <div><span>Investor</span><strong>{getInvestorValue(selectedInvestor, "investor_name")}</strong></div>
-            <div><span>Folio</span><strong>{getInvestorValue(selectedInvestor, "investor_code")}</strong></div>
-            <div><span>Statement period</span><strong>{getInvestorValue(selectedInvestor, "statement_period")}</strong></div>
-            <div><span>Report date</span><strong>{getInvestorValue(selectedInvestor, "report_date")}</strong></div>
+            <div><span>Investor</span><strong>{getBuilderDisplayValue("investor_name")}</strong></div>
+            <div><span>Folio</span><strong>{getBuilderDisplayValue("investor_code")}</strong></div>
+            <div><span>Statement period</span><strong>{getBuilderDisplayValue("statement_period")}</strong></div>
+            <div><span>Report date</span><strong>{getBuilderDisplayValue("report_date")}</strong></div>
           </div>
         )}
 
@@ -2946,10 +3012,10 @@ async function openPrivatePdf(documentId?: string) {
 
         {block.kind === "performance" && (
           <div className="ids-performance-grid">
-            <div><span>DPI</span><strong>{getInvestorValue(selectedInvestor, "dpi")}</strong></div>
-            <div><span>TVPI</span><strong>{getInvestorValue(selectedInvestor, "tvpi")}</strong></div>
-            <div><span>IRR</span><strong>{getInvestorValue(selectedInvestor, "irr")}</strong></div>
-            <div><span>Distribution</span><strong>{getInvestorValue(selectedInvestor, "distribution_amount")}</strong></div>
+            <div><span>DPI</span><strong>{getBuilderDisplayValue("dpi")}</strong></div>
+            <div><span>TVPI</span><strong>{getBuilderDisplayValue("tvpi")}</strong></div>
+            <div><span>IRR</span><strong>{getBuilderDisplayValue("irr")}</strong></div>
+            <div><span>Distribution</span><strong>{getBuilderDisplayValue("distribution_amount")}</strong></div>
           </div>
         )}
 
@@ -2957,7 +3023,7 @@ async function openPrivatePdf(documentId?: string) {
           <div className={`ids-chart-box chart-${chartConfig.chartType}`}>
             <h4>{chartConfig.title}</h4>
             {chartConfig.chartType === "donut" ? (
-              <div className="ids-donut"><span>{getInvestorValue(selectedInvestor, chartConfig.series)}</span></div>
+              <div className="ids-donut"><span>{getBuilderDisplayValue(chartConfig.series)}</span></div>
             ) : chartConfig.chartType === "line" ? (
               <div className="ids-line-chart"><span /><span /><span /><span /></div>
             ) : (
@@ -2981,12 +3047,12 @@ async function openPrivatePdf(documentId?: string) {
         {block.kind === "signature" && (
           <div className="ids-signature-block">
             <div>
-              <strong>For {getInvestorValue(selectedInvestor, "fund_name", activeFundName)}</strong>
+              <strong>For {getBuilderDisplayValue("fund_name")}</strong>
               <span>{block.content || "Authorized Signatory"}</span>
             </div>
             <div>
               <span>Generated on</span>
-              <strong>{getInvestorValue(selectedInvestor, "generated_on")}</strong>
+              <strong>{getBuilderDisplayValue("generated_on")}</strong>
             </div>
           </div>
         )}
@@ -3148,7 +3214,7 @@ async function openPrivatePdf(documentId?: string) {
             <div className="ids-field-list">
               {cellFields.map((field) => (
                 <button key={field.code} onClick={() => insertField(field)} type="button">
-                  <span>{field.label}<small>{field.sample}</small></span>
+                  <span>{field.label}<small>Example: {field.sample}</small></span>
                   <em>{field.type}</em>
                   <code>{`{${field.code}}`}</code>
                 </button>
@@ -3167,7 +3233,7 @@ async function openPrivatePdf(documentId?: string) {
             <div className="ids-field-list compact">
               {activeColumnSource.fields.map((field) => (
                 <button key={field.code} onClick={() => insertField(field)} type="button">
-                  <span>{field.label}<small>{field.sample}</small></span>
+                  <span>{field.label}<small>Example: {field.sample}</small></span>
                   <code>{field.code}</code>
                 </button>
               ))}
@@ -3192,7 +3258,7 @@ async function openPrivatePdf(documentId?: string) {
             <div className="ids-field-list compact">
               {calculatedFields.map((field) => (
                 <button key={field.code} onClick={() => insertField(field)} type="button">
-                  <span>{field.label}<small>{field.sample}</small></span>
+                  <span>{field.label}<small>Example: {field.sample}</small></span>
                   <em>{field.type}</em>
                   <code>{`{${field.code}}`}</code>
                 </button>
@@ -3839,7 +3905,7 @@ function renderPreview() {
           {batchDocuments.map((document) => {
             const documentId = document.id || "";
             const isSelected = selectedBatchDocumentIds.includes(documentId);
-            const status = document.generation_status || "Ready";
+            const status = document.generation_status || "Unknown";
 
             return (
               <div
@@ -4032,16 +4098,16 @@ function renderPreview() {
           <label className="ids-fund-selector">
             <span>Document Studio Fund</span>
             <select
-              value={activeFundAccess?.fund_name || ""}
-              disabled={!fundAccessReady || authorisedFunds.length === 0 || apiBusy}
+              value={activeFundName}
+              disabled={!fundAccessReady || availableFundNames.length === 0 || apiBusy}
               onChange={(event) => switchDocumentStudioFund(event.target.value)}
             >
               <option value="" disabled>
                 {fundAccessReady ? "Select authorised fund" : "Loading fund access..."}
               </option>
-              {authorisedFunds.map((fund) => (
-                <option key={fund.fund_name} value={fund.fund_name}>
-                  {fund.fund_name}
+              {availableFundNames.map((fundName) => (
+                <option key={fundName} value={fundName}>
+                  {fundName}
                 </option>
               ))}
             </select>

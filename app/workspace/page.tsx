@@ -7,62 +7,11 @@ import {
   getMembershipOrganisationName,
   useVentiqAuth,
 } from "../../lib/auth/AuthProvider";
+import { getRoleLabel } from "../../lib/auth/types";
 import {
-  getRoleLabel,
-  type VentiqRole,
-} from "../../lib/auth/types";
-
-type WorkspaceLink = {
-  label: string;
-  route: string;
-  roles: readonly VentiqRole[];
-  description: string;
-};
-
-const workspaceLinks: WorkspaceLink[] = [
-  {
-    label: "Managing Partner",
-    route: "/managing-partner-ai",
-    roles: ["managing_partner"],
-    description: "Fund performance, portfolio, risks and LP-ready intelligence.",
-  },
-  {
-    label: "Finance Head",
-    route: "/finance-head-ai",
-    roles: ["finance_head", "maker", "checker"],
-    description: "Capital calls, distributions, documents and finance controls.",
-  },
-  {
-    label: "Investment Team",
-    route: "/investment-team-ai",
-    roles: ["investment_team"],
-    description: "Portfolio movement, repayments, covenants and exit readiness.",
-  },
-  {
-    label: "Compliance",
-    route: "/compliance-ai",
-    roles: ["compliance_team", "maker", "checker"],
-    description: "Filings, evidence, regulatory review and audit readiness.",
-  },
-  {
-    label: "Investor Relations",
-    route: "/fundraising-ai",
-    roles: ["investor_relations"],
-    description: "LP pipeline, DDQs, data room and investor engagement.",
-  },
-  {
-    label: "Investor Portal",
-    route: "/investor-portal",
-    roles: ["investor", "investor_relations"],
-    description: "Investor-specific commitments, cashflows and documents.",
-  },
-  {
-    label: "Fund Activation",
-    route: "/migration/activation",
-    roles: ["fund_admin", "maker", "checker"],
-    description: "Data readiness, maker-checker approvals and fund activation.",
-  },
-];
+  WORKSPACE_REGISTRY,
+  canRoleUseWorkspace,
+} from "../../lib/auth/workspaceRegistry";
 
 export default function WorkspacePage() {
   const router = useRouter();
@@ -70,17 +19,17 @@ export default function WorkspacePage() {
     profile,
     activeRole,
     memberships,
-    fundAccess,
+    availableFundAccess,
+    activeFundName,
     signOut,
-    canUseRole,
   } = useVentiqAuth();
 
   const accessibleLinks = useMemo(
     () =>
-      workspaceLinks.filter(
-        (link) => activeRole === "fund_admin" || canUseRole(link.roles)
+      WORKSPACE_REGISTRY.filter((workspace) =>
+        canRoleUseWorkspace(activeRole, workspace)
       ),
-    [activeRole, canUseRole]
+    [activeRole]
   );
 
   async function handleSignOut() {
@@ -134,17 +83,21 @@ export default function WorkspacePage() {
               </strong>
             </article>
             <article>
+              <span>Active fund</span>
+              <strong>{activeFundName || "Not assigned"}</strong>
+            </article>
+            <article>
               <span>Fund access</span>
-              <strong>{fundAccess.length} fund permission(s)</strong>
+              <strong>{availableFundAccess.length} fund permission(s)</strong>
             </article>
           </div>
 
           <div className="workspace-grid">
-            {accessibleLinks.map((link) => (
-              <a href={link.route} key={link.route}>
-                <span>Open workspace</span>
-                <h2>{link.label}</h2>
-                <p>{link.description}</p>
+            {accessibleLinks.map((workspace) => (
+              <a href={workspace.href} key={workspace.key}>
+                <span>{workspace.group}</span>
+                <h2>{workspace.label}</h2>
+                <p>{workspace.description}</p>
                 <strong>Continue →</strong>
               </a>
             ))}
@@ -210,7 +163,7 @@ export default function WorkspacePage() {
           }
 
           .context-grid {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             margin: 34px 0;
           }
 

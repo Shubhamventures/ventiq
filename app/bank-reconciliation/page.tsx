@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { type ChangeEvent, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { useActiveFund } from "../../lib/useActiveFund";
 
 type TransactionDirection = "Credit" | "Debit";
 type TransactionStatus =
@@ -300,23 +301,57 @@ function buildDebtReceiptPayload(
 }
 
 async function resolveDebtReceiptLineage(
-  transaction: BankTransaction
+  transaction: BankTransaction,
+  activeFundName: string
 ): Promise<DebtReceiptLineage> {
   if (!isSupabaseConfigured || !supabase) {
     throw new Error("Supabase is not configured.");
   }
 
   const db = supabase as any;
+  const governedFundName = activeFundName.trim();
   const borrowerName = (transaction.borrowerName || transaction.counterparty).trim();
   const dueDate = transaction.dueDate || transaction.date;
+
+  if (!governedFundName) {
+    throw new Error("No governed active fund is available for Debt LMS sync.");
+  }
+
+  if (!transaction.fundName || transaction.fundName.trim() !== governedFundName) {
+    throw new Error(
+      "This Bank Reconciliation row has no governed active-fund lineage and cannot be synced to Debt LMS."
+    );
+  }
 
   if (!borrowerName) {
     throw new Error("Borrower name is required to resolve Debt LMS lineage.");
   }
 
+  const { data: activeLoanData, error: activeLoanError } = await db
+    .from("debt_lms_loans")
+    .select("id, fund_name, borrower_name")
+    .eq("fund_name", governedFundName);
+
+  if (activeLoanError) {
+    throw new Error(
+      `Unable to resolve active-fund Debt LMS loans: ${activeLoanError.message}`
+    );
+  }
+
+  const activeLoanIds = ((activeLoanData ?? []) as Array<{ id: string }>)
+    .map((row) => String(row.id || ""))
+    .filter(isUuid);
+
+  if (activeLoanIds.length === 0) {
+    throw new Error(
+      `No Debt LMS loans exist for the governed active fund ${governedFundName}.`
+    );
+  }
+
   let scheduleQuery = db
     .from("debt_lms_repayment_schedule")
     .select("id, loan_id, borrower_name, due_date")
+    .in("loan_id", activeLoanIds)
     .limit(10);
 
   if (transaction.repaymentScheduleId) {
@@ -374,6 +409,7 @@ async function resolveDebtReceiptLineage(
     .from("debt_lms_loans")
     .select("id, fund_name, borrower_name")
     .eq("id", schedule.loan_id)
+    .eq("fund_name", governedFundName)
     .maybeSingle();
 
   if (loanError) {
@@ -390,6 +426,10 @@ async function resolveDebtReceiptLineage(
     throw new Error("Resolved Debt LMS loan has no fund name.");
   }
 
+  if (fundName !== governedFundName) {
+    throw new Error("Resolved Debt LMS loan is outside the governed active fund.");
+  }
+
   if (transaction.fundName && transaction.fundName.trim() !== fundName) {
     throw new Error(
       `Fund mismatch: bank transaction is mapped to ${transaction.fundName}, but the Debt LMS loan belongs to ${fundName}.`
@@ -404,6 +444,31 @@ async function resolveDebtReceiptLineage(
 }
 
 export default function BankReconciliationPage() {
+  const {
+    activeFundName,
+    isReady: activeFundReady,
+  } = useActiveFund("");
+
+  return (
+    <BankReconciliationWorkspace
+      key={
+        activeFundReady && activeFundName
+          ? activeFundName
+          : "__fund_loading__"
+      }
+      activeFundName={activeFundName}
+      activeFundReady={activeFundReady}
+    />
+  );
+}
+
+function BankReconciliationWorkspace({
+  activeFundName,
+  activeFundReady,
+}: {
+  activeFundName: string;
+  activeFundReady: boolean;
+}) {
   const [connectionMode, setConnectionMode] = useState<"Bank Access" | "Daily Upload">(
     "Daily Upload"
   );
@@ -414,7 +479,7 @@ export default function BankReconciliationPage() {
     useState<BankTransaction | null>(null);
   const [guidanceText, setGuidanceText] = useState("");
   const [runMessage, setRunMessage] = useState(
-    "Daily Bank MIS is ready. Use bank access or upload a statement to process today’s transactions."
+    "Controlled Preview: transaction rows are illustrative. Debt LMS sync is permitted only for rows with governed active-fund lineage."
   );
   const [syncMessage, setSyncMessage] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -496,19 +561,25 @@ export default function BankReconciliationPage() {
   }
 
   async function syncSingleDebtReceipt(transaction: BankTransaction) {
+    if (!activeFundReady || !activeFundName) {
+      setSyncMessage("Debt LMS sync is blocked until the governed active fund is ready.");
+      return;
+    }
+
     setIsSyncingDebt(true);
     setSyncMessage("");
 
     try {
       if (isSupabaseConfigured && supabase) {
         const db = supabase as any;
-        const lineage = await resolveDebtReceiptLineage(transaction);
+        const lineage = await resolveDebtReceiptLineage(transaction, activeFundName);
         const payload = buildDebtReceiptPayload(transaction, lineage);
 
         const { data: existingRows, error: existingError } = await db
           .from("bank_reconciliation_debt_receipts")
           .select("id, sync_status")
           .eq("bank_reference", payload.bank_reference)
+          .eq("fund_name", activeFundName)
           .eq("loan_id", lineage.loanId)
           .limit(1);
 
@@ -548,9 +619,15 @@ export default function BankReconciliationPage() {
   }
 
   async function syncDebtLmsReceipts() {
+    if (!activeFundReady || !activeFundName) {
+      setSyncMessage("Debt LMS sync is blocked until the governed active fund is ready.");
+      return;
+    }
+
     const debtReceipts = transactions.filter(
       (row) =>
         row.downstreamModule === "Debt LMS" &&
+        row.fundName === activeFundName &&
         (row.status === "Auto Mapped" || row.status === "Approved" || row.status === "Needs Review")
     );
 
@@ -568,13 +645,14 @@ export default function BankReconciliationPage() {
         const payloads = [];
 
         for (const transaction of debtReceipts) {
-          const lineage = await resolveDebtReceiptLineage(transaction);
+          const lineage = await resolveDebtReceiptLineage(transaction, activeFundName);
           const payload = buildDebtReceiptPayload(transaction, lineage);
 
           const { data: existingRows, error: existingError } = await db
             .from("bank_reconciliation_debt_receipts")
             .select("id")
             .eq("bank_reference", payload.bank_reference)
+            .eq("fund_name", activeFundName)
             .eq("loan_id", lineage.loanId)
             .limit(1);
 
@@ -1039,8 +1117,16 @@ export default function BankReconciliationPage() {
       <section className="bank-shell">
         <div className="bank-header">
           <div>
-            <p className="eyebrow">VENTIQ Bank MIS</p>
+            <p className="eyebrow">VENTIQ Bank MIS · Controlled Preview</p>
             <h1>AI Bank Reconciliation</h1>
+            <p className="hero-copy">
+              Governed active fund:{" "}
+              <strong>
+                {activeFundReady && activeFundName
+                  ? activeFundName
+                  : "Loading fund context..."}
+              </strong>
+            </p>
             <p className="hero-copy">
               Daily Bank MIS for private capital funds. Connect bank account
               access or upload statements, let VENTIQ classify transactions,
@@ -1145,11 +1231,28 @@ export default function BankReconciliationPage() {
 
               <button
                 className="secondary-button"
-                disabled={isSyncingDebt}
+                disabled={
+                  isSyncingDebt ||
+                  !activeFundReady ||
+                  !activeFundName ||
+                  !transactions.some(
+                    (row) =>
+                      row.downstreamModule === "Debt LMS" &&
+                      row.fundName === activeFundName
+                  )
+                }
                 onClick={syncDebtLmsReceipts}
                 type="button"
               >
-                {isSyncingDebt ? "Syncing..." : "Sync Debt LMS Receipts"}
+                {isSyncingDebt
+                  ? "Syncing..."
+                  : transactions.some(
+                        (row) =>
+                          row.downstreamModule === "Debt LMS" &&
+                          row.fundName === activeFundName
+                      )
+                    ? "Sync Debt LMS Receipts"
+                    : "No Governed Debt Receipts to Sync"}
               </button>
             </div>
           </div>

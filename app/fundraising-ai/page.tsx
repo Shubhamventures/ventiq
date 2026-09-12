@@ -17,6 +17,21 @@ type PerformanceCalculationResponse = {
   error?: string;
 };
 
+
+type InvestorRelationsOverviewResponse = {
+  investorRows?: DataRow[];
+  commitmentRows?: DataRow[];
+  investorCashflowRows?: DataRow[];
+  investorDocumentRows?: DataRow[];
+  complianceRows?: DataRow[];
+  migrationUploadRows?: DataRow[];
+  dataRoomDocumentRows?: DataRow[];
+  dataRoomEngagementRows?: DataRow[];
+  dataRoomQuestionRows?: DataRow[];
+  activationRecord?: DataRow | null;
+  error?: string;
+};
+
 type InvestorRelationsEvent = {
   id: string;
   time: string;
@@ -209,16 +224,6 @@ function latestTimestamp(rows: DataRow[]) {
   );
 }
 
-function uniqueFundNames(rowGroups: DataRow[][]) {
-  return Array.from(
-    new Set(
-      rowGroups
-        .flat()
-        .map(getFundName)
-        .filter(Boolean)
-    )
-  ).sort((left, right) => left.localeCompare(right));
-}
 
 function filterLinkedDataRoomRows(
   rows: DataRow[],
@@ -266,13 +271,11 @@ function filterLinkedDataRoomRows(
 export default function FundraisingAIPage() {
   const {
     activeFundName,
+    availableFundNames,
     setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund(DEFAULT_FUND_NAME);
   const { session } = useVentiqAuth();
-  const [availableFunds, setAvailableFunds] = useState<string[]>([
-    DEFAULT_FUND_NAME,
-  ]);
   const [fundActivationStatus, setFundActivationStatus] = useState("Checking");
   const [fundActivatedAt, setFundActivatedAt] = useState("");
   const [fundActivatedBy, setFundActivatedBy] = useState("");
@@ -382,78 +385,54 @@ export default function FundraisingAIPage() {
     setCalculatedInvestorMetrics(calculationData?.investorMetrics ?? []);
     setCalculationReconciliations(calculationData?.reconciliations ?? []);
 
-    const db = supabase as any;
+    async function loadInvestorRelationsOverview(): Promise<
+      Required<Omit<InvestorRelationsOverviewResponse, "error">>
+    > {
+      const accessToken = session?.access_token ?? "";
 
-    async function selectRows(
-      tableName: string,
-      options?: {
-        orderBy?: string;
-        ascending?: boolean;
-        eq?: { column: string; value: string };
-      }
-    ) {
-      try {
-        let query = db.from(tableName).select("*");
-
-        if (options?.eq) {
-          query = query.eq(options.eq.column, options.eq.value);
-        }
-
-        if (options?.orderBy) {
-          query = query.order(options.orderBy, {
-            ascending: options.ascending ?? false,
-          });
-        }
-
-        const { data, error } = await query;
-
-        if (error) {
-          console.warn(
-            `VENTIQ Investor Relations dashboard skipped ${tableName}:`,
-            error.message
-          );
-          return [] as DataRow[];
-        }
-
-        return (data ?? []) as DataRow[];
-      } catch (error) {
-        console.warn(
-          `VENTIQ Investor Relations dashboard skipped ${tableName}:`,
-          error
+      if (!accessToken) {
+        throw new Error(
+          "Please sign in before opening the Investor Relations workspace."
         );
-        return [] as DataRow[];
       }
-    }
 
-    async function loadActivationRecord() {
-      try {
-        const { data, error } = await db
-          .from("fund_activation_status")
-          .select("status, activated_at, activated_by, readiness_score")
-          .eq("fund_name", activeFundName)
-          .maybeSingle();
-
-        if (error) {
-          console.warn(
-            "VENTIQ Investor Relations dashboard could not read fund activation:",
-            error.message
-          );
-          return null;
+      const response = await fetch(
+        `/api/fundraising/overview?fundName=${encodeURIComponent(activeFundName)}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          cache: "no-store",
         }
+      );
+      const result =
+        (await response.json()) as InvestorRelationsOverviewResponse;
 
-        return (data as DataRow | null) ?? null;
-      } catch (error) {
-        console.warn(
-          "VENTIQ Investor Relations dashboard could not read fund activation:",
-          error
+      if (!response.ok) {
+        throw new Error(
+          result.error || "Unable to load Investor Relations workspace."
         );
-        return null;
       }
+
+      return {
+        investorRows: result.investorRows ?? [],
+        commitmentRows: result.commitmentRows ?? [],
+        investorCashflowRows: result.investorCashflowRows ?? [],
+        investorDocumentRows: result.investorDocumentRows ?? [],
+        complianceRows: result.complianceRows ?? [],
+        migrationUploadRows: result.migrationUploadRows ?? [],
+        dataRoomDocumentRows: result.dataRoomDocumentRows ?? [],
+        dataRoomEngagementRows: result.dataRoomEngagementRows ?? [],
+        dataRoomQuestionRows: result.dataRoomQuestionRows ?? [],
+        activationRecord: result.activationRecord ?? null,
+      };
     }
 
     try {
-      const [
-        fundMasterRows,
+      const overviewData = await loadInvestorRelationsOverview();
+
+      const {
         investorRows,
         commitmentRows,
         investorCashflowRows,
@@ -464,59 +443,7 @@ export default function FundraisingAIPage() {
         dataRoomEngagementRows,
         dataRoomQuestionRows,
         activationRecord,
-      ] = await Promise.all([
-        selectRows("fund_master"),
-        selectRows("investor_master", {
-          orderBy: "investor_code",
-          ascending: true,
-        }),
-        selectRows("fund_commitments"),
-        selectRows("investor_cashflows", {
-          orderBy: "cashflow_date",
-          ascending: false,
-        }),
-        selectRows("investor_documents", {
-          orderBy: "created_at",
-          ascending: false,
-        }),
-        selectRows("compliance_items", {
-          orderBy: "due_date",
-          ascending: true,
-        }),
-        selectRows("migration_file_uploads", {
-          orderBy: "created_at",
-          ascending: false,
-        }),
-        selectRows("data_room_documents", {
-          orderBy: "imported_at",
-          ascending: false,
-        }),
-        selectRows("data_room_engagement_events", {
-          orderBy: "event_time",
-          ascending: false,
-        }),
-        selectRows("data_room_questions", {
-          orderBy: "asked_at",
-          ascending: false,
-        }),
-        loadActivationRecord(),
-      ]);
-
-      const detectedFunds = uniqueFundNames([
-        fundMasterRows,
-        investorRows,
-        commitmentRows,
-        investorDocumentRows,
-        complianceRows,
-        dataRoomDocumentRows,
-      ]);
-      const nextFunds = Array.from(
-        new Set([DEFAULT_FUND_NAME, activeFundName, ...detectedFunds])
-      )
-        .filter(Boolean)
-        .sort((left, right) => left.localeCompare(right));
-
-      setAvailableFunds(nextFunds);
+      } = overviewData;
 
       const activation = activationRecord ?? null;
       setFundActivationStatus(
@@ -1154,7 +1081,7 @@ export default function FundraisingAIPage() {
                 </span>
                 <select
                   aria-label="Select active fund"
-                  disabled={!fundContextReady || loading}
+                  disabled={!fundContextReady || loading || availableFundNames.length === 0}
                   onChange={(event) => setActiveFundName(event.target.value)}
                   style={{
                     background: "#0f172a",
@@ -1166,7 +1093,7 @@ export default function FundraisingAIPage() {
                   }}
                   value={activeFundName}
                 >
-                  {availableFunds.map((fundName) => (
+                  {availableFundNames.map((fundName) => (
                     <option key={fundName} value={fundName}>
                       {fundName}
                     </option>

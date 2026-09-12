@@ -4,6 +4,17 @@ import Link from "next/link";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useVentiqAuth } from "../../lib/auth/AuthProvider";
+import {
+  VENTIQ_ROLES,
+  getRoleHomeRoute,
+  getRoleLabel,
+  type VentiqRole,
+} from "../../lib/auth/types";
+import {
+  buildCanonicalSetupStages,
+  loadCanonicalFundReadiness,
+  type CanonicalFundReadiness,
+} from "../../lib/readiness/canonicalFundReadiness";
 
 type DataRow = Record<string, unknown>;
 
@@ -115,80 +126,77 @@ type RoleOption = {
   description: string;
 };
 
-const roleOptions: RoleOption[] = [
-  {
-    roleKey: "fund_admin",
-    roleLabel: "Fund Admin",
+const rolePresentation: Record<
+  VentiqRole,
+  Pick<
+    RoleOption,
+    "stakeholderType" | "accessLevel" | "description"
+  >
+> = {
+  fund_admin: {
     stakeholderType: "Internal",
-    dashboardPath: "/fund-onboarding",
     accessLevel: "Full Admin",
     description:
       "Can create funds, add schemes, invite users, revoke access and manage implementation setup.",
   },
-  {
-    roleKey: "managing_partner",
-    roleLabel: "Managing Partner",
+  managing_partner: {
     stakeholderType: "Internal",
-    dashboardPath: "/managing-partner-ai",
     accessLevel: "Executive View",
     description:
       "Fund-level performance, deployment, risk, collections, portfolio alerts and operating summary.",
   },
-  {
-    roleKey: "finance_head",
-    roleLabel: "Finance Head",
+  finance_head: {
     stakeholderType: "Internal",
-    dashboardPath: "/finance-head-ai",
     accessLevel: "Finance Operations",
     description:
       "Bank MIS, Debt LMS, receipts, notices, reconciliations, fees, finance controls and reports.",
   },
-  {
-    roleKey: "investment_team",
-    roleLabel: "Investment Team",
+  investment_team: {
     stakeholderType: "Internal",
-    dashboardPath: "/investment-team-ai",
     accessLevel: "Investment View",
     description:
       "Portfolio company intelligence, deal monitoring, repayment visibility and investment updates.",
   },
-  {
-    roleKey: "compliance_officer",
-    roleLabel: "Compliance Officer",
+  compliance_team: {
     stakeholderType: "Internal",
-    dashboardPath: "/compliance-ai",
     accessLevel: "Compliance View",
     description:
       "Compliance calendar, filings, covenant breaches, audit trail, evidence and control workflows.",
   },
-  {
-    roleKey: "investor_relations",
-    roleLabel: "Investor Relations",
+  investor_relations: {
     stakeholderType: "Internal",
-    dashboardPath: "/investor-portal",
-    accessLevel: "Investor Communication",
+    accessLevel: "Investor Relations",
     description:
-      "Investor notices, SOA, capital call communication, distribution notices and reporting packs.",
+      "LP servicing, fundraising, DDQs, data room workflow, notices and investor communication.",
   },
-  {
-    roleKey: "investor_lp",
-    roleLabel: "Investor / LP",
+  investor: {
     stakeholderType: "External",
-    dashboardPath: "/investor-portal",
     accessLevel: "Investor Read Only",
     description:
       "Investor portal access for notices, statements, capital calls, distributions and reports.",
   },
-  {
-    roleKey: "auditor_trustee",
-    roleLabel: "Auditor / Trustee",
-    stakeholderType: "External",
-    dashboardPath: "/document-studio",
-    accessLevel: "Evidence Read Only",
+  maker: {
+    stakeholderType: "Internal",
+    accessLevel: "Prepare & Submit",
     description:
-      "Read-only evidence pack, audit documents, notices, schedules, logs and supporting files.",
+      "Prepares governed fund data, resolves readiness items and submits maker-checker actions.",
   },
-];
+  checker: {
+    stakeholderType: "Internal",
+    accessLevel: "Review & Approve",
+    description:
+      "Independently reviews maker submissions, evidence and controlled activation decisions.",
+  },
+};
+
+const roleOptions: RoleOption[] = VENTIQ_ROLES.map(
+  (roleKey) => ({
+    roleKey,
+    roleLabel: getRoleLabel(roleKey),
+    dashboardPath: getRoleHomeRoute(roleKey),
+    ...rolePresentation[roleKey],
+  })
+);
 
 const emptyFundForm: FundForm = {
   fundName: "",
@@ -199,7 +207,7 @@ const emptyFundForm: FundForm = {
   sponsorName: "",
   investmentManagerName: "",
   trusteeName: "",
-  dataMode: "Demo Data",
+  dataMode: "Production Data",
 };
 
 const emptySchemeForm: SchemeForm = {
@@ -295,7 +303,7 @@ const sampleStakeholders: StakeholderRow[] = [
     email: "lp@example.com",
     organization: "Family Office",
     stakeholderType: "External",
-    roleKey: "investor_lp",
+    roleKey: "investor",
     roleLabel: "Investor / LP",
     dashboardPath: "/investor-portal",
     accessLevel: "Investor Read Only",
@@ -399,8 +407,17 @@ function statusClass(value: string) {
 }
 
 function getRoleOption(roleKey: string) {
+  const canonicalRoleKey =
+    roleKey === "compliance_officer"
+      ? "compliance_team"
+      : roleKey === "investor_lp"
+        ? "investor"
+        : roleKey;
+
   return (
-    roleOptions.find((role) => role.roleKey === roleKey) ?? roleOptions[0]
+    roleOptions.find(
+      (role) => role.roleKey === canonicalRoleKey
+    ) ?? roleOptions[0]
   );
 }
 
@@ -420,7 +437,7 @@ function mapFund(row: DataRow): FundRow {
     investmentManagerName: getString(row, ["investment_manager_name"], ""),
     trusteeName: getString(row, ["trustee_name"], ""),
     onboardingStatus: getString(row, ["onboarding_status"], "Draft"),
-    dataMode: getString(row, ["data_mode"], "Demo Data"),
+    dataMode: getString(row, ["data_mode"], "Production Data"),
     createdAt: getDateString(row, ["created_at"], ""),
   };
 }
@@ -450,9 +467,9 @@ function mapStakeholder(row: DataRow): StakeholderRow {
     email: getString(row, ["email"], ""),
     organization: getString(row, ["organization"], ""),
     stakeholderType: getString(row, ["stakeholder_type"], role.stakeholderType),
-    roleKey,
-    roleLabel: getString(row, ["role_label"], role.roleLabel),
-    dashboardPath: getString(row, ["dashboard_path"], role.dashboardPath),
+    roleKey: role.roleKey,
+    roleLabel: role.roleLabel,
+    dashboardPath: role.dashboardPath,
     accessLevel: getString(row, ["access_level"], role.accessLevel),
     inviteStatus: getString(row, ["invite_status"], "Not Invited"),
     invitedAt: getDateString(row, ["invited_at"], ""),
@@ -491,17 +508,36 @@ function mapAuditLog(row: DataRow): AuditLogRow {
 }
 
 export default function FundOnboardingPage() {
-  const { refreshAccess } = useVentiqAuth();
+  const {
+    activeFundName,
+    availableFundAccess,
+    fundContextReady,
+    refreshAccess,
+    session,
+    setActiveFundName,
+  } = useVentiqAuth();
 
-  const [funds, setFunds] = useState<FundRow[]>(sampleFunds);
-  const [schemes, setSchemes] = useState<SchemeRow[]>(sampleSchemes);
-  const [stakeholders, setStakeholders] =
-    useState<StakeholderRow[]>(sampleStakeholders);
-  const [inviteBatches, setInviteBatches] =
-    useState<InviteBatchRow[]>(sampleInviteBatches);
-  const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>(sampleAuditLogs);
+  const controlledPreview = !isSupabaseConfigured || !supabase;
 
-  const [selectedFundId, setSelectedFundId] = useState(sampleFunds[0].id);
+  const [funds, setFunds] = useState<FundRow[]>(
+    controlledPreview ? sampleFunds : []
+  );
+  const [schemes, setSchemes] = useState<SchemeRow[]>(
+    controlledPreview ? sampleSchemes : []
+  );
+  const [stakeholders, setStakeholders] = useState<StakeholderRow[]>(
+    controlledPreview ? sampleStakeholders : []
+  );
+  const [inviteBatches, setInviteBatches] = useState<InviteBatchRow[]>(
+    controlledPreview ? sampleInviteBatches : []
+  );
+  const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>(
+    controlledPreview ? sampleAuditLogs : []
+  );
+
+  const [selectedFundId, setSelectedFundId] = useState(
+    controlledPreview ? sampleFunds[0].id : ""
+  );
   const [fundForm, setFundForm] = useState<FundForm>(emptyFundForm);
   const [schemeForm, setSchemeForm] = useState<SchemeForm>(emptySchemeForm);
   const [stakeholderForm, setStakeholderForm] =
@@ -515,16 +551,75 @@ export default function FundOnboardingPage() {
   const [schemeMessage, setSchemeMessage] = useState("");
   const [stakeholderMessage, setStakeholderMessage] = useState("");
   const [inviteMessage, setInviteMessage] = useState("");
+  const [operationalReadiness, setOperationalReadiness] =
+    useState<CanonicalFundReadiness | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
+  const [readinessError, setReadinessError] = useState("");
   const [isSavingFund, setIsSavingFund] = useState(false);
   const [isSavingScheme, setIsSavingScheme] = useState(false);
   const [isSavingStakeholder, setIsSavingStakeholder] = useState(false);
   const [isSendingInvites, setIsSendingInvites] = useState(false);
 
+  const authorisedFundNameList = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          availableFundAccess
+            .map((access) => access.fund_name.trim())
+            .filter(Boolean)
+        )
+      ),
+    [availableFundAccess]
+  );
+
+  const authorisedFundNames = useMemo(
+    () =>
+      new Set(
+        authorisedFundNameList.map((fundName) => fundName.toLowerCase())
+      ),
+    [authorisedFundNameList]
+  );
+
+  const editableFundNames = useMemo(
+    () =>
+      new Set(
+        availableFundAccess
+          .filter((access) => access.can_edit)
+          .map((access) => access.fund_name.trim().toLowerCase())
+          .filter(Boolean)
+      ),
+    [availableFundAccess]
+  );
+
   useEffect(() => {
     async function loadOnboardingData() {
-      if (!isSupabaseConfigured || !supabase) {
+      if (!fundContextReady) {
+        return;
+      }
+
+      if (controlledPreview) {
+        setFunds(sampleFunds);
+        setSchemes(sampleSchemes);
+        setStakeholders(sampleStakeholders);
+        setInviteBatches(sampleInviteBatches);
+        setAuditLogs(sampleAuditLogs);
+        setSelectedFundId(sampleFunds[0].id);
         setDataMessage(
-          "Using sample onboarding data. Supabase is not configured."
+          "Controlled Preview - Supabase is not configured; no live onboarding data is being shown."
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (authorisedFundNameList.length === 0) {
+        setFunds([]);
+        setSchemes([]);
+        setStakeholders([]);
+        setInviteBatches([]);
+        setAuditLogs([]);
+        setSelectedFundId("");
+        setDataMessage(
+          "No governed fund access exists yet. Create your first fund to begin onboarding."
         );
         setLoading(false);
         return;
@@ -533,129 +628,267 @@ export default function FundOnboardingPage() {
       try {
         setLoading(true);
 
-        const db = supabase as any;
+        const accessToken = session?.access_token?.trim() || "";
+        const response = await fetch("/api/fund-onboarding/overview", {
+          method: "GET",
+          headers: accessToken
+            ? { Authorization: `Bearer ${accessToken}` }
+            : undefined,
+          cache: "no-store",
+        });
 
-        const [
-          fundsResult,
-          schemesResult,
-          stakeholdersResult,
-          batchesResult,
-          auditResult,
-        ] = await Promise.all([
-          db
-            .from("ventiq_funds")
-            .select("*")
-            .order("created_at", { ascending: false }),
+        const result = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          funds?: DataRow[];
+          schemes?: DataRow[];
+          stakeholders?: DataRow[];
+          inviteBatches?: DataRow[];
+          auditLogs?: DataRow[];
+        };
 
-          db
-            .from("ventiq_schemes")
-            .select("*")
-            .order("created_at", { ascending: false }),
-
-          db
-            .from("ventiq_stakeholders")
-            .select("*")
-            .order("created_at", { ascending: false }),
-
-          db
-            .from("ventiq_invite_batches")
-            .select("*")
-            .order("created_at", { ascending: false }),
-
-          db
-            .from("ventiq_access_audit_logs")
-            .select("*")
-            .order("created_at", { ascending: false }),
-        ]);
-
-        if (fundsResult.error) throw new Error(fundsResult.error.message);
-        if (schemesResult.error) throw new Error(schemesResult.error.message);
-        if (stakeholdersResult.error) {
-          throw new Error(stakeholdersResult.error.message);
+        if (!response.ok) {
+          throw new Error(result.error || "Unable to load governed onboarding data.");
         }
-        if (batchesResult.error) throw new Error(batchesResult.error.message);
-        if (auditResult.error) throw new Error(auditResult.error.message);
 
-        const nextFunds =
-          fundsResult.data && fundsResult.data.length > 0
-            ? (fundsResult.data as DataRow[]).map(mapFund)
-            : sampleFunds;
+        const nextFunds = (result.funds || [])
+          .map(mapFund)
+          .filter((fund) =>
+            authorisedFundNames.has(fund.fundName.trim().toLowerCase())
+          );
+        const authorisedFundIds = new Set(
+          nextFunds.map((fund) => fund.id).filter(Boolean)
+        );
 
-        const nextSchemes =
-          schemesResult.data && schemesResult.data.length > 0
-            ? (schemesResult.data as DataRow[]).map(mapScheme)
-            : sampleSchemes;
-
-        const nextStakeholders =
-          stakeholdersResult.data && stakeholdersResult.data.length > 0
-            ? (stakeholdersResult.data as DataRow[]).map(mapStakeholder)
-            : sampleStakeholders;
-
-        const nextBatches =
-          batchesResult.data && batchesResult.data.length > 0
-            ? (batchesResult.data as DataRow[]).map(mapInviteBatch)
-            : sampleInviteBatches;
-
-        const nextAuditLogs =
-          auditResult.data && auditResult.data.length > 0
-            ? (auditResult.data as DataRow[]).map(mapAuditLog)
-            : sampleAuditLogs;
+        const nextSchemes = (result.schemes || [])
+          .map(mapScheme)
+          .filter((scheme) => authorisedFundIds.has(scheme.fundId));
+        const nextStakeholders = (result.stakeholders || [])
+          .map(mapStakeholder)
+          .filter((stakeholder) => authorisedFundIds.has(stakeholder.fundId));
+        const nextBatches = (result.inviteBatches || [])
+          .map(mapInviteBatch)
+          .filter((batch) => authorisedFundIds.has(batch.fundId));
+        const nextAuditLogs = (result.auditLogs || [])
+          .map(mapAuditLog)
+          .filter((auditLog) => authorisedFundIds.has(auditLog.fundId));
 
         setFunds(nextFunds);
         setSchemes(nextSchemes);
         setStakeholders(nextStakeholders);
         setInviteBatches(nextBatches);
         setAuditLogs(nextAuditLogs);
-        setSelectedFundId(nextFunds[0]?.id || sampleFunds[0].id);
+        setSelectedFundId((currentFundId) => {
+          if (nextFunds.some((fund) => fund.id === currentFundId)) {
+            return currentFundId;
+          }
+
+          const activeFund = nextFunds.find(
+            (fund) =>
+              fund.fundName.trim().toLowerCase() ===
+              activeFundName.trim().toLowerCase()
+          );
+
+          return activeFund?.id || nextFunds[0]?.id || "";
+        });
 
         setDataMessage(
-          fundsResult.data && fundsResult.data.length > 0
-            ? "Onboarding workspace connected."
-            : "Onboarding tables are ready. Showing sample data until a fund is created."
+          nextFunds.length > 0
+            ? `Onboarding workspace connected to ${nextFunds.length} governed fund${nextFunds.length === 1 ? "" : "s"}.`
+            : "No onboarding fund rows matched your governed fund access."
         );
       } catch (error) {
         setDataMessage(
           error instanceof Error
-            ? `Onboarding database issue: ${error.message}`
-            : "Unable to load onboarding data. Showing sample data."
+            ? `Onboarding database issue: ${error.message}. No sample data was substituted.`
+            : "Unable to load governed onboarding data. No sample data was substituted."
         );
 
-        setFunds(sampleFunds);
-        setSchemes(sampleSchemes);
-        setStakeholders(sampleStakeholders);
-        setInviteBatches(sampleInviteBatches);
-        setAuditLogs(sampleAuditLogs);
+        setFunds([]);
+        setSchemes([]);
+        setStakeholders([]);
+        setInviteBatches([]);
+        setAuditLogs([]);
+        setSelectedFundId("");
       } finally {
         setLoading(false);
       }
     }
 
-    loadOnboardingData();
-  }, []);
+    void loadOnboardingData();
+  }, [
+    activeFundName,
+    authorisedFundNameList,
+    authorisedFundNames,
+    controlledPreview,
+    fundContextReady,
+    session?.access_token,
+  ]);
 
-  const selectedFund =
-    funds.find((fund) => fund.id === selectedFundId) ?? funds[0] ?? sampleFunds[0];
+  const selectableFunds = controlledPreview
+    ? funds
+    : funds.filter((fund) =>
+        authorisedFundNames.has(fund.fundName.trim().toLowerCase())
+      );
+
+  const activeFundSelection = activeFundName
+    ? selectableFunds.find(
+        (fund) =>
+          fund.fundName.trim().toLowerCase() ===
+          activeFundName.trim().toLowerCase()
+      )
+    : undefined;
+
+  const selectedFund = activeFundName
+    ? activeFundSelection
+    : selectableFunds.find((fund) => fund.id === selectedFundId) ??
+      selectableFunds[0] ??
+      (controlledPreview ? sampleFunds[0] : undefined);
+
+  const selectedFundIdValue = selectedFund?.id ?? "";
 
   const selectedSchemes = schemes.filter(
-    (scheme) => scheme.fundId === selectedFund.id
+    (scheme) => scheme.fundId === selectedFundIdValue
   );
 
   const selectedStakeholders = stakeholders.filter(
-    (stakeholder) => stakeholder.fundId === selectedFund.id
+    (stakeholder) => stakeholder.fundId === selectedFundIdValue
   );
 
   const selectedInviteBatches = inviteBatches.filter(
-    (batch) => batch.fundId === selectedFund.id
+    (batch) => batch.fundId === selectedFundIdValue
   );
 
   const selectedAuditLogs = auditLogs.filter(
-    (auditLog) => auditLog.fundId === selectedFund.id
+    (auditLog) => auditLog.fundId === selectedFundIdValue
   );
+
+  const readinessAccessToken = session?.access_token?.trim() || "";
+  const governedActiveFundName =
+    activeFundName && authorisedFundNames.has(activeFundName.trim().toLowerCase())
+      ? activeFundName.trim()
+      : "";
+
+  useEffect(() => {
+    let cancelled = false;
+    const fundName =
+      governedActiveFundName || selectedFund?.fundName.trim() || "";
+
+    if (controlledPreview) {
+      void Promise.resolve().then(() => {
+        if (!cancelled) {
+          setOperationalReadiness(null);
+          setReadinessError("");
+          setReadinessLoading(false);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!fundContextReady || !fundName || !readinessAccessToken) {
+      void Promise.resolve().then(() => {
+        if (!cancelled) {
+          setOperationalReadiness(null);
+          setReadinessError("");
+          setReadinessLoading(false);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void Promise.resolve().then(() => {
+      if (!cancelled) {
+        setReadinessLoading(true);
+        setReadinessError("");
+      }
+    });
+
+    loadCanonicalFundReadiness(fundName, readinessAccessToken)
+      .then((snapshot) => {
+        if (!cancelled) {
+          setOperationalReadiness(snapshot);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setOperationalReadiness(null);
+          setReadinessError(
+            error instanceof Error
+              ? error.message
+              : "Unable to load canonical fund readiness."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setReadinessLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    controlledPreview,
+    fundContextReady,
+    governedActiveFundName,
+    readinessAccessToken,
+    selectedFund?.fundName,
+  ]);
+
+  function requireSelectedEditableFund(action: string) {
+    if (!selectedFund?.id) {
+      throw new Error(`${action} requires a governed fund selection.`);
+    }
+
+    if (controlledPreview) {
+      return selectedFund;
+    }
+
+    if (
+      activeFundName &&
+      selectedFund.fundName.trim().toLowerCase() !==
+        activeFundName.trim().toLowerCase()
+    ) {
+      throw new Error(
+        `${action} is blocked because the selected fund is not the governed ActiveFund.`
+      );
+    }
+
+    if (
+      !authorisedFundNames.has(selectedFund.fundName.trim().toLowerCase()) ||
+      !editableFundNames.has(selectedFund.fundName.trim().toLowerCase())
+    ) {
+      throw new Error(
+        `${action} is blocked because the selected fund is not an editable governed fund.`
+      );
+    }
+
+    return selectedFund;
+  }
+
+  function requireCurrentFundStakeholder(
+    stakeholder: StakeholderRow,
+    action: string
+  ) {
+    const governedFund = requireSelectedEditableFund(action);
+
+    if (stakeholder.fundId !== governedFund.id) {
+      throw new Error(
+        `${action} is blocked because this stakeholder belongs to a different fund.`
+      );
+    }
+
+    return governedFund;
+  }
 
   const selectedRole = getRoleOption(stakeholderForm.roleKey);
 
   const summary = useMemo(() => {
-    const totalFunds = funds.length;
+    const totalFunds = selectableFunds.length;
     const totalSchemes = schemes.length;
     const totalStakeholders = selectedStakeholders.length;
     const invited = selectedStakeholders.filter(
@@ -680,7 +913,7 @@ export default function FundOnboardingPage() {
       notInvited,
       revoked,
     };
-  }, [funds, schemes, selectedStakeholders]);
+  }, [schemes, selectableFunds.length, selectedStakeholders]);
 
   function updateFundForm(field: keyof FundForm, value: string) {
     setFundForm((currentForm) => ({
@@ -728,12 +961,20 @@ export default function FundOnboardingPage() {
     }
 
     try {
+      const governedFund = requireSelectedEditableFund("Audit logging");
+
+      if (payload.fundId !== governedFund.id) {
+        throw new Error(
+          "Audit logging is blocked because the requested fund is not the current governed fund."
+        );
+      }
+
       const db = supabase as any;
 
       const { data, error } = await db
         .from("ventiq_access_audit_logs")
         .insert({
-          fund_id: payload.fundId,
+          fund_id: governedFund.id,
           stakeholder_id: payload.stakeholderId || null,
           event_type: payload.eventType,
           event_title: payload.eventTitle,
@@ -745,16 +986,18 @@ export default function FundOnboardingPage() {
         .single();
 
       if (error) {
-        setAuditLogs((currentLogs) => [localAuditLog, ...currentLogs]);
-        return;
+        throw new Error(error.message);
       }
 
       setAuditLogs((currentLogs) => [
         mapAuditLog(data as DataRow),
         ...currentLogs,
       ]);
-    } catch {
-      setAuditLogs((currentLogs) => [localAuditLog, ...currentLogs]);
+    } catch (error) {
+      console.error(
+        "VENTIQ governed onboarding audit log failed:",
+        error instanceof Error ? error.message : error
+      );
     }
   }
 
@@ -872,6 +1115,7 @@ export default function FundOnboardingPage() {
       );
 
       await refreshAccess();
+      setActiveFundName(savedFund.fundName);
     } catch (error) {
       setFundMessage(
         error instanceof Error ? error.message : "Unable to create fund."
@@ -885,8 +1129,14 @@ export default function FundOnboardingPage() {
     event.preventDefault();
     setSchemeMessage("");
 
-    if (!selectedFund) {
-      setSchemeMessage("Please create or select a fund first.");
+    let governedFund: FundRow;
+
+    try {
+      governedFund = requireSelectedEditableFund("Scheme creation");
+    } catch (error) {
+      setSchemeMessage(
+        error instanceof Error ? error.message : "Please select an editable governed fund."
+      );
       return;
     }
 
@@ -898,7 +1148,7 @@ export default function FundOnboardingPage() {
     setIsSavingScheme(true);
 
     const payload = {
-      fund_id: selectedFund.id,
+      fund_id: governedFund.id,
       scheme_name: schemeForm.schemeName.trim(),
       scheme_type: schemeForm.schemeType,
       category: schemeForm.category,
@@ -924,10 +1174,10 @@ export default function FundOnboardingPage() {
         setSchemeForm(emptySchemeForm);
         setSchemeMessage("Scheme added locally.");
         await createAuditLog({
-          fundId: selectedFund.id,
+          fundId: governedFund.id,
           eventType: "Scheme Added",
           eventTitle: "Scheme added",
-          eventDescription: `${localScheme.schemeName} was added under ${selectedFund.fundName}.`,
+          eventDescription: `${localScheme.schemeName} was added under ${governedFund.fundName}.`,
         });
         return;
       }
@@ -951,10 +1201,10 @@ export default function FundOnboardingPage() {
       setSchemeMessage("Scheme added successfully.");
 
       await createAuditLog({
-        fundId: selectedFund.id,
+        fundId: governedFund.id,
         eventType: "Scheme Added",
         eventTitle: "Scheme added",
-        eventDescription: `${savedScheme.schemeName} was added under ${selectedFund.fundName}.`,
+        eventDescription: `${savedScheme.schemeName} was added under ${governedFund.fundName}.`,
       });
     } catch (error) {
       setSchemeMessage(
@@ -969,8 +1219,14 @@ export default function FundOnboardingPage() {
     event.preventDefault();
     setStakeholderMessage("");
 
-    if (!selectedFund) {
-      setStakeholderMessage("Please create or select a fund first.");
+    let governedFund: FundRow;
+
+    try {
+      governedFund = requireSelectedEditableFund("Stakeholder creation");
+    } catch (error) {
+      setStakeholderMessage(
+        error instanceof Error ? error.message : "Please select an editable governed fund."
+      );
       return;
     }
 
@@ -988,9 +1244,15 @@ export default function FundOnboardingPage() {
 
     setIsSavingStakeholder(true);
 
+    const governedSchemeId =
+      stakeholderForm.schemeId &&
+      selectedSchemes.some((scheme) => scheme.id === stakeholderForm.schemeId)
+        ? stakeholderForm.schemeId
+        : null;
+
     const payload = {
-      fund_id: selectedFund.id,
-      scheme_id: stakeholderForm.schemeId || null,
+      fund_id: governedFund.id,
+      scheme_id: governedSchemeId,
       full_name: stakeholderForm.fullName.trim(),
       email: stakeholderForm.email.trim(),
       organization: stakeholderForm.organization.trim(),
@@ -1009,8 +1271,8 @@ export default function FundOnboardingPage() {
       if (!isSupabaseConfigured || !supabase) {
         const localStakeholder: StakeholderRow = {
           id: crypto.randomUUID(),
-          fundId: selectedFund.id,
-          schemeId: stakeholderForm.schemeId,
+          fundId: governedFund.id,
+          schemeId: governedSchemeId || "",
           fullName: payload.full_name,
           email: payload.email,
           organization: payload.organization,
@@ -1034,7 +1296,7 @@ export default function FundOnboardingPage() {
         setStakeholderMessage("Stakeholder added locally.");
 
         await createAuditLog({
-          fundId: selectedFund.id,
+          fundId: governedFund.id,
           stakeholderId: localStakeholder.id,
           eventType: "Stakeholder Added",
           eventTitle: "Stakeholder added",
@@ -1065,7 +1327,7 @@ export default function FundOnboardingPage() {
       setStakeholderMessage("Stakeholder added successfully.");
 
       await createAuditLog({
-        fundId: selectedFund.id,
+        fundId: governedFund.id,
         stakeholderId: savedStakeholder.id,
         eventType: "Stakeholder Added",
         eventTitle: "Stakeholder added",
@@ -1127,6 +1389,7 @@ export default function FundOnboardingPage() {
     setInviteMessage("");
 
     try {
+      requireCurrentFundStakeholder(stakeholder, "Secure invite");
       const accessToken = await getInviteAccessToken();
       await requestSecureInvite(stakeholder.id, accessToken);
 
@@ -1178,13 +1441,19 @@ export default function FundOnboardingPage() {
     }
 
     try {
+      const governedFund = requireCurrentFundStakeholder(
+        stakeholder,
+        "Stakeholder status update"
+      );
+
       if (isSupabaseConfigured && supabase && !stakeholder.id.startsWith("stake-")) {
         const db = supabase as any;
 
         const { error } = await db
           .from("ventiq_stakeholders")
           .update(updatePayload)
-          .eq("id", stakeholder.id);
+          .eq("id", stakeholder.id)
+          .eq("fund_id", governedFund.id);
 
         if (error) {
           throw new Error(error.message);
@@ -1231,8 +1500,14 @@ export default function FundOnboardingPage() {
   async function sendInviteBatch() {
     setInviteMessage("");
 
-    if (!selectedFund) {
-      setInviteMessage("Please select a fund first.");
+    let governedFund: FundRow;
+
+    try {
+      governedFund = requireSelectedEditableFund("Invite batch");
+    } catch (error) {
+      setInviteMessage(
+        error instanceof Error ? error.message : "Please select an editable governed fund."
+      );
       return;
     }
 
@@ -1278,8 +1553,8 @@ export default function FundOnboardingPage() {
         const { data, error } = await db
           .from("ventiq_invite_batches")
           .insert({
-            fund_id: selectedFund.id,
-            batch_name: `${selectedFund.fundName} invite batch`,
+            fund_id: governedFund.id,
+            batch_name: `${governedFund.fundName} invite batch`,
             total_invites: pendingStakeholders.length,
             sent_count: successfulIds.length,
             pending_count: failures.length,
@@ -1332,28 +1607,83 @@ export default function FundOnboardingPage() {
     }
   }
 
-  const hasSelectedFund = Boolean(selectedFund);
-  const hasPeople = selectedStakeholders.length > 0;
-  const currentSetupStage = !hasSelectedFund ? 1 : !hasPeople ? 2 : 3;
+  const hasSelectedFund = Boolean(selectedFund?.id);
+
+  const peopleUpdatedAt = useMemo(() => {
+    const candidates = selectedStakeholders
+      .flatMap((stakeholder) => [
+        stakeholder.activatedAt,
+        stakeholder.invitedAt,
+        stakeholder.lastLoginAt,
+      ])
+      .filter(Boolean)
+      .map((value) => ({ value, time: Date.parse(value) }))
+      .filter((item) => Number.isFinite(item.time))
+      .sort((left, right) => right.time - left.time);
+
+    return candidates[0]?.value || "";
+  }, [selectedStakeholders]);
+
+  const setupStages = useMemo(
+    () =>
+      buildCanonicalSetupStages({
+        readiness: operationalReadiness,
+        readinessError,
+        hasFundIdentity:
+          operationalReadiness?.setup.fundIdentityReady ?? hasSelectedFund,
+        fundCreatedAt:
+          operationalReadiness?.setup.fundCreatedAt ||
+          selectedFund?.createdAt ||
+          "",
+        peopleCount:
+          operationalReadiness?.setup.peopleAccessCount ??
+          selectedStakeholders.length,
+        peopleUpdatedAt:
+          operationalReadiness?.setup.peopleUpdatedAt || peopleUpdatedAt,
+      }),
+    [
+      hasSelectedFund,
+      operationalReadiness,
+      peopleUpdatedAt,
+      readinessError,
+      selectedFund?.createdAt,
+      selectedStakeholders.length,
+    ]
+  );
+
+  const currentSetupStage =
+    setupStages.find((stage) => stage.status !== "Complete")?.stage ?? 6;
 
   function setupStepClass(stage: number) {
-    if (stage < currentSetupStage) return "setup-step complete";
+    const snapshot = setupStages.find((item) => item.stage === stage);
+
+    if (snapshot?.status === "Complete") return "setup-step complete";
     if (stage === currentSetupStage) return "setup-step current";
     return "setup-step upcoming";
   }
 
   function setupStepStatus(stage: number) {
-    if (stage < currentSetupStage) return "Complete";
-    if (stage === currentSetupStage) return "Current";
-    return stage === currentSetupStage + 1 ? "Next" : "Later";
+    const snapshot = setupStages.find((item) => item.stage === stage);
+
+    if (!snapshot) return "Not Started";
+
+    if (snapshot.blockerCount > 0) {
+      return `${snapshot.status} · ${snapshot.blockerCount} blocker${
+        snapshot.blockerCount === 1 ? "" : "s"
+      }`;
+    }
+
+    return snapshot.status;
   }
 
-  const nextAction =
-    currentSetupStage === 1
-      ? { href: "#create-fund", label: "Create Fund" }
-      : currentSetupStage === 2
-        ? { href: "#people-access", label: "Add People & Access" }
-        : { href: "/migration/data-intake", label: "Continue to Fund Data" };
+  const activeSetupStage =
+    setupStages.find((stage) => stage.stage === currentSetupStage) ??
+    setupStages[setupStages.length - 1];
+
+  const nextAction = {
+    href: activeSetupStage.nextHref,
+    label: readinessLoading ? "Loading readiness..." : activeSetupStage.nextLabel,
+  };
 
   return (
     <main className="onboarding-page">
@@ -1856,6 +2186,77 @@ export default function FundOnboardingPage() {
           color: #93c5fd;
         }
 
+        .setup-readiness-note {
+          margin: 0 0 18px;
+          padding: 12px 14px;
+          border-radius: 12px;
+          border: 1px solid rgba(96, 165, 250, 0.2);
+          background: rgba(15, 23, 42, 0.56);
+          color: #b8c9e3;
+          font-size: 12px;
+          line-height: 1.55;
+        }
+
+        .setup-readiness-note.error {
+          border-color: rgba(248, 113, 113, 0.3);
+          color: #fecaca;
+        }
+
+        .setup-stage-detail-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 18px;
+        }
+
+        .setup-stage-detail {
+          border: 1px solid rgba(147, 197, 253, 0.14);
+          background: rgba(2, 12, 31, 0.52);
+          border-radius: 14px;
+          padding: 13px;
+        }
+
+        .setup-stage-detail.complete {
+          border-color: rgba(34, 197, 94, 0.24);
+        }
+
+        .setup-stage-detail.current {
+          border-color: rgba(96, 165, 250, 0.42);
+        }
+
+        .setup-stage-detail > span {
+          display: block;
+          color: #7890b2;
+          font-size: 9px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          margin-bottom: 5px;
+        }
+
+        .setup-stage-detail strong {
+          display: block;
+          color: #f8fbff;
+          font-size: 13px;
+          margin-bottom: 7px;
+        }
+
+        .setup-stage-detail p {
+          margin: 3px 0;
+          color: #a9bdd9;
+          font-size: 11px;
+          line-height: 1.45;
+        }
+
+        .setup-stage-detail a {
+          display: inline-flex;
+          margin-top: 8px;
+          color: #93c5fd;
+          font-size: 11px;
+          font-weight: 850;
+          text-decoration: none;
+        }
+
         .hero-next {
           display: flex;
           align-items: center;
@@ -1900,6 +2301,10 @@ export default function FundOnboardingPage() {
             grid-template-columns: repeat(3, minmax(0, 1fr));
           }
 
+          .setup-stage-detail-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
           .next-stage-panel {
             align-items: flex-start;
             flex-direction: column;
@@ -1923,6 +2328,10 @@ export default function FundOnboardingPage() {
 
           .setup-journey {
             grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .setup-stage-detail-grid {
+            grid-template-columns: 1fr;
           }
         }
       `}</style>
@@ -1969,9 +2378,9 @@ export default function FundOnboardingPage() {
               <strong>Fund Data</strong>
               <em>{setupStepStatus(3)}</em>
             </Link>
-            <Link className={setupStepClass(4)} href="/migration/activation">
+            <Link className={setupStepClass(4)} href="/issues">
               <span>04</span>
-              <strong>Review</strong>
+              <strong>Review & Calculate</strong>
               <em>{setupStepStatus(4)}</em>
             </Link>
             <Link className={setupStepClass(5)} href="/migration/activation">
@@ -1979,12 +2388,59 @@ export default function FundOnboardingPage() {
               <strong>Activate</strong>
               <em>{setupStepStatus(5)}</em>
             </Link>
-            <Link className={setupStepClass(6)} href="/launch-center">
+            <Link className={setupStepClass(6)} href="/migration/stakeholder-launch">
               <span>06</span>
               <strong>Launch</strong>
               <em>{setupStepStatus(6)}</em>
             </Link>
           </nav>
+
+          {readinessLoading && (
+            <div className="setup-readiness-note">
+              Loading canonical Data Intake, Issue Center, calculation, approval,
+              activation and Stakeholder Launch readiness for the selected fund.
+            </div>
+          )}
+
+          {readinessError && !controlledPreview && (
+            <div className="setup-readiness-note error">
+              Canonical readiness could not be loaded: {readinessError}
+            </div>
+          )}
+
+          {!controlledPreview && (
+            <div className="setup-stage-detail-grid">
+              {setupStages.map((stage) => (
+                <article
+                  className={`setup-stage-detail ${
+                    stage.status === "Complete"
+                      ? "complete"
+                      : stage.stage === currentSetupStage
+                        ? "current"
+                        : ""
+                  }`}
+                  key={stage.key}
+                >
+                  <span>
+                    Stage {stage.stage} · {stage.status}
+                  </span>
+                  <strong>{stage.title}</strong>
+                  <p>
+                    Blockers: <b>{stage.blockerCount}</b>
+                  </p>
+                  <p>
+                    Last completed:{" "}
+                    <b>{stage.completedAt ? formatDate(stage.completedAt) : "—"}</b>
+                  </p>
+                  {stage.nextHref.startsWith("#") ? (
+                    <a href={stage.nextHref}>{stage.nextLabel} &rarr;</a>
+                  ) : (
+                    <Link href={stage.nextHref}>{stage.nextLabel} &rarr;</Link>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
 
           <div className="summary-grid">
             <div className="stat-card">
@@ -2036,14 +2492,34 @@ export default function FundOnboardingPage() {
 
           <div className="fund-selector">
             <select
-              value={selectedFundId}
-              onChange={(event) => setSelectedFundId(event.target.value)}
+              disabled={selectableFunds.length === 0}
+              value={
+                selectedFund && selectableFunds.some((fund) => fund.id === selectedFund.id)
+                  ? selectedFund.id
+                  : ""
+              }
+              onChange={(event) => {
+                const nextFundId = event.target.value;
+                setSelectedFundId(nextFundId);
+
+                const nextFund = selectableFunds.find(
+                  (fund) => fund.id === nextFundId
+                );
+
+                if (nextFund) {
+                  setActiveFundName(nextFund.fundName);
+                }
+              }}
             >
-              {funds.map((fund) => (
-                <option key={fund.id} value={fund.id}>
-                  {fund.fundName}
-                </option>
-              ))}
+              {selectableFunds.length === 0 ? (
+                <option value="">Create your first fund to begin</option>
+              ) : (
+                selectableFunds.map((fund) => (
+                  <option key={fund.id} value={fund.id}>
+                    {fund.fundName}
+                  </option>
+                ))
+              )}
             </select>
 
             {inviteMessage && <span className="message">{inviteMessage}</span>}
@@ -2052,22 +2528,22 @@ export default function FundOnboardingPage() {
           <div className="selected-fund-card">
             <div>
               <span>Fund</span>
-              <strong>{selectedFund.fundName}</strong>
+              <strong>{selectedFund?.fundName || "No governed fund selected"}</strong>
             </div>
 
             <div>
               <span>Type</span>
-              <strong>{selectedFund.fundType}</strong>
+              <strong>{selectedFund?.fundType || "Not available"}</strong>
             </div>
 
             <div>
               <span>Jurisdiction</span>
-              <strong>{selectedFund.jurisdiction}</strong>
+              <strong>{selectedFund?.jurisdiction || "Not available"}</strong>
             </div>
 
             <div>
               <span>Status</span>
-              <strong>{selectedFund.onboardingStatus}</strong>
+              <strong>{selectedFund?.onboardingStatus || "Not available"}</strong>
             </div>
           </div>
 
@@ -2214,10 +2690,10 @@ export default function FundOnboardingPage() {
                     updateFundForm("dataMode", event.target.value)
                   }
                 >
+                  <option>Production Data</option>
+                  <option>Limited Real Data</option>
                   <option>Demo Data</option>
                   <option>Sample Client Data</option>
-                  <option>Limited Real Data</option>
-                  <option>Production Data</option>
                 </select>
               </div>
 
@@ -2715,7 +3191,7 @@ export default function FundOnboardingPage() {
 
             <div>
               <span>Data mode</span>
-              <strong>{selectedFund.dataMode}</strong>
+              <strong>{selectedFund?.dataMode || "Not available"}</strong>
             </div>
 
             <div>

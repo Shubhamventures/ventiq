@@ -2,9 +2,7 @@
 
 // A7.7-7B2: current-baseline governed Fund → Investor → FY → Quarter → Nature archive.
 
-import { useEffect, useMemo, useState } from "react";
-import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
-import { useActiveFund } from "../../lib/useActiveFund";
+import { useEffect, useMemo, useState } from "react";import { useActiveFund } from "../../lib/useActiveFund";
 import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 import type { GovernedDocumentHierarchy } from "../../lib/documentHierarchy";
 
@@ -86,6 +84,19 @@ type WorkflowApiResponse = {
   warning?: string;
   error?: string;
 };
+type OverviewApiResponse = {
+  activation?: {
+    status?: string;
+    readinessScore?: number;
+  };
+  sourceBatch?: SourceBatch | null;
+  documents?: DataRoomDocument[];
+  investors?: DataRow[];
+  engagementEvents?: DataRow[];
+  questions?: DataRow[];
+  error?: string;
+};
+
 
 type UploadPreview = {
   id: string;
@@ -131,8 +142,8 @@ const DATA_ROOM_FOLDERS: FolderDefinition[] = [
     expectedDocuments: ["Portfolio Summary", "Company Updates", "Risk Summary"],
   },
   {
-    name: "Investor Reporting Samples",
-    description: "Sample capital calls, distribution notices, SOAs and reports.",
+    name: "Investor Reporting",
+    description: "Capital calls, distribution notices, SOAs and investor reports.",
     expectedDocuments: ["Capital Call Notice", "Distribution Notice", "SOA"],
   },
   {
@@ -307,9 +318,9 @@ function detectDocumentType(fileName: string) {
 function suggestFolder(documentType: string) {
   if (documentType.includes("DDQ")) return "DDQ & Q&A";
   if (documentType.includes("Track")) return "Track Record & Performance";
-  if (documentType.includes("Capital Call")) return "Investor Reporting Samples";
-  if (documentType.includes("Distribution")) return "Investor Reporting Samples";
-  if (documentType.includes("Statement")) return "Investor Reporting Samples";
+  if (documentType.includes("Capital Call")) return "Investor Reporting";
+  if (documentType.includes("Distribution")) return "Investor Reporting";
+  if (documentType.includes("Statement")) return "Investor Reporting";
   if (documentType.includes("Tax")) return "Tax & Regulatory";
   if (documentType.includes("Compliance")) return "Legal & Compliance";
   if (documentType.includes("Deck")) return "Fund Overview";
@@ -330,7 +341,7 @@ function getDDQImpact(documentType: string, folder: string) {
   if (folder === "Legal & Compliance") {
     return "Can support legal and compliance diligence";
   }
-  if (folder === "Investor Reporting Samples") {
+  if (folder === "Investor Reporting") {
     return "Can support operations and investor reporting DDQ questions";
   }
   if (folder === "Tax & Regulatory") {
@@ -378,37 +389,20 @@ function documentMatchesSearch(document: DataRoomDocument, search: string) {
 export default function DataRoomPage() {
   const {
     activeFundName,
+    availableFundNames,
     setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund(DEFAULT_FUND_NAME);
   const {
     session,
     activeRole,
-    fundAccess,
     loading: authLoading,
   } = useVentiqAuth();
   const isInvestorUser = activeRole === "investor";
 
-  const investorAllowedFunds = useMemo(() => {
-    if (!isInvestorUser) return [];
+  const investorAllowedFunds = isInvestorUser ? availableFundNames : [];
+  const investorAllowedFundsKey = JSON.stringify(investorAllowedFunds);
 
-    return Array.from(
-      new Set(
-        fundAccess
-          .filter(
-            (access) =>
-              access.status === "Active" &&
-              Boolean(access.can_view) &&
-              Boolean(access.fund_name?.trim())
-          )
-          .map((access) => access.fund_name.trim())
-      )
-    ).sort();
-  }, [fundAccess, isInvestorUser]);
-
-  const [availableFunds, setAvailableFunds] = useState<string[]>([
-    DEFAULT_FUND_NAME,
-  ]);
   const [activationStatus, setActivationStatus] = useState("Checking");
   const [activationReadiness, setActivationReadiness] = useState(0);
 
@@ -554,44 +548,8 @@ export default function DataRoomPage() {
     return result;
   }
 
-  async function loadDataRoom() {
-    if (!fundContextReady || authLoading) return;
-
-    if (isInvestorUser) {
-      if (investorAllowedFunds.length === 0) {
-        setSourceBatch(null);
-        setDocuments([]);
-        setInvestors([]);
-        setEngagementEvents([]);
-        setDdqQuestions([]);
-        setErrorMessage(
-          "No active governed fund access is available for this investor account."
-        );
-        setLoading(false);
-        return;
-      }
-
-      const hasCurrentFundAccess = investorAllowedFunds.some(
-        (fundName) =>
-          fundName.trim().toLowerCase() ===
-          activeFundName.trim().toLowerCase()
-      );
-
-      if (!hasCurrentFundAccess) {
-        // The fund-lock effect below will move the page to the investor's
-        // governed fund before any Data Room API request is released.
-        setLoading(true);
-        return;
-      }
-    }
-
-    if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage(
-        "The Investor Data Room is unavailable because Supabase is not configured."
-      );
-      setLoading(false);
-      return;
-    }
+    async function loadDataRoom() {
+    if (!fundContextReady) return;
 
     if (!accessToken) {
       setErrorMessage("Please sign in to access the Investor Data Room.");
@@ -604,49 +562,8 @@ export default function DataRoomPage() {
     setUploadMessage("");
 
     try {
-      const db = supabase as any;
-
-      const [fundOptionsResult, activationResult] = await Promise.all([
-        db.from("fund_master").select("fund_name").order("fund_name"),
-        db
-          .from("fund_activation_status")
-          .select("status, readiness_score")
-          .eq("fund_name", activeFundName)
-          .maybeSingle(),
-      ]);
-
-      const fundOptions = Array.from(
-        new Set(
-          [
-            DEFAULT_FUND_NAME,
-            activeFundName,
-            ...((fundOptionsResult.data ?? []) as DataRow[]).map((row) =>
-              getString(row, ["fund_name"], "")
-            ),
-          ].filter(Boolean)
-        )
-      ).sort((left, right) => left.localeCompare(right));
-
-      setAvailableFunds(fundOptions);
-      setActivationStatus(
-        activationResult.error
-          ? "Unavailable"
-          : getString(
-              activationResult.data as DataRow | null,
-              ["status"],
-              "Setup Not Started"
-            )
-      );
-      setActivationReadiness(
-        activationResult.error
-          ? 0
-          : getNumber(activationResult.data as DataRow | null, [
-              "readiness_score",
-            ])
-      );
-
-      const documentResponse = await fetch(
-        `/api/data-room/documents?fundName=${encodeURIComponent(
+      const overviewResponse = await fetch(
+        `/api/data-room/overview?fundName=${encodeURIComponent(
           activeFundName
         )}&limit=500`,
         {
@@ -656,46 +573,34 @@ export default function DataRoomPage() {
         }
       );
 
-      const documentResult =
-        await readJson<DocumentApiResponse>(documentResponse);
+      const overviewResult =
+        await readJson<OverviewApiResponse>(overviewResponse);
 
-      if (!documentResponse.ok) {
+      if (!overviewResponse.ok) {
         throw new Error(
-          documentResult.error || "Unable to load data room documents."
+          overviewResult.error || "Unable to load the Investor Data Room."
         );
       }
 
-      if (isInvestorUser) {
-        setActivationStatus("Active");
-        setActivationReadiness(100);
-      }
+      const resolvedBatch = overviewResult.sourceBatch ?? null;
+      const resolvedDocuments = overviewResult.documents ?? [];
+      const loadedInvestors = overviewResult.investors ?? [];
 
-      const resolvedBatch = documentResult.sourceBatch ?? null;
-      const resolvedDocuments = documentResult.documents ?? [];
-
+      setActivationStatus(
+        overviewResult.activation?.status || "Setup Not Started"
+      );
+      setActivationReadiness(
+        Number(overviewResult.activation?.readinessScore || 0)
+      );
       setSourceBatch(resolvedBatch);
       setDocuments(resolvedDocuments);
-
-      if (!resolvedBatch?.id) {
-        setInvestors([]);
-        setEngagementEvents([]);
-        setDdqQuestions([]);
-        setLoading(false);
-        return;
-      }
-
-      const investorsResult = await db
-        .from("investor_master")
-        .select("*")
-        .eq("fund_name", activeFundName)
-        .eq("source_batch_id", resolvedBatch.id)
-        .order("investor_code", { ascending: true });
-
-      const loadedInvestors = investorsResult.error
-        ? []
-        : ((investorsResult.data ?? []) as DataRow[]);
-
       setInvestors(loadedInvestors);
+
+      applyWorkflowResult({
+        sourceBatch: resolvedBatch,
+        engagementEvents: overviewResult.engagementEvents ?? [],
+        questions: overviewResult.questions ?? [],
+      });
 
       const firstInvestorCode = loadedInvestors[0]
         ? getInvestorCode(loadedInvestors[0])
@@ -703,8 +608,6 @@ export default function DataRoomPage() {
 
       setEngagementInvestorCode((current) => current || firstInvestorCode);
       setQuestionInvestorCode((current) => current || firstInvestorCode);
-
-      await loadWorkflowState(resolvedBatch.id, false);
     } catch (error) {
       setSourceBatch(null);
       setDocuments([]);
@@ -722,32 +625,6 @@ export default function DataRoomPage() {
   }
 
   useEffect(() => {
-    if (!isInvestorUser || authLoading) return;
-
-    if (investorAllowedFunds.length === 0) {
-      setAvailableFunds([]);
-      return;
-    }
-
-    setAvailableFunds(investorAllowedFunds);
-
-    const hasCurrentFundAccess = investorAllowedFunds.some(
-      (fundName) =>
-        fundName.trim().toLowerCase() === activeFundName.trim().toLowerCase()
-    );
-
-    if (!hasCurrentFundAccess) {
-      setActiveFundName(investorAllowedFunds[0]);
-    }
-  }, [
-    activeFundName,
-    authLoading,
-    investorAllowedFunds,
-    isInvestorUser,
-    setActiveFundName,
-  ]);
-
-  useEffect(() => {
     loadDataRoom();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -755,7 +632,7 @@ export default function DataRoomPage() {
     accessToken,
     authLoading,
     fundContextReady,
-    investorAllowedFunds,
+    investorAllowedFundsKey,
     isInvestorUser,
   ]);
 
@@ -1871,7 +1748,7 @@ export default function DataRoomPage() {
                 value={activeFundName}
                 onChange={(event) => setActiveFundName(event.target.value)}
               >
-                {availableFunds.map((fundName) => (
+                {availableFundNames.map((fundName) => (
                   <option key={fundName} value={fundName}>
                     {fundName}
                   </option>

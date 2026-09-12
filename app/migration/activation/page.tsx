@@ -65,6 +65,24 @@ type ActivationRow = {
   activated_by?: string | null;
 };
 
+type CalculationReadiness = {
+  ready: boolean;
+  runId: string;
+  asOfDate: string;
+  totalControls: number;
+  passedControls: number;
+  blockers: string[];
+};
+
+const emptyCalculationReadiness: CalculationReadiness = {
+  ready: false,
+  runId: "",
+  asOfDate: "",
+  totalControls: 0,
+  passedControls: 0,
+  blockers: ["No completed, fully reconciled canonical calculation is available."],
+};
+
 type GovernedFundOption = {
   fund_name: string;
   role: string;
@@ -257,6 +275,7 @@ export default function DataActivationDashboardPage() {
   const { session, profile, activeRole, loading: authLoading } = useVentiqAuth();
   const {
     activeFundName,
+    availableFundNames,
     setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund(DEFAULT_FUND_NAME);
@@ -309,6 +328,8 @@ export default function DataActivationDashboardPage() {
   const [persistedActivation, setPersistedActivation] = useState<ActivationRow | null>(
     null
   );
+  const [calculationReadiness, setCalculationReadiness] =
+    useState<CalculationReadiness>(emptyCalculationReadiness);
 
   const setNotice = useCallback(
     (text: string, tone: "success" | "warning" | "error" = "success") => {
@@ -371,10 +392,8 @@ export default function DataActivationDashboardPage() {
         );
 
         if (!currentFundIsAllowed) {
-          const nextFund = funds[0].fund_name;
-          setActiveFundName(nextFund);
           setFundAccessMessage(
-            `Activation moved to your first authorised fund: ${nextFund}.`
+            "Activation could not confirm access metadata for the globally selected fund. Refresh access or choose another authorised fund from the global selector."
           );
         }
 
@@ -413,6 +432,7 @@ export default function DataActivationDashboardPage() {
     if (!activeFundName.trim() || !activeFundAccess) {
       setLayers(defaultLayers);
       setPersistedActivation(null);
+      setCalculationReadiness(emptyCalculationReadiness);
       setNotice("Select an authorised fund before loading activation readiness.", "warning");
       return;
     }
@@ -422,8 +442,19 @@ export default function DataActivationDashboardPage() {
       return;
     }
 
+    const accessToken = session?.access_token?.trim() || "";
+
+    if (!accessToken) {
+      setCalculationReadiness(emptyCalculationReadiness);
+      setNotice("A secure VENTIQ session is required to verify canonical calculations.", "error");
+      return;
+    }
+
     setLoading(true);
-    setNotice("Loading migration readiness, approvals and activation status...", "warning");
+    setNotice(
+      "Loading migration readiness, approvals, canonical calculations and activation status...",
+      "warning"
+    );
 
     try {
       let workflowAvailable = true;
@@ -443,21 +474,21 @@ export default function DataActivationDashboardPage() {
       ] = await Promise.all([
         client
           .from("investor_import_batches")
-          .select("*")
+          .select("batch_name, created_at, fund_name, id, source, status, total_commitment, total_records, updated_at")
           .eq("fund_name", activeFundName)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
         client
           .from("pdf_intelligence_batches")
-          .select("*")
+          .select("batch_name, created_at, fund_name, id, ready_files, review_files, status, total_files, unmatched_files, updated_at")
           .eq("fund_name", activeFundName)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
         client
           .from("portfolio_data_migration_batches")
-          .select("*")
+          .select("at_risk_count, batch_name, created_at, current_portfolio_value, expected_exit_value, fund_name, id, portfolio_moic, realised_value, repayment_count, status, total_investment_cost, total_records, updated_at")
           .eq("fund_name", activeFundName)
           .order("created_at", { ascending: false })
           .limit(1)
@@ -472,7 +503,7 @@ export default function DataActivationDashboardPage() {
           .maybeSingle(),
         client
           .from("compliance_data_migration_batches")
-          .select("*")
+          .select("batch_name, created_at, evidence_available_count, fund_name, high_risk_count, id, pending_review_count, ready_count, status, total_items, updated_at")
           .eq("fund_name", activeFundName)
           .order("created_at", { ascending: false })
           .limit(1)
@@ -499,7 +530,7 @@ export default function DataActivationDashboardPage() {
       const fundBatchResult = fundBatchId
         ? await client
             .from("fund_data_migration_batches")
-            .select("*")
+            .select("average_carry, average_management_fee, batch_name, created_at, id, status, total_committed_capital, total_funds, total_green_shoe, total_sponsor_commitment, total_target_corpus, updated_at")
             .eq("id", fundBatchId)
             .maybeSingle()
         : { data: null, error: null };
@@ -677,7 +708,7 @@ export default function DataActivationDashboardPage() {
 
       const approvalResult = await client
         .from("migration_data_approvals")
-        .select("*")
+        .select("checker_name, checker_user_id, created_at, fund_name, id, layer_key, layer_name, maker_name, maker_user_id, owner_name, review_comment, reviewed_at, source_batch_id, source_batch_name, source_table, status, submitted_at, updated_at, validation_issues")
         .eq("fund_name", activeFundName);
 
       if (approvalResult.error) {
@@ -711,7 +742,7 @@ export default function DataActivationDashboardPage() {
 
       const activationResult = await client
         .from("fund_activation_status")
-        .select("*")
+        .select("activated_at, activated_by, approved_batch_map, created_at, fund_name, id, readiness_score, status, updated_at")
         .eq("fund_name", activeFundName)
         .maybeSingle();
 
@@ -726,12 +757,79 @@ export default function DataActivationDashboardPage() {
         setPersistedActivation((activationResult.data as ActivationRow | null) ?? null);
       }
 
+      const calculationResponse = await fetch(
+        `/api/metrics/calculate?fundName=${encodeURIComponent(activeFundName)}`,
+        {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+      const calculationResult = (await calculationResponse.json()) as {
+        error?: string;
+        run?: {
+          id?: string | null;
+          as_of_date?: string | null;
+          calculation_status?: string | null;
+        } | null;
+        reconciliations?: Array<{
+          reconciliation_status?: string | null;
+        }>;
+      };
+
+      if (!calculationResponse.ok) {
+        throw new Error(
+          calculationResult.error ||
+            "Unable to verify canonical calculation readiness for activation."
+        );
+      }
+
+      const reconciliationRows = calculationResult.reconciliations ?? [];
+      const passedControls = reconciliationRows.filter(
+        (row) =>
+          String(row.reconciliation_status ?? "").trim().toLowerCase() === "pass"
+      ).length;
+      const runId = String(calculationResult.run?.id ?? "").trim();
+      const calculationReady =
+        Boolean(runId) &&
+        String(calculationResult.run?.calculation_status ?? "") === "Completed" &&
+        reconciliationRows.length > 0 &&
+        passedControls === reconciliationRows.length;
+      const calculationBlockers: string[] = [];
+
+      if (!runId) {
+        calculationBlockers.push(
+          "Run canonical performance calculations after the governed intake is complete."
+        );
+      } else if (reconciliationRows.length === 0) {
+        calculationBlockers.push(
+          "The completed calculation has no reconciliation controls."
+        );
+      } else if (passedControls !== reconciliationRows.length) {
+        calculationBlockers.push(
+          `${reconciliationRows.length - passedControls} reconciliation control(s) are not Pass.`
+        );
+      }
+
+      setCalculationReadiness({
+        ready: calculationReady,
+        runId,
+        asOfDate: String(calculationResult.run?.as_of_date ?? "").trim(),
+        totalControls: reconciliationRows.length,
+        passedControls,
+        blockers: calculationBlockers,
+      });
+
       setLayers(nextLayers);
       setNotice(
         workflowAvailable
-          ? "Data readiness and maker-checker status loaded."
+          ? calculationReady
+            ? "Data readiness, maker-checker approvals and canonical calculation reconciliation loaded."
+            : "Data readiness and approvals loaded. Canonical calculation reconciliation is still required before activation."
           : "Migration data loaded. Apply the activation workflow SQL to enable approvals and fund activation.",
-        workflowAvailable ? "success" : "warning"
+        workflowAvailable && calculationReady ? "success" : "warning"
       );
     } catch (error) {
       const errorMessage =
@@ -752,6 +850,7 @@ export default function DataActivationDashboardPage() {
     activeFundName,
     fundAccessReady,
     fundContextReady,
+    session?.access_token,
     setNotice,
   ]);
 
@@ -770,24 +869,31 @@ export default function DataActivationDashboardPage() {
       (layer) => layer.status === "Ready" && layer.approvalStatus === "Approved"
     ).length;
     const issueCount = mandatoryLayers.reduce((total, layer) => total + layer.issues.length, 0);
+    const mandatoryControlCount = mandatoryLayers.length + 1;
+    const readyControlCount = approvedCount + (calculationReadiness.ready ? 1 : 0);
     const readinessScore =
-      mandatoryLayers.length === 0
+      mandatoryControlCount === 0
         ? 0
-        : Math.round((approvedCount / mandatoryLayers.length) * 100);
+        : Math.round((readyControlCount / mandatoryControlCount) * 100);
     const derivedStatus = deriveActivationStatus(layers);
     const activationStatus =
       persistedActivation?.status === "Active"
         ? "Active"
-        : derivedStatus;
+        : derivedStatus === "Ready for Activation" && !calculationReadiness.ready
+          ? "Validation Required"
+          : derivedStatus;
     const canActivate =
       workflowConfigured &&
       activationStatus !== "Active" &&
+      calculationReadiness.ready &&
       mandatoryLayers.every(
         (layer) => layer.status === "Ready" && layer.approvalStatus === "Approved"
       );
 
     return {
       mandatoryCount: mandatoryLayers.length,
+      mandatoryControlCount,
+      readyControlCount,
       dataReadyCount,
       submittedCount,
       approvedCount,
@@ -796,7 +902,7 @@ export default function DataActivationDashboardPage() {
       activationStatus: activationStatus as ActivationStatus,
       canActivate,
     };
-  }, [layers, persistedActivation, workflowConfigured]);
+  }, [calculationReadiness, layers, persistedActivation, workflowConfigured]);
 
   async function writeEvent(input: {
     eventType: string;
@@ -961,7 +1067,12 @@ export default function DataActivationDashboardPage() {
     }
 
     if (!readiness.canActivate) {
-      setNotice("All mandatory data layers must be validated and checker-approved first.", "warning");
+      setNotice(
+        calculationReadiness.ready
+          ? "All mandatory data layers must be validated and checker-approved first."
+          : "Run canonical calculations and resolve every reconciliation control to Pass before activation.",
+        "warning"
+      );
       return;
     }
 
@@ -969,9 +1080,10 @@ export default function DataActivationDashboardPage() {
 
     try {
       const now = new Date().toISOString();
-      const approvedBatchMap = Object.fromEntries(
-        layers.map((layer) => [layer.id, layer.batchId])
-      );
+      const approvedBatchMap = {
+        ...Object.fromEntries(layers.map((layer) => [layer.id, layer.batchId])),
+        calculation_run: calculationReadiness.runId,
+      };
 
       const { error } = await supabase.from("fund_activation_status").upsert(
         {
@@ -993,7 +1105,13 @@ export default function DataActivationDashboardPage() {
         actorName,
         actorRole: workflowRole,
         description: `${activeFundName} was activated across VENTIQ.`,
-        metadata: { approvedBatchMap, readinessScore: 100 },
+        metadata: {
+          approvedBatchMap,
+          readinessScore: 100,
+          calculationRunId: calculationReadiness.runId,
+          calculationAsOfDate: calculationReadiness.asOfDate,
+          reconciliationControls: calculationReadiness.totalControls,
+        },
       });
 
       setNotice("Fund activated. Approved data can now power VENTIQ dashboards and workflows.", "success");
@@ -1017,16 +1135,16 @@ export default function DataActivationDashboardPage() {
             <span>Activation fund</span>
             <select
               aria-label="Select authorised activation fund"
-              disabled={!fundAccessReady || authorisedFunds.length === 0 || loading}
+              disabled={!fundAccessReady || availableFundNames.length === 0 || loading}
               onChange={(event) => setActiveFundName(event.target.value)}
-              value={activeFundAccess ? activeFundName : ""}
+              value={activeFundName}
             >
               {!activeFundAccess && (
                 <option value="">Select authorised fund</option>
               )}
-              {authorisedFunds.map((fund) => (
-                <option key={fund.fund_name} value={fund.fund_name}>
-                  {fund.fund_name}
+              {availableFundNames.map((fundName) => (
+                <option key={fundName} value={fundName}>
+                  {fundName}
                 </option>
               ))}
             </select>
@@ -1072,6 +1190,9 @@ export default function DataActivationDashboardPage() {
               <Link className="activation-secondary-button" href="/migration/stakeholder-launch">
                 Stakeholder Launch
               </Link>
+              <Link className="activation-secondary-button" href="/issues">
+                Issue Center
+              </Link>
               <Link className="activation-secondary-button" href="/admin/audit-workflow">
                 Audit Workflow
               </Link>
@@ -1094,8 +1215,9 @@ export default function DataActivationDashboardPage() {
               <span style={{ width: `${readiness.readinessScore}%` }} />
             </div>
             <p>
-              {readiness.approvedCount} of {readiness.mandatoryCount} mandatory layers are
-              checker-approved and activation-ready.
+              {readiness.readyControlCount} of {readiness.mandatoryControlCount} mandatory
+              activation controls are ready: five governed data layers plus one fully
+              reconciled canonical calculation.
             </p>
             <button
               className="activation-final-button"
@@ -1163,10 +1285,25 @@ export default function DataActivationDashboardPage() {
           </div>
         </div>
 
+        <div className="activation-setup-warning">
+          <div>
+            <strong>Canonical calculation & reconciliation gate</strong>
+            <p>
+              {calculationReadiness.ready
+                ? `Calculation ${calculationReadiness.runId} is completed and all ${calculationReadiness.totalControls} reconciliation controls are Pass.`
+                : calculationReadiness.blockers.join(" ")}
+            </p>
+            {calculationReadiness.asOfDate && (
+              <small>Calculation as of {calculationReadiness.asOfDate}</small>
+            )}
+          </div>
+          <span>{calculationReadiness.ready ? "Ready" : "Required"}</span>
+        </div>
+
         <div className="activation-section-heading">
           <div>
             <p className="activation-eyebrow">Mandatory activation checks</p>
-            <h2>Five controlled data layers</h2>
+            <h2>Five controlled data layers + canonical calculations</h2>
           </div>
           <p>
             Source readiness and checker approval are separate controls. A technically complete

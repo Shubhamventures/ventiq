@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../../lib/supabaseClient";
+import { useActiveFund } from "../../../lib/useActiveFund";
 
 type InvestorImportBatch = {
   id: string;
@@ -90,6 +91,26 @@ function safeDivide(numerator: number, denominator: number) {
 }
 
 export default function InvestorFinancialMigrationPage() {
+  const { activeFundName, isReady: activeFundReady } = useActiveFund(
+    "VENTIQ Growth Fund II"
+  );
+
+  return (
+    <InvestorFinancialMigrationWorkspace
+      key={activeFundReady && activeFundName ? activeFundName : "__fund_loading__"}
+      activeFundName={activeFundName}
+      activeFundReady={activeFundReady}
+    />
+  );
+}
+
+function InvestorFinancialMigrationWorkspace({
+  activeFundName,
+  activeFundReady,
+}: {
+  activeFundName: string;
+  activeFundReady: boolean;
+}) {
   const [latestBatch, setLatestBatch] = useState<InvestorImportBatch | null>(
     null
   );
@@ -151,6 +172,11 @@ export default function InvestorFinancialMigrationPage() {
   async function handleLoadLatestInvestorBatch() {
     const supabaseClient = supabase;
 
+    if (!activeFundReady || !activeFundName) {
+      setMessage("Authenticated fund access is still loading.");
+      return;
+    }
+
     if (!isSupabaseConfigured || !supabaseClient) {
       setMessage("Supabase is not configured. Please check .env.local.");
       return;
@@ -164,6 +190,7 @@ export default function InvestorFinancialMigrationPage() {
     const { data: batchData, error: batchError } = await supabaseClient
       .from("investor_import_batches")
       .select("id, fund_name, batch_name")
+      .eq("fund_name", activeFundName)
       .order("created_at", { ascending: false })
       .limit(1);
 
@@ -202,6 +229,7 @@ export default function InvestorFinancialMigrationPage() {
           "id, investor_id, fund_name, class_name, commitment_amount, unfunded_commitment, commitment_status"
         )
         .eq("batch_id", batch.id)
+        .eq("fund_name", activeFundName)
         .order("commitment_amount", { ascending: false });
 
     if (commitmentError) {
@@ -316,7 +344,7 @@ export default function InvestorFinancialMigrationPage() {
         investorCode: investor?.investor_code ?? "",
         investorName: investor?.investor_name ?? "Unknown Investor",
         email: investor?.email ?? "",
-        fundName: commitment.fund_name || latestBatch.fund_name,
+        fundName: activeFundName,
         className: commitment.class_name || "Class A",
         commitmentAmount,
         capitalCalledTillDate,
@@ -344,6 +372,11 @@ export default function InvestorFinancialMigrationPage() {
   async function handlePublishFinancialData() {
     const supabaseClient = supabase;
 
+    if (!activeFundReady || !activeFundName) {
+      setMessage("Authenticated fund access is still loading.");
+      return;
+    }
+
     if (!supabaseClient) {
       setMessage("Supabase is not configured. Please check .env.local.");
       return;
@@ -351,6 +384,11 @@ export default function InvestorFinancialMigrationPage() {
 
     if (!latestBatch) {
       setMessage("Load latest investor batch before publishing.");
+      return;
+    }
+
+    if (latestBatch.fund_name !== activeFundName) {
+      setMessage("Loaded investor batch does not belong to the active fund.");
       return;
     }
 
@@ -366,7 +404,7 @@ export default function InvestorFinancialMigrationPage() {
       .from("investor_financial_migration_batches")
       .insert({
         import_batch_id: latestBatch.id,
-        fund_name: latestBatch.fund_name,
+        fund_name: activeFundName,
         total_investors: financialRows.length,
         total_commitment: metrics.totalCommitment,
         total_called: metrics.totalCalled,
@@ -395,7 +433,7 @@ export default function InvestorFinancialMigrationPage() {
       investor_code: row.investorCode,
       investor_name: row.investorName,
       email: row.email,
-      fund_name: row.fundName,
+      fund_name: activeFundName,
       class_name: row.className,
       commitment_amount: row.commitmentAmount,
       capital_called_till_date: row.capitalCalledTillDate,
@@ -418,7 +456,7 @@ export default function InvestorFinancialMigrationPage() {
         investor_id: row.investorId,
         investor_code: row.investorCode,
         investor_name: row.investorName,
-        fund_name: row.fundName,
+        fund_name: activeFundName,
         cashflow_date: getPastDate(3, 0),
         cashflow_type: "Setup Fee",
         amount: row.setupFee,
@@ -430,7 +468,7 @@ export default function InvestorFinancialMigrationPage() {
         investor_id: row.investorId,
         investor_code: row.investorCode,
         investor_name: row.investorName,
-        fund_name: row.fundName,
+        fund_name: activeFundName,
         cashflow_date: getPastDate(2, 2),
         cashflow_type: "Capital Call",
         amount: Math.round(row.capitalCalledTillDate * 0.6),
@@ -442,7 +480,7 @@ export default function InvestorFinancialMigrationPage() {
         investor_id: row.investorId,
         investor_code: row.investorCode,
         investor_name: row.investorName,
-        fund_name: row.fundName,
+        fund_name: activeFundName,
         cashflow_date: getPastDate(1, 4),
         cashflow_type: "Capital Call",
         amount: Math.round(row.capitalCalledTillDate * 0.4),
@@ -454,7 +492,7 @@ export default function InvestorFinancialMigrationPage() {
         investor_id: row.investorId,
         investor_code: row.investorCode,
         investor_name: row.investorName,
-        fund_name: row.fundName,
+        fund_name: activeFundName,
         cashflow_date: getPastDate(0, -3),
         cashflow_type: "Distribution",
         amount: row.distributionsTillDate,

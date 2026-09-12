@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
+import { useActiveFund } from "@/lib/useActiveFund";
 
 type PortfolioRow = {
   id: string;
@@ -137,7 +138,7 @@ function toNullableDate(value: string) {
   return value.trim() ? value : null;
 }
 
-function downloadPortfolioTemplate() {
+function downloadPortfolioTemplate(fundName: string) {
   const headers = [
     "portfolio_company",
     "fund_name",
@@ -159,7 +160,7 @@ function downloadPortfolioTemplate() {
 
   const sample = [
     "ABC Fintech Pvt Ltd",
-    "VENTIQ Growth Fund II",
+    fundName,
     "2024-04-15",
     "Equity",
     "Fintech",
@@ -194,7 +195,32 @@ function downloadPortfolioTemplate() {
 }
 
 export default function PortfolioDataMigrationPage() {
-  const [rows, setRows] = useState<PortfolioRow[]>(sampleRows);
+  const { activeFundName, isReady: activeFundReady } = useActiveFund(
+    "VENTIQ Growth Fund II"
+  );
+
+  return (
+    <PortfolioDataMigrationWorkspace
+      key={activeFundReady && activeFundName ? activeFundName : "__fund_loading__"}
+      activeFundName={activeFundName}
+      activeFundReady={activeFundReady}
+    />
+  );
+}
+
+function PortfolioDataMigrationWorkspace({
+  activeFundName,
+  activeFundReady,
+}: {
+  activeFundName: string;
+  activeFundReady: boolean;
+}) {
+  const [rows, setRows] = useState<PortfolioRow[]>(() =>
+    sampleRows.map((row) => ({
+      ...row,
+      fundName: activeFundName,
+    }))
+  );
   const [message, setMessage] = useState("");
   const [activeBatchName, setActiveBatchName] = useState("");
   const [publishing, setPublishing] = useState(false);
@@ -236,6 +262,11 @@ export default function PortfolioDataMigrationPage() {
   }, [rows]);
 
   async function publishPortfolioData() {
+    if (!activeFundReady || !activeFundName) {
+      setMessage("Authenticated fund access is still loading.");
+      return;
+    }
+
     if (!isSupabaseConfigured || !supabase) {
       setMessage("Supabase is not configured.");
       return;
@@ -255,7 +286,7 @@ export default function PortfolioDataMigrationPage() {
       .from("portfolio_data_migration_batches")
       .insert({
         batch_name: batchName,
-        fund_name: "VENTIQ Growth Fund II",
+        fund_name: activeFundName,
         total_records: rows.length,
         total_investment_cost: metrics.totalCost,
         current_portfolio_value: metrics.currentValue,
@@ -281,7 +312,7 @@ export default function PortfolioDataMigrationPage() {
       batch_id: batchId,
       portfolio_code: row.id,
       portfolio_company: row.companyName,
-      fund_name: row.fundName,
+      fund_name: activeFundName,
       investment_date: toNullableDate(row.investmentDate),
       instrument_type: row.instrumentType,
       sector: row.sector,
@@ -315,6 +346,11 @@ export default function PortfolioDataMigrationPage() {
   }
 
   async function loadLatestPortfolioBatch() {
+    if (!activeFundReady || !activeFundName) {
+      setMessage("Authenticated fund access is still loading.");
+      return;
+    }
+
     if (!isSupabaseConfigured || !supabase) {
       setMessage("Supabase is not configured.");
       return;
@@ -326,6 +362,7 @@ export default function PortfolioDataMigrationPage() {
     const { data: batchData, error: batchError } = await supabase
       .from("portfolio_data_migration_batches")
       .select("id, batch_name")
+      .eq("fund_name", activeFundName)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -351,6 +388,7 @@ export default function PortfolioDataMigrationPage() {
         "id, batch_id, portfolio_code, portfolio_company, fund_name, investment_date, instrument_type, sector, investment_cost, current_value, realised_value, expected_exit_value, expected_exit_date, repayment_due_date, interest_rate, security_or_charge, covenants, risk_status, latest_update"
       )
       .eq("batch_id", batchId)
+      .eq("fund_name", activeFundName)
       .order("created_at", { ascending: true });
 
     if (investmentError) {
@@ -364,7 +402,7 @@ export default function PortfolioDataMigrationPage() {
     const loadedRows: PortfolioRow[] = dbRows.map((row) => ({
       id: row.portfolio_code ?? row.id,
       companyName: row.portfolio_company ?? "Unknown Portfolio Company",
-      fundName: row.fund_name ?? "VENTIQ Growth Fund II",
+      fundName: row.fund_name ?? activeFundName,
       investmentDate: row.investment_date ?? "",
       instrumentType: row.instrument_type ?? "Not provided",
       sector: row.sector ?? "Not provided",
@@ -490,7 +528,7 @@ export default function PortfolioDataMigrationPage() {
 
               <button
                 className="portfolio-primary-button"
-                onClick={downloadPortfolioTemplate}
+                onClick={() => downloadPortfolioTemplate(activeFundName)}
                 type="button"
               >
                 ↓ Download Portfolio Template

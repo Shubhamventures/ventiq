@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { useActiveFund } from "../../lib/useActiveFund";
 
 type DataRow = Record<string, unknown>;
 
@@ -79,6 +80,31 @@ function statusLabel(value: string) {
 }
 
 export default function PortfolioIntelligencePage() {
+  const {
+    activeFundName,
+    isReady: activeFundReady,
+  } = useActiveFund("");
+
+  return (
+    <PortfolioIntelligenceWorkspace
+      key={
+        activeFundReady && activeFundName
+          ? activeFundName
+          : "__fund_loading__"
+      }
+      activeFundName={activeFundName}
+      activeFundReady={activeFundReady}
+    />
+  );
+}
+
+function PortfolioIntelligenceWorkspace({
+  activeFundName,
+  activeFundReady,
+}: {
+  activeFundName: string;
+  activeFundReady: boolean;
+}) {
   const [funds, setFunds] = useState<DataRow[]>([]);
   const [companies, setCompanies] = useState<DataRow[]>([]);
   const [investments, setInvestments] = useState<DataRow[]>([]);
@@ -91,73 +117,201 @@ export default function PortfolioIntelligencePage() {
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
+    async function loadPortfolioIntelligence() {
+      if (!activeFundReady) {
+        return;
+      }
+
+      if (!activeFundName) {
+        setFunds([]);
+        setCompanies([]);
+        setInvestments([]);
+        setRepayments([]);
+        setCompanyMetrics([]);
+        setNewsAlerts([]);
+        setFundMetrics([]);
+        setErrorMessage(
+          "No governed active fund is available for this account."
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (!isSupabaseConfigured || !supabase) {
+        setFunds([]);
+        setCompanies([]);
+        setInvestments([]);
+        setRepayments([]);
+        setCompanyMetrics([]);
+        setNewsAlerts([]);
+        setFundMetrics([]);
+        setErrorMessage(
+          "The Portfolio Intelligence data connection is unavailable."
+        );
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setErrorMessage("");
+
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError || !session?.access_token) {
+        setErrorMessage(
+          sessionError?.message ||
+            "Please sign in before opening Portfolio Intelligence."
+        );
+        setLoading(false);
+        return;
+      }
+
+      const response = await fetch(
+        `/api/portfolio-intelligence/overview?fundName=${encodeURIComponent(
+          activeFundName
+        )}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          cache: "no-store",
+        }
+      );
+
+      const payload = (await response.json().catch(() => ({}))) as DataRow;
+
+      if (!response.ok) {
+        setErrorMessage(
+          getString(
+            payload,
+            ["error"],
+            "Unable to load Portfolio Intelligence."
+          )
+        );
+        setLoading(false);
+        return;
+      }
+
+      const selectedFund =
+        payload.selectedFund as DataRow | undefined;
+      const selectedFundId = getId(selectedFund);
+
+      if (!selectedFund || !selectedFundId) {
+        setErrorMessage(
+          `The governed fund record for ${activeFundName} has no usable fund ID.`
+        );
+        setLoading(false);
+        return;
+      }
+
+      const scopedInvestments =
+        (payload.scopedInvestments ?? []) as DataRow[];
+
+      const selectedInvestmentIds = Array.from(
+        new Set(scopedInvestments.map(getId).filter(Boolean))
+      );
+
+      const selectedCompanyIds = Array.from(
+        new Set(
+          scopedInvestments
+            .map((investment) =>
+              getString(
+                investment,
+                [
+                  "portfolio_company_id",
+                  "company_id",
+                  "investee_company_id",
+                ],
+                ""
+              )
+            )
+            .filter(Boolean)
+        )
+      );
+
+      const selectedInvestmentIdSet = new Set(selectedInvestmentIds);
+      const selectedCompanyIdSet = new Set(selectedCompanyIds);
+
+      const companyRows =
+        (payload.companies ?? []) as DataRow[];
+
+      const repaymentByInvestmentRows =
+        (payload.repaymentByInvestment ?? []) as DataRow[];
+
+      const repaymentByCompanyRows =
+        (payload.repaymentByCompany ?? []) as DataRow[];
+
+      const companyMetricRows =
+        (payload.companyMetrics ?? []) as DataRow[];
+
+      const newsAlertRows =
+        (payload.newsAlerts ?? []) as DataRow[];
+
+      const fundMetricRows =
+        (payload.fundMetrics ?? []) as DataRow[];
+
+      const scopedCompanies = companyRows.filter(
+        (company) => selectedCompanyIdSet.has(getId(company))
+      );
+
+      const repaymentMap = new Map<string, DataRow>();
+
+      for (const repayment of [
+        ...repaymentByInvestmentRows,
+        ...repaymentByCompanyRows,
+      ]) {
+        const investmentId = getString(
+          repayment,
+          ["fund_investment_id", "investment_id"],
+          ""
+        );
+
+        const companyId = getString(
+          repayment,
+          ["portfolio_company_id", "company_id"],
+          ""
+        );
+
+        if (
+          selectedInvestmentIdSet.has(investmentId) ||
+          selectedCompanyIdSet.has(companyId)
+        ) {
+          repaymentMap.set(getId(repayment), repayment);
+        }
+      }
+
+      const scopedCompanyMetrics = companyMetricRows.filter((metric) =>
+        selectedCompanyIdSet.has(
+          getString(metric, ["portfolio_company_id", "company_id"], "")
+        )
+      );
+
+      const scopedNewsAlerts = newsAlertRows.filter((alert) =>
+        selectedCompanyIdSet.has(
+          getString(alert, ["portfolio_company_id", "company_id"], "")
+        )
+      );
+
+      const scopedFundMetrics = fundMetricRows.filter(
+        (metric) => getString(metric, ["fund_id"], "") === selectedFundId
+      );
+
+      setFunds([selectedFund]);
+      setCompanies(scopedCompanies);
+      setInvestments(scopedInvestments);
+      setRepayments(Array.from(repaymentMap.values()));
+      setCompanyMetrics(scopedCompanyMetrics);
+      setNewsAlerts(scopedNewsAlerts);
+      setFundMetrics(scopedFundMetrics);
+      setLoading(false);
+    }
+
     loadPortfolioIntelligence();
-  }, []);
-
-  async function loadPortfolioIntelligence() {
-    if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage(
-  "The sample Portfolio Intelligence workspace is temporarily unavailable. Please request a walkthrough."
-);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setErrorMessage("");
-
-    const [
-      fundsResult,
-      companiesResult,
-      investmentsResult,
-      repaymentsResult,
-      companyMetricsResult,
-      newsAlertsResult,
-      fundMetricsResult,
-    ] = await Promise.all([
-      supabase.from("funds").select("*"),
-      supabase.from("portfolio_companies").select("*"),
-      supabase.from("fund_investments").select("*"),
-      supabase.from("debt_repayment_schedules").select("*").order("due_date"),
-      supabase
-        .from("portfolio_company_metrics")
-        .select("*")
-        .order("metric_date", { ascending: false }),
-      supabase
-        .from("portfolio_news_alerts")
-        .select("*")
-        .order("alert_date", { ascending: false }),
-      supabase
-        .from("fund_performance_metrics")
-        .select("*")
-        .order("reporting_date", { ascending: false }),
-    ]);
-
-    const firstError =
-      fundsResult.error ||
-      companiesResult.error ||
-      investmentsResult.error ||
-      repaymentsResult.error ||
-      companyMetricsResult.error ||
-      newsAlertsResult.error ||
-      fundMetricsResult.error;
-
-    if (firstError) {
-      setErrorMessage(firstError.message);
-      setLoading(false);
-      return;
-    }
-
-    setFunds((fundsResult.data ?? []) as DataRow[]);
-    setCompanies((companiesResult.data ?? []) as DataRow[]);
-    setInvestments((investmentsResult.data ?? []) as DataRow[]);
-    setRepayments((repaymentsResult.data ?? []) as DataRow[]);
-    setCompanyMetrics((companyMetricsResult.data ?? []) as DataRow[]);
-    setNewsAlerts((newsAlertsResult.data ?? []) as DataRow[]);
-    setFundMetrics((fundMetricsResult.data ?? []) as DataRow[]);
-
-    setLoading(false);
-  }
+  }, [activeFundName, activeFundReady]);
 
   const fundMap = useMemo(() => {
     return new Map(funds.map((fund) => [getId(fund), fund]));
@@ -270,21 +424,21 @@ export default function PortfolioIntelligencePage() {
           </a>
         </div>
 <div className="sample-data-ribbon">
-  Sample portfolio intelligence preview · Illustrative data
+  Controlled Preview - Governed Active Fund - Read-only intelligence
 </div>
         {loading && (
   <div className="preview-card">
-    <h2>Preparing Portfolio Intelligence Preview...</h2>
+    <h2>Loading Governed Portfolio Intelligence...</h2>
     <p>
-      VENTIQ is preparing the sample portfolio company, investment, repayment
-      and performance intelligence view.
+      VENTIQ is loading portfolio company, investment, repayment and
+      performance intelligence for {activeFundName || "the active fund"}.
     </p>
   </div>
 )}
 
         {!loading && errorMessage && (
           <div className="preview-card">
-            <h2>Connection Issue</h2>
+            <h2>Portfolio Intelligence Unavailable</h2>
             <div className="explain-box">{errorMessage}</div>
           </div>
         )}
@@ -298,7 +452,8 @@ export default function PortfolioIntelligencePage() {
                 VENTIQ is tracking {companies.length} portfolio companies,{" "}
                 {investments.length} fund investments,{" "}
                 {dashboardMetrics.upcomingRepayments} upcoming repayment events
-                and {dashboardMetrics.openAlerts} open portfolio alerts.
+                and {dashboardMetrics.openAlerts} open portfolio alerts for{" "}
+                {activeFundName}.
               </div>
             </div>
 
@@ -533,8 +688,20 @@ export default function PortfolioIntelligencePage() {
               )}
 
               <div className="action-row">
-                <button type="button">Generate Repayment Notice</button>
-                <button type="button">Send Reminder</button>
+                <button
+                  type="button"
+                  disabled
+                  title="Controlled Preview only"
+                >
+                  Generate Repayment Notice - Preview Only
+                </button>
+                <button
+                  type="button"
+                  disabled
+                  title="Controlled Preview only"
+                >
+                  Send Reminder - Preview Only
+                </button>
               </div>
             </div>
 

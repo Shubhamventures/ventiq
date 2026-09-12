@@ -1,63 +1,42 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
 
-const dashboards = [
-  {
-    code: "01",
-    title: "Managing Partner",
-    subtitle: "Executive command",
-    href: "/managing-partner-ai",
-    detail: "Performance, deployment, portfolio movement, risk and fund-level operating context.",
-  },
-  {
-    code: "02",
-    title: "Finance Head",
-    subtitle: "Finance operations",
-    href: "/finance-head-ai",
-    detail: "Capital activity, reconciliations, notices, documents and finance controls.",
-  },
-  {
-    code: "03",
-    title: "Investment Team",
-    subtitle: "Portfolio intelligence",
-    href: "/investment-team-ai",
-    detail: "Deal monitoring, valuation, portfolio company context and investment updates.",
-  },
-  {
-    code: "04",
-    title: "Compliance",
-    subtitle: "Governed control",
-    href: "/compliance-ai",
-    detail: "Filings, evidence, approvals, due dates, exceptions and regulatory control.",
-  },
-  {
-    code: "05",
-    title: "Investor Relations",
-    subtitle: "LP operations",
-    href: "/investor-portal",
-    detail: "Investor servicing, capital activity, statements, documents and reporting context.",
-  },
-  {
-    code: "06",
-    title: "Investor / LP",
-    subtitle: "Investor experience",
-    href: "/investor-portal",
-    detail: "Entitled financial position, cashflows, statements and private documents.",
-  },
-];
-
-const workflows = [
-  ["Fund Setup", "Create and maintain the governed fund context.", "/fund-onboarding"],
-  ["Data Intake", "Bring structured and historical fund data into VENTIQ.", "/migration/data-intake"],
-  ["Activation", "Review readiness, approvals and activation state.", "/migration/activation"],
-  ["Debt LMS", "Track borrower schedules, repayments, notices and controls.", "/debt-lms"],
-  ["Bank MIS", "Process bank activity, mappings and reconciliations.", "/bank-reconciliation"],
-  ["Document Studio", "Generate and govern fund and investor documents.", "/document-studio"],
-  ["Data Room & DDQ", "Manage investor diligence documents and controlled access.", "/data-room"],
-];
+import { useVentiqAuth } from "../../lib/auth/AuthProvider";
+import {
+  WORKSPACE_REGISTRY,
+  canRoleUseWorkspace,
+} from "../../lib/auth/workspaceRegistry";
 
 export default function LaunchCenterPage() {
+  const { activeRole, activeFundName } = useVentiqAuth();
+
+  const dashboards = useMemo(
+    () =>
+      WORKSPACE_REGISTRY.filter(
+        (workspace) =>
+          workspace.group === "Dashboards" &&
+          workspace.showInLaunchCenter &&
+          Boolean(activeFundName) &&
+          canRoleUseWorkspace(activeRole, workspace)
+      ),
+    [activeFundName, activeRole]
+  );
+
+  const workflows = useMemo(
+    () =>
+      WORKSPACE_REGISTRY.filter(
+        (workspace) =>
+          workspace.group !== "Dashboards" &&
+          workspace.showInLaunchCenter &&
+          (Boolean(activeFundName) ||
+            workspace.href === "/fund-onboarding") &&
+          canRoleUseWorkspace(activeRole, workspace)
+      ),
+    [activeFundName, activeRole]
+  );
+
   return (
     <main className="launch-page">
       <section className="launch-shell">
@@ -66,8 +45,9 @@ export default function LaunchCenterPage() {
             <p className="eyebrow">VENTIQ LAUNCH CENTER</p>
             <h1>Open the workspace you need.</h1>
             <p>
-              One governed fund context, six role-native views and the core
-              operating workflows behind them.
+              {activeFundName
+                ? `Working in ${activeFundName}. Open the role-native view or workflow you need.`
+                : "No active fund is assigned yet. Start in Setup Control Center to create or select the governed fund."}
             </p>
           </div>
 
@@ -86,14 +66,18 @@ export default function LaunchCenterPage() {
           </div>
 
           <div className="dashboard-grid">
-            {dashboards.map((item) => (
-              <Link className="dashboard-card" href={item.href} key={`${item.code}-${item.title}`}>
+            {dashboards.map((item, index) => (
+              <Link
+                className="dashboard-card"
+                href={item.href}
+                key={item.key}
+              >
                 <div className="card-meta">
-                  <span>{item.code}</span>
+                  <span>{String(index + 1).padStart(2, "0")}</span>
                   <small>{item.subtitle}</small>
                 </div>
-                <h3>{item.title}</h3>
-                <p>{item.detail}</p>
+                <h3>{item.label}</h3>
+                <p>{item.description}</p>
                 <strong>Open workspace →</strong>
               </Link>
             ))}
@@ -109,11 +93,11 @@ export default function LaunchCenterPage() {
           </div>
 
           <div className="workflow-grid">
-            {workflows.map(([label, detail, href]) => (
-              <Link href={href} key={href}>
+            {workflows.map((item) => (
+              <Link href={item.href} key={item.key}>
                 <div>
-                  <strong>{label}</strong>
-                  <span>{detail}</span>
+                  <strong>{item.label}</strong>
+                  <span>{item.description}</span>
                 </div>
                 <b>→</b>
               </Link>

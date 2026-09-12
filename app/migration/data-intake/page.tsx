@@ -1375,6 +1375,7 @@ export default function DataIntakeCommandCenterPage() {
   const { session } = useVentiqAuth();
   const {
     activeFundName,
+    availableFundNames,
     setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund("VENTIQ Growth Fund II");
@@ -1465,10 +1466,8 @@ export default function DataIntakeCommandCenterPage() {
         );
 
         if (!currentFundIsAllowed) {
-          const nextFund = funds[0].fund_name;
-          setActiveFundName(nextFund);
           setFundAccessMessage(
-            `Data Intake moved to your first authorised fund: ${nextFund}.`
+            "Data Intake could not confirm access metadata for the globally selected fund. Refresh access or choose another authorised fund from the global selector."
           );
         }
 
@@ -2071,16 +2070,16 @@ export default function DataIntakeCommandCenterPage() {
           </label>
           <select
             id="migration-intake-active-fund"
-            value={activeFundAccess ? activeFundName : ""}
+            value={activeFundName}
             onChange={(event) => setActiveFundName(event.target.value)}
-            disabled={!fundAccessReady || authorisedFunds.length === 0}
+            disabled={!fundAccessReady || availableFundNames.length === 0}
           >
-            {authorisedFunds.length === 0 ? (
+            {availableFundNames.length === 0 ? (
               <option value="">No authorised funds available</option>
             ) : (
-              authorisedFunds.map((fund) => (
-                <option key={fund.fund_name} value={fund.fund_name}>
-                  {fund.fund_name}
+              availableFundNames.map((fundName) => (
+                <option key={fundName} value={fundName}>
+                  {fundName}
                 </option>
               ))
             )}
@@ -2489,9 +2488,17 @@ export default function DataIntakeCommandCenterPage() {
                 for the selected governed fund. Nothing is auto-resolved here.
               </p>
             </div>
-            <span className="status-pill">
-              {validationIssueSummary.total} Open
-            </span>
+            <div>
+              <span className="status-pill">
+                {validationIssueSummary.total} Open
+              </span>
+              <Link
+                className="monitor-btn monitor-btn-secondary"
+                href="/issues"
+              >
+                Open Issue Center
+              </Link>
+            </div>
           </div>
 
           <div className="queue-grid">

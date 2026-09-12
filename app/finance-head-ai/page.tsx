@@ -17,6 +17,26 @@ type PerformanceCalculationResponse = {
   error?: string;
 };
 
+type FinanceHeadOverviewResponse = {
+  capitalCallsData?: DataRow[];
+  distributionsData?: DataRow[];
+  documentsData?: DataRow[];
+  matchesData?: DataRow[];
+  circularsData?: DataRow[];
+  migratedInvestorMasterData?: DataRow[];
+  migratedFundCommitmentsData?: DataRow[];
+  migratedFinancialPositionsData?: DataRow[];
+  migratedInvestorCashflowsData?: DataRow[];
+  migratedFundMasterData?: DataRow[];
+  migratedPortfolioInvestmentsData?: DataRow[];
+  migratedDebtRepaymentSchedulesData?: DataRow[];
+  migratedComplianceItemsData?: DataRow[];
+  migratedPdfDocumentsData?: DataRow[];
+  allocationBatchRows?: DataRow[];
+  activationRecord?: DataRow | null;
+  error?: string;
+};
+
 type FinanceActivityEvent = {
   id: string;
   time: string;
@@ -240,27 +260,15 @@ function batchIdentity(rows: DataRow[], fallback: string) {
   return getString(latestRow ?? undefined, ["batch_id", "id"], fallback);
 }
 
-function uniqueFundNames(rowGroups: DataRow[][]) {
-  return Array.from(
-    new Set(
-      rowGroups
-        .flat()
-        .map(getFundName)
-        .filter(Boolean)
-    )
-  ).sort((left, right) => left.localeCompare(right));
-}
 
 export default function FinanceHeadAIPage() {
   const {
     activeFundName,
+    availableFundNames,
     setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund("VENTIQ Growth Fund II");
   const { session } = useVentiqAuth();
-  const [availableFunds, setAvailableFunds] = useState<string[]>([
-    "VENTIQ Growth Fund II",
-  ]);
   const [fundActivationStatus, setFundActivationStatus] = useState("Checking");
   const [fundActivatedAt, setFundActivatedAt] = useState("");
   const [fundActivatedBy, setFundActivatedBy] = useState("");
@@ -328,7 +336,7 @@ const [
     async function loadFinanceHeadWorkspace() {
       if (!isSupabaseConfigured || !supabase) {
         setErrorMessage(
-          "The sample Finance Head workspace is temporarily unavailable. Please request a walkthrough."
+          "The Finance Head workspace is unavailable because Supabase is not configured."
         );
         setLoading(false);
         return;
@@ -402,8 +410,6 @@ const [
         performanceCalculationData?.reconciliations ?? []
       );
 
-      const db = supabase as any;
-
       function rowsForCalculationBatch(rows: DataRow[]) {
         if (!calculationSourceBatch) return [] as DataRow[];
 
@@ -414,75 +420,64 @@ const [
         );
       }
 
-      async function selectRows(
-        tableName: string,
-        options?: {
-          orderBy?: string;
-          ascending?: boolean;
-          eq?: {
-            column: string;
-            value: string;
-          };
-        }
-      ) {
-        try {
-          let query = db.from(tableName).select("*");
+      async function loadFinanceHeadOverview(): Promise<
+        Required<Omit<FinanceHeadOverviewResponse, "error">>
+      > {
+        const accessToken = session?.access_token ?? "";
 
-          if (options?.eq) {
-            query = query.eq(options.eq.column, options.eq.value);
-          }
-
-          if (options?.orderBy) {
-            query = query.order(options.orderBy, {
-              ascending: options.ascending ?? false,
-            });
-          }
-
-          const { data, error } = await query;
-
-          if (error) {
-            console.warn(
-              `VENTIQ finance dashboard skipped ${tableName}:`,
-              error.message
-            );
-            return [] as DataRow[];
-          }
-
-          return (data ?? []) as DataRow[];
-        } catch (error) {
-          console.warn(`VENTIQ finance dashboard skipped ${tableName}:`, error);
-          return [] as DataRow[];
-        }
-      }
-
-      async function loadActivationRecord() {
-        try {
-          const { data, error } = await db
-            .from("fund_activation_status")
-            .select("status, activated_at, activated_by, readiness_score")
-            .eq("fund_name", activeFundName)
-            .maybeSingle();
-
-          if (error) {
-            console.warn(
-              "VENTIQ finance dashboard could not read fund activation:",
-              error.message
-            );
-            return null;
-          }
-
-          return (data as DataRow | null) ?? null;
-        } catch (error) {
-          console.warn(
-            "VENTIQ finance dashboard could not read fund activation:",
-            error
+        if (!accessToken) {
+          throw new Error(
+            "Please sign in before opening the Finance Head workspace."
           );
-          return null;
         }
+
+        const response = await fetch(
+          `/api/finance-head/overview?fundName=${encodeURIComponent(activeFundName)}`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            cache: "no-store",
+          }
+        );
+        const result = (await response.json()) as FinanceHeadOverviewResponse;
+
+        if (!response.ok) {
+          throw new Error(
+            result.error || "Unable to load Finance Head workspace."
+          );
+        }
+
+        return {
+          capitalCallsData: result.capitalCallsData ?? [],
+          distributionsData: result.distributionsData ?? [],
+          documentsData: result.documentsData ?? [],
+          matchesData: result.matchesData ?? [],
+          circularsData: result.circularsData ?? [],
+          migratedInvestorMasterData: result.migratedInvestorMasterData ?? [],
+          migratedFundCommitmentsData: result.migratedFundCommitmentsData ?? [],
+          migratedFinancialPositionsData:
+            result.migratedFinancialPositionsData ?? [],
+          migratedInvestorCashflowsData:
+            result.migratedInvestorCashflowsData ?? [],
+          migratedFundMasterData: result.migratedFundMasterData ?? [],
+          migratedPortfolioInvestmentsData:
+            result.migratedPortfolioInvestmentsData ?? [],
+          migratedDebtRepaymentSchedulesData:
+            result.migratedDebtRepaymentSchedulesData ?? [],
+          migratedComplianceItemsData:
+            result.migratedComplianceItemsData ?? [],
+          migratedPdfDocumentsData: result.migratedPdfDocumentsData ?? [],
+          allocationBatchRows: result.allocationBatchRows ?? [],
+          activationRecord: result.activationRecord ?? null,
+        };
       }
 
       try {
-        const [
+        const overviewData = await loadFinanceHeadOverview();
+
+        const {
           capitalCallsData,
           distributionsData,
           documentsData,
@@ -499,77 +494,7 @@ const [
           migratedPdfDocumentsData,
           allocationBatchRows,
           activationRecord,
-        ] = await Promise.all([
-          selectRows("capital_calls", {
-            orderBy: "created_at",
-            ascending: false,
-          }),
-          selectRows("distributions", {
-            orderBy: "created_at",
-            ascending: false,
-          }),
-          selectRows("investor_documents"),
-          selectRows("regulatory_source_matches", {
-            eq: {
-              column: "status",
-              value: "needs_review",
-            },
-          }),
-          selectRows("regulatory_circulars", {
-            eq: {
-              column: "status",
-              value: "active",
-            },
-          }),
-          selectRows("investor_master", {
-            orderBy: "investor_code",
-            ascending: true,
-          }),
-          selectRows("fund_commitments"),
-          selectRows("investor_financial_positions"),
-          selectRows("investor_cashflows", {
-            orderBy: "cashflow_date",
-            ascending: false,
-          }),
-          selectRows("fund_master"),
-          selectRows("portfolio_investments"),
-          selectRows("debt_repayment_schedules", {
-            orderBy: "due_date",
-            ascending: true,
-          }),
-          selectRows("compliance_items"),
-          selectRows("pdf_intelligence_documents"),
-          selectRows("capital_call_allocation_batches", {
-            orderBy: "created_at",
-            ascending: false,
-          }),
-          loadActivationRecord(),
-        ]);
-
-        const fundOptions = uniqueFundNames([
-          migratedFundMasterData,
-          migratedInvestorMasterData,
-          migratedFundCommitmentsData,
-          migratedFinancialPositionsData,
-          migratedPortfolioInvestmentsData,
-          migratedDebtRepaymentSchedulesData,
-          migratedComplianceItemsData,
-          migratedPdfDocumentsData,
-          capitalCallsData,
-          distributionsData,
-          documentsData,
-        ]);
-
-        const nextFundOptions = fundOptions.length
-          ? fundOptions
-          : [activeFundName];
-
-        setAvailableFunds(nextFundOptions);
-
-        if (!nextFundOptions.includes(activeFundName)) {
-          setActiveFundName(nextFundOptions[0]);
-          return;
-        }
+        } = overviewData;
 
         const scopedCapitalCalls = filterRowsForFund(
           rowsForCalculationBatch(capitalCallsData),
@@ -1818,7 +1743,7 @@ const [
                 </span>
                 <select
                   aria-label="Select active fund"
-                  disabled={!fundContextReady || loading}
+                  disabled={!fundContextReady || loading || availableFundNames.length === 0}
                   onChange={(event) => setActiveFundName(event.target.value)}
                   style={{
                     background: "#0f172a",
@@ -1830,7 +1755,7 @@ const [
                   }}
                   value={activeFundName}
                 >
-                  {availableFunds.map((fundName) => (
+                  {availableFundNames.map((fundName) => (
                     <option key={fundName} value={fundName}>
                       {fundName}
                     </option>

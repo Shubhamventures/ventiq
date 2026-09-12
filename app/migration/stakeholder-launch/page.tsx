@@ -45,6 +45,11 @@ type LaunchSnapshot = {
     activated_by: string;
     is_active: boolean;
     using_frozen_batch_map: boolean;
+    calculation_run_id?: string;
+    calculation_ready?: boolean;
+    calculation_as_of_date?: string;
+    reconciliation_controls?: number;
+    reconciliation_passed?: number;
   };
   layers?: ApiLayer[];
   summary?: {
@@ -125,6 +130,8 @@ function humanizeBlocker(code: string) {
     COMPLIANCE_REVIEW_REQUIRED: "compliance review required",
     COMPLIANCE_HIGH_RISK_OPEN: "high-risk compliance items open",
     COMPLIANCE_EVIDENCE_MISSING: "compliance evidence missing",
+    CALCULATION_RECONCILIATION_REQUIRED:
+      "canonical calculation reconciliation required",
   };
 
   return labels[code] ?? code.toLowerCase().replaceAll("_", " ");
@@ -306,6 +313,7 @@ export default function StakeholderLaunchCenterPage() {
   const { session } = useVentiqAuth();
   const {
     activeFundName,
+    availableFundNames,
     setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund(DEFAULT_FUND_NAME);
@@ -380,10 +388,8 @@ export default function StakeholderLaunchCenterPage() {
         );
 
         if (!currentFundIsAllowed) {
-          const nextFund = funds[0].fund_name;
-          setActiveFundName(nextFund);
           setFundAccessMessage(
-            `Stakeholder Launch moved to your first authorised fund: ${nextFund}.`
+            "Stakeholder Launch could not confirm access metadata for the globally selected fund. Refresh access or choose another authorised fund from the global selector."
           );
         }
 
@@ -458,9 +464,12 @@ export default function StakeholderLaunchCenterPage() {
 
       setSnapshot(result);
       setMessage(
-        result.activation?.is_active
+        result.summary?.launch_gate_open
           ? `Governed launch state loaded for ${activeFundName}.`
-          : `${activeFundName} is not activated. Stakeholder launch remains locked.`
+          : result.activation?.is_active &&
+              !result.activation?.calculation_ready
+            ? `${activeFundName} is activated, but canonical calculation reconciliation is not fully Pass. Stakeholder launch remains locked.`
+            : `${activeFundName} is not activated. Stakeholder launch remains locked.`
       );
     } catch (error) {
       setSnapshot(null);
@@ -550,16 +559,16 @@ export default function StakeholderLaunchCenterPage() {
           </label>
           <select
             id="stakeholder-launch-active-fund"
-            value={activeFundAccess ? activeFundName : ""}
+            value={activeFundName}
             onChange={(event) => setActiveFundName(event.target.value)}
-            disabled={!fundAccessReady || authorisedFunds.length === 0}
+            disabled={!fundAccessReady || availableFundNames.length === 0}
           >
-            {authorisedFunds.length === 0 ? (
+            {availableFundNames.length === 0 ? (
               <option value="">No authorised funds available</option>
             ) : (
-              authorisedFunds.map((fund) => (
-                <option key={fund.fund_name} value={fund.fund_name}>
-                  {fund.fund_name}
+              availableFundNames.map((fundName) => (
+                <option key={fundName} value={fundName}>
+                  {fundName}
                 </option>
               ))
             )}
@@ -607,6 +616,13 @@ export default function StakeholderLaunchCenterPage() {
               >
                 Back to Data Intake
               </Link>
+
+              <Link
+                className="activation-secondary-button"
+                href="/issues"
+              >
+                Issue Center
+              </Link>
             </div>
           </div>
 
@@ -653,6 +669,16 @@ export default function StakeholderLaunchCenterPage() {
             <span>◎</span>
             <p>Fund activation</p>
             <h3>{activation?.is_active ? "Active" : "Locked"}</h3>
+          </div>
+          <div className="activation-kpi-card">
+            <span>Σ</span>
+            <p>Calculation reconciliation</p>
+            <h3>{activation?.calculation_ready ? "Pass" : "Locked"}</h3>
+            <small>
+              {activation?.calculation_ready
+                ? `${activation.reconciliation_passed ?? 0}/${activation.reconciliation_controls ?? 0} controls`
+                : "Completed calculation with all controls Pass required"}
+            </small>
           </div>
         </div>
 
@@ -759,7 +785,7 @@ export default function StakeholderLaunchCenterPage() {
               ) : (
                 <Link
                   className="activation-card-link"
-                  href="/migration/activation"
+                  href="/issues"
                 >
                   Resolve launch blockers →
                 </Link>

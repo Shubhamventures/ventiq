@@ -3,7 +3,7 @@
 // A7.7-7B2: current-baseline governed Fund → Investor → FY → Quarter → Nature archive.
 
 import { useEffect, useMemo, useState } from "react";
-import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { isSupabaseConfigured } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
 import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 import type { GovernedDocumentHierarchy } from "../../lib/documentHierarchy";
@@ -247,6 +247,18 @@ type PerformanceCalculationResponse = {
   reconciliations?: DataRow[];
   portfolioValuations?: DataRow[];
   error?: string;
+};
+
+type InvestorPortalOverviewResponse = {
+  investorEntitlements?: DataRow[];
+  investorRows?: DataRow[];
+  commitmentRows?: DataRow[];
+  activation?: DataRow | null;
+  moduleActivation?: DataRow | null;
+  uploadRows?: DataRow[];
+  complianceRows?: DataRow[];
+  error?: string;
+  code?: string;
 };
 
 type FinancialVerification = {
@@ -697,37 +709,19 @@ function documentMatchesExpectedType(
 export default function InvestorPortalPage() {
   const {
     activeFundName,
+    availableFundNames,
     setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund("VENTIQ Growth Fund II");
   const {
     session,
     activeRole,
-    fundAccess,
     investorId,
     loading: authLoading,
   } = useVentiqAuth();
   const isInvestorRole = activeRole === "investor";
 
-  const investorAllowedFunds = useMemo(() => {
-    if (!isInvestorRole) return [];
-
-    return Array.from(
-      new Set(
-        fundAccess
-          .filter(
-            (access) =>
-              access.status === "Active" &&
-              Boolean(access.can_view) &&
-              Boolean(access.fund_name?.trim())
-          )
-          .map((access) => access.fund_name.trim())
-      )
-    ).sort();
-  }, [fundAccess, isInvestorRole]);
-  const [availableFunds, setAvailableFunds] = useState<string[]>([
-    "VENTIQ Growth Fund II",
-  ]);
+  const investorAllowedFunds = isInvestorRole ? availableFundNames : [];
   const [fundActivationStatus, setFundActivationStatus] =
     useState("Setup Not Started");
   const [fundActivatedAt, setFundActivatedAt] = useState("");
@@ -741,6 +735,9 @@ export default function InvestorPortalPage() {
   const [investors, setInvestors] = useState<Investor[]>([]);
   const [selectedInvestorId, setSelectedInvestorId] = useState("");
   const [commitments, setCommitments] = useState<Commitment[]>([]);
+  const [overviewCommitmentRows, setOverviewCommitmentRows] = useState<
+    DataRow[]
+  >([]);
   const [documents, setDocuments] = useState<InvestorDocument[]>([]);
   const [investorEntitlements, setInvestorEntitlements] = useState<DataRow[]>([]);
   const [financialPosition, setFinancialPosition] =
@@ -794,33 +791,6 @@ export default function InvestorPortalPage() {
   const [documentAccessMessage, setDocumentAccessMessage] = useState("");
   const [documentListMessage, setDocumentListMessage] = useState("");
   const [documentDownloadAllowed, setDocumentDownloadAllowed] = useState(true);
-
-  useEffect(() => {
-    if (!fundContextReady || authLoading || !isInvestorRole) return;
-
-    if (investorAllowedFunds.length === 0) {
-      setAvailableFunds([]);
-      return;
-    }
-
-    setAvailableFunds(investorAllowedFunds);
-
-    const hasCurrentFundAccess = investorAllowedFunds.some(
-      (fundName) =>
-        fundName.trim().toLowerCase() === activeFundName.trim().toLowerCase()
-    );
-
-    if (!hasCurrentFundAccess) {
-      setActiveFundName(investorAllowedFunds[0]);
-    }
-  }, [
-    activeFundName,
-    authLoading,
-    fundContextReady,
-    investorAllowedFunds,
-    isInvestorRole,
-    setActiveFundName,
-  ]);
 
   async function accessInvestorDocument(
     documentRecord: InvestorDocument,
@@ -937,10 +907,14 @@ export default function InvestorPortalPage() {
             fundName.trim().toLowerCase() === activeFundName.trim().toLowerCase()
         )
       ) {
+        setErrorMessage(
+          "The globally selected fund is not available to this investor account. Choose an authorised fund from the VENTIQ fund selector."
+        );
+        setLoading(false);
         return;
       }
 
-      if (!isSupabaseConfigured || !supabase) {
+      if (!isSupabaseConfigured) {
         setErrorMessage(
           "The Investor Portal is unavailable because Supabase is not configured."
         );
@@ -1030,114 +1004,87 @@ export default function InvestorPortalPage() {
           setCalculationLoadMessage("");
         }
 
-        const db = supabase as any;
+        const overviewParams = new URLSearchParams({
+          fundName: activeFundName,
+        });
 
-        let activeInvestorEntitlements: DataRow[] = [];
-
-        if (isInvestorRole) {
-          const entitlementResult = await db
-            .from("ventiq_user_investor_access")
-            .select(
-              "investor_code,fund_name,status,expires_at,can_view_profile,can_view_financials,can_view_documents,can_download_documents,can_use_data_room,can_submit_questions"
-            )
-            .eq("status", "Active")
-            .eq("fund_name", activeFundName);
-
-          if (entitlementResult.error) {
-            throw new Error(
-              `Unable to resolve your investor entitlement: ${entitlementResult.error.message}`
-            );
-          }
-
-          const now = Date.now();
-          activeInvestorEntitlements = (
-            (entitlementResult.data ?? []) as DataRow[]
-          ).filter((row) => {
-            const expiresAt = getString(row, ["expires_at"], "");
-            if (!expiresAt) return true;
-            const expiry = Date.parse(expiresAt);
-            return Number.isFinite(expiry) && expiry > now;
-          });
-
-          setInvestorEntitlements(activeInvestorEntitlements);
-
-          if (activeInvestorEntitlements.length === 0) {
-            throw new Error(
-              `Your investor account has no active entitlement for ${activeFundName}.`
-            );
-          }
-        } else {
-          setInvestorEntitlements([]);
+        if (!isInvestorRole && authoritativeBatch) {
+          overviewParams.set("sourceBatchId", authoritativeBatch);
         }
 
-        let investorsQuery = db
-          .from("investor_master")
-          .select("*")
-          .eq("fund_name", activeFundName)
-          .order("investor_code", { ascending: true });
+        const overviewResponse = await fetch(
+          `/api/investor-portal/overview?${overviewParams.toString()}`,
+          {
+            method: "GET",
+            headers: { Authorization: `Bearer ${accessToken}` },
+            cache: "no-store",
+          }
+        );
 
-        let commitmentsQuery = db
-          .from("fund_commitments")
-          .select("*")
-          .eq("fund_name", activeFundName);
+        const overviewData =
+          (await overviewResponse.json()) as InvestorPortalOverviewResponse;
 
-        let uploadsQuery = db.from("migration_file_uploads").select("*");
-
-        let complianceQuery = db
-          .from("compliance_items")
-          .select("*")
-          .eq("fund_name", activeFundName);
-
-        if (authoritativeBatch) {
-          investorsQuery = investorsQuery.eq("source_batch_id", authoritativeBatch);
-          commitmentsQuery = commitmentsQuery.eq(
-            "source_batch_id",
-            authoritativeBatch
+        if (!overviewResponse.ok) {
+          throw new Error(
+            overviewData.error ||
+              "Unable to load the verified Investor Portal."
           );
-          uploadsQuery = uploadsQuery.eq("batch_id", authoritativeBatch);
-          complianceQuery = complianceQuery.eq(
-            "source_batch_id",
-            authoritativeBatch
-          );
-        } else {
-          // Without a verified Calculation Engine batch we still load the
-          // governed investor master so canonical documents can be matched.
-          // Batch-scoped operating records remain unavailable rather than being
-          // mixed across historical migration batches.
-          const impossibleBatch = "__VENTIQ_NO_VERIFIED_SOURCE_BATCH__";
-          commitmentsQuery = commitmentsQuery.eq("source_batch_id", impossibleBatch);
-          uploadsQuery = uploadsQuery.eq("batch_id", impossibleBatch);
-          complianceQuery = complianceQuery.eq("source_batch_id", impossibleBatch);
         }
 
-        const [
-          investorsResult,
-          commitmentsResult,
-          fundOptionsResult,
-          activationResult,
-          moduleActivationResult,
-          uploadsResult,
-          complianceResult,
-        ] = await Promise.all([
-          investorsQuery,
-          commitmentsQuery,
-          db.from("fund_master").select("fund_name").not("fund_name", "is", null),
-          db
-            .from("fund_activation_status")
-            .select("status, activated_at, activated_by, readiness_score")
-            .eq("fund_name", activeFundName)
-            .maybeSingle(),
-          db
-            .from("ventiq_module_activation_status")
-            .select(
-              "status, activated_at, activated_by_name, module_key, readiness_score"
-            )
-            .eq("fund_name", activeFundName)
-            .eq("module_key", "investor_documents_portal")
-            .maybeSingle(),
-          uploadsQuery,
-          complianceQuery,
-        ]);
+        const activeInvestorEntitlements =
+          overviewData.investorEntitlements ?? [];
+
+        setInvestorEntitlements(
+          isInvestorRole ? activeInvestorEntitlements : []
+        );
+
+        const investorsResult: {
+          data: DataRow[];
+          error: { message: string } | null;
+        } = {
+          data: overviewData.investorRows ?? [],
+          error: null,
+        };
+
+        const commitmentsResult: {
+          data: DataRow[];
+          error: { message: string } | null;
+        } = {
+          data: overviewData.commitmentRows ?? [],
+          error: null,
+        };
+
+        const activationResult: {
+          data: DataRow | null;
+          error: { message: string } | null;
+        } = {
+          data: overviewData.activation ?? null,
+          error: null,
+        };
+
+        const moduleActivationResult: {
+          data: DataRow | null;
+          error: { message: string } | null;
+        } = {
+          data: overviewData.moduleActivation ?? null,
+          error: null,
+        };
+
+        const uploadsResult: {
+          data: DataRow[];
+          error: { message: string } | null;
+        } = {
+          data: overviewData.uploadRows ?? [],
+          error: null,
+        };
+
+        const complianceResult: {
+          data: DataRow[];
+          error: { message: string } | null;
+        } = {
+          data: overviewData.complianceRows ?? [],
+          error: null,
+        };
 
         if (investorsResult.error) {
           throw new Error(investorsResult.error.message);
@@ -1147,6 +1094,8 @@ export default function InvestorPortalPage() {
         }
 
         const commitmentRows = (commitmentsResult.data ?? []) as DataRow[];
+        setOverviewCommitmentRows(commitmentRows);
+
         const activeInvestorIds = new Set(
           commitmentRows
             .map((row) => getString(row, ["investor_id"], ""))
@@ -1209,20 +1158,6 @@ export default function InvestorPortalPage() {
         }
 
         setInvestors(investorData);
-
-        if (!isInvestorRole && !fundOptionsResult.error) {
-          const fundNames = Array.from(
-            new Set<string>(
-              ((fundOptionsResult.data ?? []) as DataRow[])
-                .map((row) => getString(row, ["fund_name"], ""))
-                .filter(Boolean)
-            )
-          ).sort();
-
-          setAvailableFunds(
-            Array.from(new Set([activeFundName, ...fundNames])).filter(Boolean)
-          );
-        }
 
         if (!activationResult.error && activationResult.data) {
           setFundActivationStatus(
@@ -1357,6 +1292,7 @@ export default function InvestorPortalPage() {
         setCalculatedInvestorMetrics([]);
         setCalculationReconciliations([]);
         setSourceBatch("");
+        setOverviewCommitmentRows([]);
       } finally {
         setLoading(false);
       }
@@ -1375,7 +1311,7 @@ export default function InvestorPortalPage() {
 
   useEffect(() => {
     async function loadInvestorPortalData() {
-      if (!selectedInvestorId || !supabase) return;
+      if (!selectedInvestorId) return;
 
       const selectedInvestor = investors.find(
         (investor) => investor.id === selectedInvestorId
@@ -1386,40 +1322,18 @@ export default function InvestorPortalPage() {
       setErrorMessage("");
 
       try {
-        const db = supabase as any;
-
-        let commitmentQuery = db
-          .from("fund_commitments")
-          .select("*")
-          .eq("fund_name", activeFundName);
-
-        // Commitments remain tied to the verified calculation source batch.
-        // Capital calls, receipts and distributions are loaded separately through
-        // the entitlement-scoped server API below. Published canonical Document
-        // Studio documents carry their own immutable Fund Memory lineage.
-        if (sourceBatch) {
-          commitmentQuery = commitmentQuery.eq("source_batch_id", sourceBatch);
-        } else {
-          const impossibleSourceBatch = "__VENTIQ_NO_VERIFIED_SOURCE_BATCH__";
-          commitmentQuery = commitmentQuery.eq(
-            "source_batch_id",
-            impossibleSourceBatch
+        // Reuse the same governed fund/source-batch commitment corpus already
+        // returned by the dedicated overview route. This removes the duplicate
+        // browser fund_commitments read without changing commitment normalization.
+        const commitmentRows = overviewCommitmentRows.filter((row) => {
+          const rowInvestorId = getString(row, ["investor_id"], "");
+          const rowInvestorCode = getString(row, ["investor_code"], "");
+          return (
+            rowInvestorId === selectedInvestorId ||
+            (selectedInvestor.investor_code &&
+              rowInvestorCode === selectedInvestor.investor_code)
           );
-        }
-
-        const commitmentResult = await commitmentQuery;
-
-        const commitmentRows = commitmentResult.error
-          ? []
-          : ((commitmentResult.data ?? []) as DataRow[]).filter((row) => {
-              const rowInvestorId = getString(row, ["investor_id"], "");
-              const rowInvestorCode = getString(row, ["investor_code"], "");
-              return (
-                rowInvestorId === selectedInvestorId ||
-                (selectedInvestor.investor_code &&
-                  rowInvestorCode === selectedInvestor.investor_code)
-              );
-            });
+        });
 
         const normalizedCommitments: Commitment[] = commitmentRows.map((row) => {
           const commitmentAmount = getNumber(row, [
@@ -1762,7 +1676,7 @@ export default function InvestorPortalPage() {
     selectedInvestorId,
     activeFundName,
     investors,
-    sourceBatch,
+    overviewCommitmentRows,
     isInvestorRole,
     session?.access_token,
   ]);
@@ -2324,7 +2238,7 @@ const displayedManagementFee = financialPosition
                 gap: 10,
               }}
             >
-              {(!isInvestorRole || availableFunds.length > 1) && (
+              {(!isInvestorRole || availableFundNames.length > 1) && (
                 <label style={{ display: "grid", gap: 6, minWidth: 270 }}>
                   <span style={{ fontSize: 12, fontWeight: 800 }}>
                     {isInvestorRole ? "My fund" : "Switch active fund"}
@@ -2343,7 +2257,7 @@ const displayedManagementFee = financialPosition
                     }}
                     value={activeFundName}
                   >
-                    {availableFunds.map((fundName) => (
+                    {availableFundNames.map((fundName) => (
                       <option key={fundName} value={fundName}>
                         {fundName}
                       </option>
@@ -2352,14 +2266,6 @@ const displayedManagementFee = financialPosition
                 </label>
               )}
 
-              {!isInvestorRole && (
-                <a
-                  className="monitor-btn monitor-btn-secondary"
-                  href="/migration/activation"
-                >
-                  Open Fund Activation
-                </a>
-              )}
             </div>
           </div>
         </div>
@@ -2417,18 +2323,6 @@ const displayedManagementFee = financialPosition
               </div>
               {!isInvestorRole && (
                 <div className="action-row">
-                  <a
-                    className="monitor-btn monitor-btn-primary"
-                    href="/document-studio"
-                  >
-                    Open Document Studio
-                  </a>
-                  <a
-                    className="monitor-btn monitor-btn-secondary"
-                    href="/migration/activation"
-                  >
-                    Full Fund Activation
-                  </a>
                 </div>
               )}
             </div>
@@ -2573,14 +2467,6 @@ const displayedManagementFee = financialPosition
                   Open Data Room
                 </a>
 
-                {!isInvestorRole && (
-                  <a
-                    className="monitor-btn monitor-btn-secondary"
-                    href="/fundraising-ai"
-                  >
-                    Open IR Workspace
-                  </a>
-                )}
               </div>
             </div>
 
@@ -2604,7 +2490,7 @@ const displayedManagementFee = financialPosition
 
                   <div className="impact-card">
                     <h3>{formatCr(portalMetrics.displayedCalled)}</h3>
-                    <p>Capital called</p>
+                    <p>Lifetime paid-in capital</p>
                   </div>
 
                   <div className="impact-card">
@@ -2713,7 +2599,7 @@ const displayedManagementFee = financialPosition
                         <br />
                         Commitment: {formatCr(toCr(financialPosition.commitment_amount))}
                         <br />
-                        Called: {formatCr(toCr(financialPosition.capital_called_till_date))}
+                        Lifetime paid-in: {formatCr(toCr(financialPosition.capital_called_till_date))}
                         <br />
                         Remaining: {formatCr(toCr(financialPosition.uncalled_capital))}
                         <br />
@@ -2738,7 +2624,7 @@ const displayedManagementFee = financialPosition
                           <br />
                           Commitment: {formatCr(toCr(commitment.commitment_amount))}
                           <br />
-                          Called: {formatCr(toCr(commitment.called_amount))}
+                          Cumulative called: {formatCr(toCr(commitment.called_amount))}
                           <br />
                           Remaining: {formatCr(toCr(commitment.unfunded_amount))}
                           <br />
@@ -3250,6 +3136,27 @@ const displayedManagementFee = financialPosition
                     the governed VENTIQ server layer.
                   </p>
 
+                  <div className="logic-note" style={{ marginTop: "12px" }}>
+                    This section shows capital calls recorded in the VENTIQ workflow.
+                    Lifetime paid-in capital is the cumulative verified investor position
+                    and can also include opening or pre-VENTIQ contributions.
+                    {financialPosition && cashflowSummary ? (
+                      <>
+                        {" "}Opening / pre-VENTIQ contribution currently reconciles to{" "}
+                        <strong>
+                          {formatInr(
+                            Math.max(
+                              0,
+                              Number(financialPosition.capital_called_till_date ?? 0) -
+                                Number(cashflowSummary.total_called ?? 0)
+                            )
+                          )}
+                        </strong>
+                        .
+                      </>
+                    ) : null}
+                  </div>
+
                   {cashflowAccessMessage && (
                     <div className="explain-box">{cashflowAccessMessage}</div>
                   )}
@@ -3259,7 +3166,7 @@ const displayedManagementFee = financialPosition
                       <div className="impact-grid">
                         <div className="impact-card">
                           <h3>{formatInr(cashflowSummary?.total_called)}</h3>
-                          <p>Total called</p>
+                          <p>VENTIQ-recorded calls</p>
                         </div>
 
                         <div className="impact-card">
@@ -3525,12 +3432,6 @@ const displayedManagementFee = financialPosition
                       Open Investor Data Room
                     </a>
 
-                    <a
-                      className="monitor-btn monitor-btn-secondary"
-                      href="/fundraising-ai"
-                    >
-                      Open IR Workspace
-                    </a>
                   </div>
                 </div>
 
@@ -3620,7 +3521,7 @@ const displayedManagementFee = financialPosition
                     {financialPosition
                       ? `Your current commitment is ${formatCr(
                           portalMetrics.displayedCommitment
-                        )}. Capital called till date is ${formatCr(
+                        )}. Lifetime paid-in capital is ${formatCr(
                           portalMetrics.displayedCalled
                         )}, uncalled capital is ${formatCr(
                           portalMetrics.displayedRemaining

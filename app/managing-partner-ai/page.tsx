@@ -14,6 +14,34 @@ type PerformanceCalculationResponse = {
   reconciliations?: DataRow[];
   error?: string;
 };
+type ManagingPartnerOverviewResponse = {
+  fundsData?: DataRow[];
+  commitmentsData?: DataRow[];
+  investorsData?: DataRow[];
+  capitalCallsData?: DataRow[];
+  distributionsData?: DataRow[];
+  documentsData?: DataRow[];
+  matchesData?: DataRow[];
+  circularsData?: DataRow[];
+  portfolioCompaniesData?: DataRow[];
+  fundInvestmentsData?: DataRow[];
+  debtRepaymentsData?: DataRow[];
+  portfolioCompanyMetricsData?: DataRow[];
+  portfolioNewsAlertsData?: DataRow[];
+  fundPerformanceMetricsData?: DataRow[];
+  dataRoomDocumentsData?: DataRow[];
+  dataRoomEngagementData?: DataRow[];
+  dataRoomQuestionsData?: DataRow[];
+  migratedInvestorMasterData?: DataRow[];
+  migratedFundCommitmentsData?: DataRow[];
+  migratedFinancialPositionsData?: DataRow[];
+  migratedFundMasterData?: DataRow[];
+  migratedPortfolioInvestmentsData?: DataRow[];
+  migratedComplianceItemsData?: DataRow[];
+  migratedPdfDocumentsData?: DataRow[];
+  activationRecord?: DataRow | null;
+  error?: string;
+};
 type DeckChartItem = {
   label: string;
   value: number;
@@ -435,8 +463,6 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
     setFundActivatedAt("");
     setFundActivatedBy("");
 
-    const db = supabase as any;
-
     async function loadLatestPerformanceCalculation(): Promise<PerformanceCalculationResponse | null> {
       const accessToken = session?.access_token ?? "";
 
@@ -480,78 +506,73 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
       }
     }
 
-    async function selectRows(
-      tableName: string,
-      options?: {
-        orderBy?: string;
-        ascending?: boolean;
-        eq?: {
-          column: string;
-          value: string;
-        };
-      }
-    ) {
-      try {
-        let query = db.from(tableName).select("*");
+    async function loadManagingPartnerOverview(): Promise<Required<Omit<ManagingPartnerOverviewResponse, "error">>> {
+      const accessToken = session?.access_token ?? "";
 
-        if (options?.eq) {
-          query = query.eq(options.eq.column, options.eq.value);
-        }
-
-        if (options?.orderBy) {
-          query = query.order(options.orderBy, {
-            ascending: options.ascending ?? false,
-          });
-        }
-
-        const { data, error } = await query;
-
-        if (error) {
-          console.warn(
-            `VENTIQ Managing Partner dashboard skipped ${tableName}:`,
-            error.message
-          );
-          return [] as DataRow[];
-        }
-
-        return (data ?? []) as DataRow[];
-      } catch (error) {
-        console.warn(
-          `VENTIQ Managing Partner dashboard skipped ${tableName}:`,
-          error
+      if (!accessToken) {
+        throw new Error(
+          "Please sign in before opening the Managing Partner workspace."
         );
-        return [] as DataRow[];
       }
-    }
 
-    async function loadActivationRecord() {
-      try {
-        const { data, error } = await db
-          .from("fund_activation_status")
-          .select("status, activated_at, activated_by, readiness_score")
-          .eq("fund_name", activeFundName)
-          .maybeSingle();
-
-        if (error) {
-          console.warn(
-            "VENTIQ Managing Partner dashboard could not read fund activation:",
-            error.message
-          );
-          return null;
+      const response = await fetch(
+        `/api/managing-partner/overview?fundName=${encodeURIComponent(activeFundName)}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          cache: "no-store",
         }
+      );
+      const result =
+        (await response.json()) as ManagingPartnerOverviewResponse;
 
-        return (data as DataRow | null) ?? null;
-      } catch (error) {
-        console.warn(
-          "VENTIQ Managing Partner dashboard could not read fund activation:",
-          error
+      if (!response.ok) {
+        throw new Error(
+          result.error || "Unable to load Managing Partner workspace."
         );
-        return null;
       }
+
+      return {
+        fundsData: result.fundsData ?? [],
+        commitmentsData: result.commitmentsData ?? [],
+        investorsData: result.investorsData ?? [],
+        capitalCallsData: result.capitalCallsData ?? [],
+        distributionsData: result.distributionsData ?? [],
+        documentsData: result.documentsData ?? [],
+        matchesData: result.matchesData ?? [],
+        circularsData: result.circularsData ?? [],
+        portfolioCompaniesData: result.portfolioCompaniesData ?? [],
+        fundInvestmentsData: result.fundInvestmentsData ?? [],
+        debtRepaymentsData: result.debtRepaymentsData ?? [],
+        portfolioCompanyMetricsData: result.portfolioCompanyMetricsData ?? [],
+        portfolioNewsAlertsData: result.portfolioNewsAlertsData ?? [],
+        fundPerformanceMetricsData: result.fundPerformanceMetricsData ?? [],
+        dataRoomDocumentsData: result.dataRoomDocumentsData ?? [],
+        dataRoomEngagementData: result.dataRoomEngagementData ?? [],
+        dataRoomQuestionsData: result.dataRoomQuestionsData ?? [],
+        migratedInvestorMasterData: result.migratedInvestorMasterData ?? [],
+        migratedFundCommitmentsData: result.migratedFundCommitmentsData ?? [],
+        migratedFinancialPositionsData: result.migratedFinancialPositionsData ?? [],
+        migratedFundMasterData: result.migratedFundMasterData ?? [],
+        migratedPortfolioInvestmentsData: result.migratedPortfolioInvestmentsData ?? [],
+        migratedComplianceItemsData: result.migratedComplianceItemsData ?? [],
+        migratedPdfDocumentsData: result.migratedPdfDocumentsData ?? [],
+        activationRecord: result.activationRecord ?? null,
+      };
     }
 
     try {
       const [
+        overviewData,
+        performanceCalculationData,
+      ] = await Promise.all([
+        loadManagingPartnerOverview(),
+        loadLatestPerformanceCalculation(),
+      ]);
+
+      const {
         fundsData,
         commitmentsData,
         investorsData,
@@ -577,66 +598,7 @@ const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState(true);
         migratedComplianceItemsData,
         migratedPdfDocumentsData,
         activationRecord,
-        performanceCalculationData,
-      ] = await Promise.all([
-        selectRows("funds"),
-        selectRows("commitments"),
-        selectRows("investors"),
-        selectRows("capital_calls"),
-        selectRows("distributions"),
-        selectRows("investor_documents", {
-          orderBy: "published_at",
-          ascending: false,
-        }),
-        selectRows("regulatory_source_matches", {
-          eq: { column: "status", value: "needs_review" },
-        }),
-        selectRows("regulatory_circulars", {
-          eq: { column: "status", value: "active" },
-        }),
-        selectRows("portfolio_companies"),
-        selectRows("fund_investments"),
-        selectRows("debt_repayment_schedules", {
-          orderBy: "due_date",
-          ascending: true,
-        }),
-        selectRows("portfolio_company_metrics", {
-          orderBy: "metric_date",
-          ascending: false,
-        }),
-        selectRows("portfolio_news_alerts", {
-          orderBy: "alert_date",
-          ascending: false,
-        }),
-        selectRows("fund_performance_metrics", {
-          orderBy: "reporting_date",
-          ascending: false,
-        }),
-        selectRows("data_room_documents", {
-          orderBy: "imported_at",
-          ascending: false,
-        }),
-        selectRows("data_room_engagement_events", {
-          orderBy: "event_time",
-          ascending: false,
-        }),
-        selectRows("data_room_questions", {
-          orderBy: "asked_at",
-          ascending: false,
-        }),
-        selectRows("investor_master", {
-          orderBy: "investor_code",
-          ascending: true,
-        }),
-        selectRows("fund_commitments"),
-        selectRows("investor_financial_positions"),
-        selectRows("fund_master"),
-        selectRows("portfolio_investments"),
-        selectRows("compliance_items"),
-        selectRows("pdf_intelligence_documents"),
-        loadActivationRecord(),
-        loadLatestPerformanceCalculation(),
-      ]);
+      } = overviewData;
 
       const selectedFundRows = [
         ...fundsData,

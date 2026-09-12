@@ -405,6 +405,7 @@ export default function PdfIntelligencePage() {
   const { session } = useVentiqAuth();
   const {
     activeFundName,
+    availableFundNames,
     setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund("");
@@ -740,10 +741,8 @@ export default function PdfIntelligencePage() {
         );
 
         if (!allowed) {
-          const nextFund = funds[0].fund_name;
-          setActiveFundName(nextFund);
           setFundAccessMessage(
-            `PDF Intelligence moved to your first authorised fund: ${nextFund}.`
+            "PDF Intelligence could not confirm access metadata for the globally selected fund. Refresh access or choose another authorised fund from the global selector."
           );
         }
 
@@ -1646,13 +1645,13 @@ export default function PdfIntelligencePage() {
             <label>
               Active fund
               <select
-                disabled={!fundAccessReady || authorisedFunds.length === 0}
+                disabled={!fundAccessReady || availableFundNames.length === 0}
                 onChange={(event) => setActiveFundName(event.target.value)}
                 value={activeFundName}
               >
-                {authorisedFunds.map((fund) => (
-                  <option key={fund.fund_name} value={fund.fund_name}>
-                    {fund.fund_name}
+                {availableFundNames.map((fundName) => (
+                  <option key={fundName} value={fundName}>
+                    {fundName}
                   </option>
                 ))}
               </select>

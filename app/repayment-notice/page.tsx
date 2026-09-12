@@ -138,9 +138,7 @@ const [errorMessage, setErrorMessage] = useState("");
 
   async function loadRepaymentData() {
     if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage(
-  "The sample Repayment Notice workflow is temporarily unavailable. Please request a walkthrough."
-);
+      setErrorMessage("Supabase is not configured. Please check .env.local.");
       setLoading(false);
       return;
     }
@@ -148,46 +146,66 @@ const [errorMessage, setErrorMessage] = useState("");
     setLoading(true);
     setErrorMessage("");
 
-    const [
-      companiesResult,
-      investmentsResult,
-      repaymentsResult,
-      noticeBatchesResult,
-      noticeHistoryResult,
-    ] = await Promise.all([
-      supabase.from("portfolio_companies").select("*"),
-      supabase.from("fund_investments").select("*"),
-      supabase.from("debt_repayment_schedules").select("*").order("due_date"),
-      supabase
-        .from("repayment_notice_batches")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(10),
-      supabase
-        .from("repayment_notices")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(25),
-    ]);
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token ?? "";
 
-    const firstError =
-      companiesResult.error ||
-      investmentsResult.error ||
-      repaymentsResult.error ||
-      noticeBatchesResult.error ||
-      noticeHistoryResult.error;
-
-    if (firstError) {
-      setErrorMessage(firstError.message);
+    if (sessionError || !accessToken) {
+      setErrorMessage(
+        sessionError?.message || "Please sign in before loading repayment notices."
+      );
       setLoading(false);
       return;
     }
 
-    const companies = (companiesResult.data ?? []) as DataRow[];
-    const investments = (investmentsResult.data ?? []) as DataRow[];
-    const repayments = (repaymentsResult.data ?? []) as DataRow[];
-    const noticeBatches = (noticeBatchesResult.data ?? []) as DataRow[];
-    const noticeHistory = (noticeHistoryResult.data ?? []) as DataRow[];
+    const response = await fetch("/api/repayment-notice/overview", {
+      method: "GET",
+      cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    let overviewResult: {
+      portfolioCompanies?: DataRow[];
+      fundInvestments?: DataRow[];
+      debtRepayments?: DataRow[];
+      repaymentNoticeBatches?: DataRow[];
+      repaymentNoticeHistory?: DataRow[];
+      error?: string;
+    };
+
+    try {
+      overviewResult = (await response.json()) as typeof overviewResult;
+    } catch {
+      setErrorMessage("Repayment Notice overview returned an invalid response.");
+      setLoading(false);
+      return;
+    }
+
+    if (!response.ok) {
+      setErrorMessage(
+        overviewResult.error || "Unable to load Repayment Notice records."
+      );
+      setLoading(false);
+      return;
+    }
+
+    const companies = Array.isArray(overviewResult.portfolioCompanies)
+      ? overviewResult.portfolioCompanies
+      : [];
+    const investments = Array.isArray(overviewResult.fundInvestments)
+      ? overviewResult.fundInvestments
+      : [];
+    const repayments = Array.isArray(overviewResult.debtRepayments)
+      ? overviewResult.debtRepayments
+      : [];
+    const noticeBatches = Array.isArray(overviewResult.repaymentNoticeBatches)
+      ? overviewResult.repaymentNoticeBatches
+      : [];
+    const noticeHistory = Array.isArray(overviewResult.repaymentNoticeHistory)
+      ? overviewResult.repaymentNoticeHistory
+      : [];
 
     setPortfolioCompanies(companies);
     setFundInvestments(investments);
@@ -831,7 +849,7 @@ function getQueueCompletionLabel(notice: DataRow | undefined) {
 async function handleDeleteGeneratedNotice() {
   if (!supabase) {
     setQueueActionMessage(
-  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+  "The repayment notice workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -1145,7 +1163,7 @@ ${buildNoticeForRepayment(repayment)}`;
 async function handleMarkNoticeSent(notice: DataRow) {
   if (!supabase) {
     setQueueActionMessage(
-  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+  "The repayment notice workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -1204,7 +1222,7 @@ async function handleMarkNoticeSent(notice: DataRow) {
 async function handleMarkReminderSent(notice: DataRow) {
   if (!supabase) {
     setQueueActionMessage(
-  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+  "The repayment notice workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -1285,7 +1303,7 @@ async function handleCopyNoticeFromQueue(notice: DataRow) {
 async function handlePrepareEmailDraft(notice: DataRow) {
   if (!supabase) {
     setQueueActionMessage(
-  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+  "The repayment notice workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -1342,7 +1360,7 @@ async function handlePrepareEmailDraft(notice: DataRow) {
 async function handleSimulateEmailDispatch(notice: DataRow) {
   if (!supabase) {
     setQueueActionMessage(
-  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+  "The repayment notice workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -1430,7 +1448,7 @@ async function handleSimulateEmailDispatch(notice: DataRow) {
 async function handleResetEmailDispatch(notice: DataRow) {
   if (!supabase) {
     setQueueActionMessage(
-  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+  "The repayment notice workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -1503,7 +1521,7 @@ setQueueActionMessage("");
 async function handleCleanupStaleNoticeBatches() {
   if (!supabase) {
     setQueueActionMessage(
-  "The sample repayment notice workflow is temporarily unavailable. Please request a walkthrough."
+  "The repayment notice workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -1776,14 +1794,14 @@ async function handleDownloadQueueNoticePdf(notice: DataRow) {
           </a>
         </div>
 <div className="sample-data-ribbon">
-  Live repayment notice workflow preview · Sample data shown for demonstration
+  Repayment notice workflow · Live governed debt schedule data
 </div>
        {loading && (
   <div className="preview-card">
     <h2>Preparing Repayment Notice Workflow...</h2>
     <p>
-      VENTIQ is preparing the sample portfolio, investment and repayment
-      schedule workflow.
+      VENTIQ is loading governed portfolio, investment and repayment
+      schedule records.
     </p>
   </div>
 )}

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { useActiveFund } from "../../lib/useActiveFund";
 
 type Fund = {
   id: string;
@@ -36,6 +37,7 @@ type Commitment = {
 
 type SavedDistribution = {
   id: string;
+  fund_id: string;
   distribution_name: string | null;
   distribution_date: string | null;
   payment_date: string | null;
@@ -122,10 +124,35 @@ function getInvestorRisk(investor: Investor | null) {
 }
 
 export default function DistributionWaterfallPage() {
+  const {
+    activeFundName,
+    isReady: activeFundReady,
+  } = useActiveFund("");
+
+  return (
+    <DistributionWaterfallWorkspace
+      key={
+        activeFundReady && activeFundName
+          ? activeFundName
+          : "__fund_loading__"
+      }
+      activeFundName={activeFundName}
+      activeFundReady={activeFundReady}
+    />
+  );
+}
+
+function DistributionWaterfallWorkspace({
+  activeFundName,
+  activeFundReady,
+}: {
+  activeFundName: string;
+  activeFundReady: boolean;
+}) {
   const [funds, setFunds] = useState<Fund[]>([]);
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [selectedFundId, setSelectedFundId] = useState("");
-  const [distributionAmountInput, setDistributionAmountInput] = useState("18.5");
+  const [distributionAmountInput, setDistributionAmountInput] = useState("");
   const [distributionType, setDistributionType] = useState("Exit Proceeds");
   const [waterfallMethod, setWaterfallMethod] = useState("European Waterfall");
   const [excludedInvestor, setExcludedInvestor] = useState("None");
@@ -152,11 +179,27 @@ const [distributionActionMessage, setDistributionActionMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    async function loadFunds() {
-      if (!isSupabaseConfigured || !supabase) {
+    async function loadActiveFund() {
+      if (!activeFundReady) {
+        return;
+      }
+
+      if (!activeFundName) {
+        setFunds([]);
+        setSelectedFundId("");
         setErrorMessage(
-  "The sample Distribution Waterfall workflow is temporarily unavailable. Please request a walkthrough."
-);
+          "No governed active fund is available for this account."
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (!isSupabaseConfigured || !supabase) {
+        setFunds([]);
+        setSelectedFundId("");
+        setErrorMessage(
+          "The distribution data connection is unavailable."
+        );
         setLoading(false);
         return;
       }
@@ -166,33 +209,45 @@ const [distributionActionMessage, setDistributionActionMessage] = useState("");
         .select(
           "id, name, fund_type, category, jurisdiction, currency, committed_capital, called_capital, status"
         )
-        .order("created_at", { ascending: true });
+        .eq("name", activeFundName)
+        .limit(2);
 
       if (error) {
+        setFunds([]);
+        setSelectedFundId("");
         setErrorMessage(error.message);
-      } else {
-        const fundData = data ?? [];
-        setFunds(fundData);
-
-        const recommendedFund =
-          fundData.find((fund) =>
-            fund.name.toLowerCase().includes("growth")
-          ) ?? fundData[0];
-
-        if (recommendedFund) {
-          setSelectedFundId(recommendedFund.id);
-        }
+        setLoading(false);
+        return;
       }
 
+      const fundData = (data ?? []) as Fund[];
+
+      if (fundData.length !== 1) {
+        setFunds([]);
+        setSelectedFundId("");
+        setErrorMessage(
+          fundData.length === 0
+            ? `No distribution fund record was found for ${activeFundName}.`
+            : `Multiple distribution fund records matched ${activeFundName}; refusing ambiguous fund scope.`
+        );
+        setLoading(false);
+        return;
+      }
+
+      setFunds(fundData);
+      setSelectedFundId(fundData[0].id);
+      setErrorMessage("");
       setLoading(false);
     }
 
-    loadFunds();
-  }, []);
+    loadActiveFund();
+  }, [activeFundName, activeFundReady]);
 
   useEffect(() => {
     async function loadCommitments() {
-      if (!selectedFundId || !supabase) return;
+      if (!activeFundReady || !activeFundName || !selectedFundId || !supabase) {
+        return;
+      }
 
       setLoadingCommitments(true);
       setCommitments([]);
@@ -217,11 +272,15 @@ const [distributionActionMessage, setDistributionActionMessage] = useState("");
     }
 
     loadCommitments();
-  }, [selectedFundId]);
+  }, [activeFundName, activeFundReady, selectedFundId]);
 
   useEffect(() => {
+    if (!selectedFundId) {
+      return;
+    }
+
     loadSavedDistributions();
-  }, []);
+  }, [selectedFundId]);
 
   const selectedFund = funds.find((fund) => fund.id === selectedFundId);
   const selectedFundName = cleanFundName(selectedFund?.name);
@@ -300,10 +359,7 @@ const distributionAmount = Number(distributionAmountInput || 0);
     (investor) => investor.isEligible
   ).length;
 
-  const returnOfCapital = Math.min(distributionAmount, 12);
-  const preferredReturn = Math.min(Math.max(distributionAmount - 12, 0), 4);
-  const gpCatchup = Math.min(Math.max(distributionAmount - 16, 0), 1);
-  const carriedInterest = Math.max(distributionAmount - 17, 0);
+  const hasGovernedWaterfallTerms = false;
   const activeDistributionAmount = selectedSavedDistribution
   ? toCr(selectedSavedDistribution.distribution_amount)
   : distributionAmount;
@@ -324,15 +380,19 @@ const readyInvestorCount = savedDistributionAllocations.filter(
 ).length;
 
   async function loadSavedDistributions() {
-    if (!supabase) return;
+    if (!supabase || !selectedFundId) {
+      setSavedDistributions([]);
+      return;
+    }
 
     setLoadingSavedDistributions(true);
 
     const { data, error } = await supabase
       .from("distributions")
       .select(
-        "id, distribution_name, distribution_date, payment_date, distribution_amount, distribution_type, waterfall_method, status, created_at, funds(name)"
+        "id, fund_id, distribution_name, distribution_date, payment_date, distribution_amount, distribution_type, waterfall_method, status, created_at, funds(name)"
       )
+      .eq("fund_id", selectedFundId)
       .order("created_at", { ascending: false })
       .limit(5);
 
@@ -343,9 +403,16 @@ const readyInvestorCount = savedDistributionAllocations.filter(
     setLoadingSavedDistributions(false);
   }
 async function handleOpenSavedDistribution(distribution: SavedDistribution) {
+  if (!selectedFundId || distribution.fund_id !== selectedFundId) {
+    setDistributionAllocationMessage(
+      "This distribution does not belong to the governed active fund."
+    );
+    return;
+  }
+
   if (!supabase) {
     setDistributionAllocationMessage(
-  "The sample distribution allocation workflow is temporarily unavailable. Please request a walkthrough."
+  "The distribution allocation workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -379,9 +446,16 @@ async function handleOpenSavedDistribution(distribution: SavedDistribution) {
 }
 
 async function handleDeleteSavedDistribution(distribution: SavedDistribution) {
+  if (!selectedFundId || distribution.fund_id !== selectedFundId) {
+    setDistributionActionMessage(
+      "This distribution does not belong to the governed active fund."
+    );
+    return;
+  }
+
   if (!supabase) {
     setDistributionActionMessage(
-  "The sample distribution workflow is temporarily unavailable. Please request a walkthrough."
+  "The distribution workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -414,7 +488,8 @@ async function handleDeleteSavedDistribution(distribution: SavedDistribution) {
   const { error: distributionDeleteError } = await supabase
     .from("distributions")
     .delete()
-    .eq("id", distribution.id);
+    .eq("id", distribution.id)
+    .eq("fund_id", selectedFundId);
 
   if (distributionDeleteError) {
     setDistributionActionMessage(
@@ -436,9 +511,16 @@ async function handleDeleteSavedDistribution(distribution: SavedDistribution) {
 }
 
 async function handleApproveSavedDistribution(distribution: SavedDistribution) {
+  if (!selectedFundId || distribution.fund_id !== selectedFundId) {
+    setDistributionActionMessage(
+      "This distribution does not belong to the governed active fund."
+    );
+    return;
+  }
+
   if (!supabase) {
     setDistributionActionMessage(
-  "The sample distribution workflow is temporarily unavailable. Please request a walkthrough."
+  "The distribution workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -458,7 +540,8 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
   const { error: distributionUpdateError } = await supabase
     .from("distributions")
     .update({ status: "approved" })
-    .eq("id", distribution.id);
+    .eq("id", distribution.id)
+    .eq("fund_id", selectedFundId);
 
   if (distributionUpdateError) {
     setDistributionActionMessage(
@@ -502,13 +585,25 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
   async function handleSaveDistributionDraft() {
     if (!supabase) {
       setSaveMessage(
-  "The sample distribution draft workflow is temporarily unavailable. Please request a walkthrough."
+  "The distribution draft workflow is unavailable because Supabase is not configured."
 );
       return;
     }
 
-    if (!selectedFundId) {
-      setSaveMessage("Please select a fund before saving.");
+    if (!activeFundReady || !activeFundName || !selectedFundId) {
+      setSaveMessage("A governed active fund is required before saving.");
+      return;
+    }
+
+    if (selectedFund?.name !== activeFundName) {
+      setSaveMessage(
+        "The resolved distribution fund does not match the governed active fund."
+      );
+      return;
+    }
+
+    if (!Number.isFinite(distributionAmount) || distributionAmount <= 0) {
+      setSaveMessage("Enter a distribution amount greater than zero before saving.");
       return;
     }
 
@@ -606,13 +701,13 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
           </a>
         </div>
 <div className="sample-data-ribbon">
-  Live workflow preview · Sample data shown for demonstration
+  {activeFundName || "Governed fund"} · Live governed distribution data
 </div>
         {loading && (
   <div className="preview-card">
     <h2>Preparing Distribution Waterfall Preview...</h2>
     <p>
-      VENTIQ is preparing the sample fund, investor commitment and distribution
+      VENTIQ is loading the governed fund, investor commitments and distribution
       allocation workflow.
     </p>
   </div>
@@ -630,38 +725,33 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
         {!loading && !errorMessage && (
           <>
             <div className="preview-card">
-              <h2>AI Distribution Recommendation</h2>
+              <h2>Distribution Planning Snapshot</h2>
 
               <div className="explain-box">
-                VENTIQ recommends distributing{" "}
-                <strong>{formatCr(distributionAmount)}</strong> from{" "}
-                <strong>{selectedFundName}</strong>. Confidence:{" "}
-                <strong>99%</strong>. The recommendation is based on realised
-                exit proceeds, interest collections, pending liabilities,
-                management fees, fund liquidity policy and live investor
-                connected commitment data.
+                VENTIQ is using the governed active fund and connected investor
+                commitment records below. Enter the proposed distribution amount
+                before saving a draft. No distributable-cash forecast or AI
+                confidence is inferred unless the required governed cash,
+                liability, fee and waterfall inputs are connected.
               </div>
             </div>
 
             <div className="impact-grid">
               <div className="impact-card">
-                <h3>{formatCr(distributionAmount)}</h3>
-                <p>Recommended distribution</p>
+                <h3>{selectedFundName}</h3>
+                <p>Governed active fund</p>
               </div>
-
               <div className="impact-card">
-                <h3>99%</h3>
-                <p>AI confidence</p>
+                <h3>{formatCr(totalCommitment)}</h3>
+                <p>Total commitments</p>
               </div>
-
+              <div className="impact-card">
+                <h3>{formatCr(totalCalledTillDate)}</h3>
+                <p>Called capital</p>
+              </div>
               <div className="impact-card">
                 <h3>{eligibleCount}</h3>
                 <p>Eligible LPs</p>
-              </div>
-
-              <div className="impact-card">
-                <h3>{formatCr(totalUnfunded)}</h3>
-                <p>Unfunded commitments</p>
               </div>
             </div>
 
@@ -1085,86 +1175,50 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
   </div>
 )}
             <div className="preview-card">
-              <h2>AI Financial Reasoning</h2>
+              <h2>Governed Distribution Inputs</h2>
 
               <div className="journal-preview">
                 <div className="journal-row">
                   <span>Selected Fund</span>
                   <strong>{selectedFundName}</strong>
                 </div>
-
                 <div className="journal-row">
                   <span>Total Commitments</span>
                   <strong>{formatCr(totalCommitment)}</strong>
                 </div>
-
                 <div className="journal-row">
                   <span>Called Capital</span>
                   <strong>{formatCr(totalCalledTillDate)}</strong>
                 </div>
-
                 <div className="journal-row">
-                  <span>Cash Available</span>
-                  <strong>₹28.00 Cr</strong>
+                  <span>Unfunded Commitments</span>
+                  <strong>{formatCr(totalUnfunded)}</strong>
                 </div>
-
                 <div className="journal-row">
-                  <span>Add: Exit Proceeds</span>
-                  <strong>₹4.00 Cr</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Add: Interest Income</span>
-                  <strong>₹2.00 Cr</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Less: Management Fee</span>
-                  <strong>(₹1.00 Cr)</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Less: Fund Expenses</span>
-                  <strong>(₹0.50 Cr)</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Distributable Cash</span>
-                  <strong>₹32.50 Cr</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>AI Recommendation</span>
-                  <strong>Distribute {formatCr(distributionAmount)}</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Confidence</span>
-                  <strong>99%</strong>
+                  <span>Proposed Distribution</span>
+                  <strong>{formatCr(distributionAmount)}</strong>
                 </div>
               </div>
 
               <div className="explain-box">
-                <strong>Why?</strong> VENTIQ analysed realised proceeds,
-                interest collections, pending liabilities, management fees,
-                expenses, liquidity policy and investor commitment records. The
-                AI recommends distributing {formatCr(distributionAmount)} while
-                retaining adequate liquidity for future obligations.
+                Cash availability, realised proceeds, income, liabilities, fees,
+                expenses and confidence scores are not displayed until those inputs
+                are connected to governed canonical records.
               </div>
             </div>
 
             <div className="preview-card">
-              <h2>AI Generated Distribution</h2>
+              <h2>Distribution Draft</h2>
 
               <div className="impact-grid">
                 <div className="impact-card">
                   <h3>{selectedFundName}</h3>
-                  <p>Fund selected by AI</p>
+                  <p>Governed active fund</p>
                 </div>
 
                 <div className="impact-card">
                   <h3>{formatCr(distributionAmount)}</h3>
-                  <p>Recommended amount</p>
+                  <p>Proposed distribution amount</p>
                 </div>
 
                 <div className="impact-card">
@@ -1173,14 +1227,14 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
                 </div>
 
                 <div className="impact-card">
-                  <h3>99%</h3>
-                  <p>AI confidence</p>
+                  <h3>{formatCr(totalUnfunded)}</h3>
+                  <p>Unfunded commitments</p>
                 </div>
               </div>
 
               <div className="form-card">
                 <p className="eyebrow">
-                  Prepared automatically by VENTIQ AI — editable before approval
+                  Prepared from governed fund and commitment data — editable before approval
                 </p>
 
                 <label>Fund Type</label>
@@ -1190,19 +1244,16 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
                 </select>
 
                 <label>Fund</label>
-                <select
-                  value={selectedFundId}
-                  onChange={(event) => {
-                    setSelectedFundId(event.target.value);
-                    setExcludedInvestor("None");
-                  }}
-                >
-                  {funds.map((fund) => (
-                    <option key={fund.id} value={fund.id}>
-                      {fund.name}
-                    </option>
-                  ))}
+                <select value={selectedFundId} disabled>
+                  {selectedFund ? (
+                    <option value={selectedFund.id}>{selectedFund.name}</option>
+                  ) : (
+                    <option value="">No governed active fund resolved</option>
+                  )}
                 </select>
+                <p className="field-help">
+                  Fund scope is controlled by the authenticated VENTIQ Active Fund selector.
+                </p>
 
                 <label>Distribution Amount (₹ Cr)</label>
                 <input
@@ -1244,14 +1295,14 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
                 </select>
 
                 <div className="logic-note">
-                  VENTIQ pre-filled this distribution using connected fund,
-                  investor and commitment data, realised exits, interest
-                  collections, liquidity policy and the fund&apos;s waterfall
-                  rules.
+                  VENTIQ allocated the entered distribution amount using the
+                  connected investor commitment basis shown below. Fund-specific
+                  waterfall economics are not inferred unless governed waterfall
+                  terms are available.
                 </div>
 
                 <div className="action-row">
-                  <button>Approve Recommendation</button>
+                  <button type="button" disabled>Approval available after a governed draft is saved</button>
 
                   <button
                     type="button"
@@ -1315,69 +1366,22 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
             </div>
 
             <div className="preview-card">
-              <h2>AI Waterfall Summary</h2>
+              <h2>Waterfall Calculation Status</h2>
 
-              <div className="queue-grid">
-                <div className="queue-item">
-                  <strong>Tier 1</strong>
-                  <br />
-                  Return of Capital
-                  <br />
-                  {formatCr(returnOfCapital)}
-                  <br />
-                  🟢 Completed
-                </div>
-
-                <div className="queue-item">
-                  <strong>Tier 2</strong>
-                  <br />
-                  Preferred Return
-                  <br />
-                  {formatCr(preferredReturn)}
-                  <br />
-                  🟢 Completed
-                </div>
-
-                <div className="queue-item">
-                  <strong>Tier 3</strong>
-                  <br />
-                  GP Catch-up
-                  <br />
-                  {formatCr(gpCatchup)}
-                  <br />
-                  🟢 Completed
-                </div>
-
-                <div className="queue-item">
-                  <strong>Tier 4</strong>
-                  <br />
-                  Carried Interest
-                  <br />
-                  {formatCr(carriedInterest)}
-                  <br />
-                  🟢 Completed
-                </div>
+              <div className="explain-box">
+                {hasGovernedWaterfallTerms
+                  ? "Governed fund-specific waterfall terms are available for deterministic calculation."
+                  : "Fund-specific hurdle, preferred return, catch-up and carried-interest terms are not connected on this workspace. VENTIQ will not display illustrative waterfall amounts as production results."}
               </div>
 
               <div className="impact-grid">
                 <div className="impact-card">
                   <h3>{formatCr(distributionAmount)}</h3>
-                  <p>Total distribution</p>
+                  <p>Entered distribution amount</p>
                 </div>
-
-                <div className="impact-card">
-                  <h3>{formatCr(carriedInterest)}</h3>
-                  <p>Carry calculated</p>
-                </div>
-
-                <div className="impact-card">
-                  <h3>{formatCr(preferredReturn)}</h3>
-                  <p>Preferred return</p>
-                </div>
-
                 <div className="impact-card">
                   <h3>{waterfallMethod.replace(" Waterfall", "")}</h3>
-                  <p>Waterfall method</p>
+                  <p>Selected method</p>
                 </div>
               </div>
             </div>

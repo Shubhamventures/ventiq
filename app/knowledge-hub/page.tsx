@@ -289,7 +289,7 @@ const [savingApprovalReview, setSavingApprovalReview] = useState(false);
   async function loadRegulatoryCirculars() {
     if (!isSupabaseConfigured || !supabase) {
       setErrorMessage(
-  "The sample Knowledge Hub is temporarily unavailable. Please request a walkthrough."
+  "The Knowledge Hub is unavailable because Supabase is not configured."
 );
       setLoading(false);
       return;
@@ -522,7 +522,7 @@ function buildCircularSlugFromMatch(match: SourceMatch) {
 async function handleApproveSourceMatch(match: SourceMatch) {
   if (!supabase) {
     setSourceMatchMessage(
-  "The sample source matching workflow is temporarily unavailable. Please request a walkthrough."
+  "The regulatory source matching workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -623,7 +623,7 @@ async function handleApproveSourceMatch(match: SourceMatch) {
 async function handleRejectSourceMatch(match: SourceMatch) {
   if (!supabase) {
     setSourceMatchMessage(
-  "The sample source matching workflow is temporarily unavailable. Please request a walkthrough."
+  "The regulatory source matching workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -702,7 +702,7 @@ function openApprovalReview(match: SourceMatch) {
 async function handleSaveApprovedSourceMatch() {
   if (!supabase) {
     setSourceMatchMessage(
-  "The sample source matching workflow is temporarily unavailable. Please request a walkthrough."
+  "The regulatory source matching workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -996,9 +996,9 @@ async function handleAiFillFromPdf() {
 
   async function handleCreateCircular() {
   if (!supabase) {
-    alert("The sample Knowledge Hub workflow is temporarily unavailable.");
+    alert("The Knowledge Hub workflow is unavailable because Supabase is not configured.");
 setActionMessage(
-  "The sample Knowledge Hub workflow is temporarily unavailable. Please request a walkthrough."
+  "The Knowledge Hub workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -1242,14 +1242,14 @@ const selectedReviewMatches = selectedReviewAuthority
           </a>
         </div>
 <div className="sample-data-ribbon">
-  Sample Knowledge Hub preview · Illustrative regulatory data
+  Knowledge Hub · Live governed regulatory records
 </div>
         {loading && (
   <div className="preview-card">
     <h2>Preparing Knowledge Hub Preview...</h2>
     <p>
-      VENTIQ is preparing the sample regulatory circulars, SOPs and source
-      matching workspace.
+      VENTIQ is loading governed regulatory circulars, SOPs and source
+      matching records.
     </p>
   </div>
 )}
@@ -1269,8 +1269,8 @@ const selectedReviewMatches = selectedReviewAuthority
             <h2>No Circulars Found</h2>
 
             <div className="explain-box">
-              No active circular records found for this preview. Please add sample records
-              in the regulatory_circulars table.
+              No active regulatory circular records are available. Add governed records
+              to the regulatory_circulars table or run the regulatory source monitor.
             </div>
           </div>
         )}

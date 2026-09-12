@@ -2,6 +2,7 @@
 
 import { Fragment, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
+import { useActiveFund } from "@/lib/useActiveFund";
 
 type FundRow = {
   id: string;
@@ -28,6 +29,7 @@ type FundRow = {
 
 type FundDbRow = {
   id: string;
+  batch_id: string | null;
   fund_code: string | null;
   fund_name: string | null;
   fund_type: string | null;
@@ -91,7 +93,7 @@ function normalizeFundStatus(value: string | null): FundRow["status"] {
   return "Ready";
 }
 
-function downloadFundTemplate() {
+function downloadFundTemplate(fundName: string) {
   const headers = [
     "fund_name",
     "fund_type",
@@ -114,7 +116,7 @@ function downloadFundTemplate() {
   ];
 
   const sample = [
-    "VENTIQ Growth Fund II",
+    fundName,
     "Close-ended",
     "Category II AIF",
     "India",
@@ -152,7 +154,32 @@ function downloadFundTemplate() {
 }
 
 export default function FundDataMigrationPage() {
-  const [funds, setFunds] = useState<FundRow[]>(sampleFunds);
+  const { activeFundName, isReady: activeFundReady } = useActiveFund(
+    "VENTIQ Growth Fund II"
+  );
+
+  return (
+    <FundDataMigrationWorkspace
+      key={activeFundReady && activeFundName ? activeFundName : "__fund_loading__"}
+      activeFundName={activeFundName}
+      activeFundReady={activeFundReady}
+    />
+  );
+}
+
+function FundDataMigrationWorkspace({
+  activeFundName,
+  activeFundReady,
+}: {
+  activeFundName: string;
+  activeFundReady: boolean;
+}) {
+  const [funds, setFunds] = useState<FundRow[]>(() =>
+    sampleFunds.map((fund) => ({
+      ...fund,
+      fundName: activeFundName,
+    }))
+  );
   const [message, setMessage] = useState("");
   const [activeBatchName, setActiveBatchName] = useState("");
   const [publishing, setPublishing] = useState(false);
@@ -211,6 +238,11 @@ export default function FundDataMigrationPage() {
   }, [funds]);
 
   async function publishFundData() {
+    if (!activeFundReady || !activeFundName) {
+      setMessage("Authenticated fund access is still loading.");
+      return;
+    }
+
     if (!isSupabaseConfigured || !supabase) {
       setMessage("Supabase is not configured.");
       return;
@@ -253,7 +285,7 @@ export default function FundDataMigrationPage() {
     const payload = funds.map((fund) => ({
       batch_id: batchId,
       fund_code: fund.id,
-      fund_name: fund.fundName,
+      fund_name: activeFundName,
       fund_type: fund.fundType,
       category: fund.category,
       jurisdiction: fund.jurisdiction,
@@ -288,6 +320,11 @@ export default function FundDataMigrationPage() {
   }
 
   async function loadLatestFundBatch() {
+    if (!activeFundReady || !activeFundName) {
+      setMessage("Authenticated fund access is still loading.");
+      return;
+    }
+
     if (!isSupabaseConfigured || !supabase) {
       setMessage("Supabase is not configured.");
       return;
@@ -296,35 +333,14 @@ export default function FundDataMigrationPage() {
     setLoadingLatestBatch(true);
     setMessage("Loading latest fund data migration batch...");
 
-    const { data: batchData, error: batchError } = await supabase
-      .from("fund_data_migration_batches")
-      .select("id, batch_name")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (batchError) {
-      setMessage(batchError.message);
-      setLoadingLatestBatch(false);
-      return;
-    }
-
-    if (!batchData) {
-      setMessage("No fund data migration batch found yet.");
-      setLoadingLatestBatch(false);
-      return;
-    }
-
-    const batchId = batchData.id as string;
-    const batchName = (batchData.batch_name as string) ?? "Latest fund batch";
-
     const { data: fundData, error: fundError } = await supabase
       .from("fund_master")
       .select(
-        "id, fund_code, fund_name, fund_type, category, jurisdiction, first_close_date, second_close_date, final_close_date, target_corpus, committed_capital, green_shoe, management_fee_rate, setup_cost_rate, carry_rate, hurdle_rate, waterfall_type, sponsor_commitment, trustee_name, investment_manager, migration_status"
+        "id, batch_id, fund_code, fund_name, fund_type, category, jurisdiction, first_close_date, second_close_date, final_close_date, target_corpus, committed_capital, green_shoe, management_fee_rate, setup_cost_rate, carry_rate, hurdle_rate, waterfall_type, sponsor_commitment, trustee_name, investment_manager, migration_status"
       )
-      .eq("batch_id", batchId)
-      .order("created_at", { ascending: true });
+      .eq("fund_name", activeFundName)
+      .order("created_at", { ascending: false })
+      .limit(1);
 
     if (fundError) {
       setMessage(fundError.message);
@@ -334,9 +350,34 @@ export default function FundDataMigrationPage() {
 
     const dbRows = (fundData as FundDbRow[] | null) ?? [];
 
+    if (dbRows.length === 0) {
+      setMessage(`No fund data migration record found for ${activeFundName}.`);
+      setLoadingLatestBatch(false);
+      return;
+    }
+
+    const batchId = dbRows[0].batch_id;
+    let batchName = "Latest fund batch";
+
+    if (batchId) {
+      const { data: batchData, error: batchError } = await supabase
+        .from("fund_data_migration_batches")
+        .select("batch_name")
+        .eq("id", batchId)
+        .maybeSingle();
+
+      if (batchError) {
+        setMessage(batchError.message);
+        setLoadingLatestBatch(false);
+        return;
+      }
+
+      batchName = (batchData?.batch_name as string | null) ?? batchName;
+    }
+
     const loadedFunds: FundRow[] = dbRows.map((fund) => ({
       id: fund.fund_code ?? fund.id,
-      fundName: fund.fund_name ?? "Unknown Fund",
+      fundName: fund.fund_name ?? activeFundName,
       fundType: fund.fund_type ?? "Not provided",
       category: fund.category ?? "Not provided",
       jurisdiction: fund.jurisdiction ?? "Not provided",
@@ -472,7 +513,7 @@ export default function FundDataMigrationPage() {
 
               <button
                 className="portfolio-primary-button"
-                onClick={downloadFundTemplate}
+                onClick={() => downloadFundTemplate(activeFundName)}
                 type="button"
               >
                 ↓ Download Fund Template

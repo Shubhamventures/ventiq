@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
+import { useActiveFund } from "@/lib/useActiveFund";
 
 type ComplianceStatus = "Ready" | "Pending" | "Review" | "Overdue";
 type ComplianceRisk = "Low" | "Medium" | "High";
@@ -169,7 +170,7 @@ function toNullableDate(value: string) {
   return value.trim() ? value : null;
 }
 
-function downloadComplianceTemplate() {
+function downloadComplianceTemplate(fundName: string) {
   const headers = [
     "item_type",
     "document_name",
@@ -188,7 +189,7 @@ function downloadComplianceTemplate() {
   const sample = [
     "SEBI Filing",
     "Quarterly Compliance Report",
-    "VENTIQ Growth Fund II",
+    fundName,
     "Q4 FY26",
     "SEBI",
     "2026-04-30",
@@ -218,7 +219,32 @@ function downloadComplianceTemplate() {
 }
 
 export default function ComplianceDataMigrationPage() {
-  const [items, setItems] = useState<ComplianceItem[]>(sampleComplianceItems);
+  const { activeFundName, isReady: activeFundReady } = useActiveFund(
+    "VENTIQ Growth Fund II"
+  );
+
+  return (
+    <ComplianceDataMigrationWorkspace
+      key={activeFundReady && activeFundName ? activeFundName : "__fund_loading__"}
+      activeFundName={activeFundName}
+      activeFundReady={activeFundReady}
+    />
+  );
+}
+
+function ComplianceDataMigrationWorkspace({
+  activeFundName,
+  activeFundReady,
+}: {
+  activeFundName: string;
+  activeFundReady: boolean;
+}) {
+  const [items, setItems] = useState<ComplianceItem[]>(() =>
+    sampleComplianceItems.map((item) => ({
+      ...item,
+      fundName: activeFundName,
+    }))
+  );
   const [message, setMessage] = useState("");
   const [activeBatchName, setActiveBatchName] = useState("");
   const [publishing, setPublishing] = useState(false);
@@ -255,6 +281,11 @@ export default function ComplianceDataMigrationPage() {
   }, [items]);
 
   async function publishComplianceData() {
+    if (!activeFundReady || !activeFundName) {
+      setMessage("Authenticated fund access is still loading.");
+      return;
+    }
+
     if (!isSupabaseConfigured || !supabase) {
       setMessage("Supabase is not configured.");
       return;
@@ -274,7 +305,7 @@ export default function ComplianceDataMigrationPage() {
       .from("compliance_data_migration_batches")
       .insert({
         batch_name: batchName,
-        fund_name: "VENTIQ Growth Fund II",
+        fund_name: activeFundName,
         total_items: metrics.totalItems,
         evidence_available_count: metrics.evidenceReady,
         pending_review_count: metrics.pendingOrReview,
@@ -298,7 +329,7 @@ export default function ComplianceDataMigrationPage() {
       compliance_code: item.id,
       item_type: item.itemType,
       document_name: item.documentName,
-      fund_name: item.fundName,
+      fund_name: activeFundName,
       period: item.period,
       authority: item.authority,
       due_date: toNullableDate(item.dueDate),
@@ -327,6 +358,11 @@ export default function ComplianceDataMigrationPage() {
   }
 
   async function loadLatestComplianceBatch() {
+    if (!activeFundReady || !activeFundName) {
+      setMessage("Authenticated fund access is still loading.");
+      return;
+    }
+
     if (!isSupabaseConfigured || !supabase) {
       setMessage("Supabase is not configured.");
       return;
@@ -338,6 +374,7 @@ export default function ComplianceDataMigrationPage() {
     const { data: batchData, error: batchError } = await supabase
       .from("compliance_data_migration_batches")
       .select("id, batch_name")
+      .eq("fund_name", activeFundName)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -364,6 +401,7 @@ export default function ComplianceDataMigrationPage() {
         "id, compliance_code, item_type, document_name, fund_name, period, authority, due_date, filing_status, evidence_available, owner, category, risk_level, remarks"
       )
       .eq("batch_id", batchId)
+      .eq("fund_name", activeFundName)
       .order("created_at", { ascending: true });
 
     if (complianceError) {
@@ -378,7 +416,7 @@ export default function ComplianceDataMigrationPage() {
       id: item.compliance_code ?? item.id,
       itemType: item.item_type ?? "Not provided",
       documentName: item.document_name ?? "Unknown Compliance Document",
-      fundName: item.fund_name ?? "VENTIQ Growth Fund II",
+      fundName: item.fund_name ?? activeFundName,
       period: item.period ?? "Not provided",
       authority: item.authority ?? "Not provided",
       dueDate: item.due_date ?? "",
@@ -511,7 +549,7 @@ export default function ComplianceDataMigrationPage() {
 
               <button
                 className="portfolio-primary-button"
-                onClick={downloadComplianceTemplate}
+                onClick={() => downloadComplianceTemplate(activeFundName)}
                 type="button"
               >
                 ↓ Download Compliance Template

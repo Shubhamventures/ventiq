@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { useActiveFund } from "../../lib/useActiveFund";
 
 type ApprovedCapitalCall = {
   id: string;
@@ -73,6 +74,7 @@ type DistributionInvestorRow = {
 
 type InvestorDocument = {
   id: string;
+  fund_id: string | null;
   investor_id: string | null;
   document_type: string;
   document_name: string;
@@ -84,7 +86,6 @@ type InvestorDocument = {
   email_status: string | null;
   portal_status: string | null;
   storage_path: string | null;
-storage_url: string | null;
   generated_at: string | null;
 };
 
@@ -177,6 +178,31 @@ function getDocumentFooter(documentRecord: InvestorDocument) {
   return "This is a system-generated investor document prepared by VENTIQ.";
 }
 export default function DocumentEnginePage() {
+  const {
+    activeFundName,
+    isReady: activeFundReady,
+  } = useActiveFund("");
+
+  return (
+    <DocumentEngineWorkspace
+      key={
+        activeFundReady && activeFundName
+          ? activeFundName
+          : "__fund_loading__"
+      }
+      activeFundName={activeFundName}
+      activeFundReady={activeFundReady}
+    />
+  );
+}
+
+function DocumentEngineWorkspace({
+  activeFundName,
+  activeFundReady,
+}: {
+  activeFundName: string;
+  activeFundReady: boolean;
+}) {
   const [capitalCalls, setCapitalCalls] = useState<ApprovedCapitalCall[]>([]);
   const [distributions, setDistributions] = useState<ApprovedDistribution[]>(
     []
@@ -201,14 +227,35 @@ const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    loadDocumentEngine();
+    if (!activeFundReady) {
+      return;
+    }
+
+    void loadDocumentEngine();
   }, []);
 
   async function loadDocumentEngine() {
+    if (!activeFundReady) {
+      return;
+    }
+
+    if (!activeFundName) {
+      setCapitalCalls([]);
+      setDistributions([]);
+      setDocuments([]);
+      setSelectedCapitalCallId("");
+      setSelectedDistributionId("");
+      setErrorMessage(
+        "No governed active fund is available for this account."
+      );
+      setLoading(false);
+      return;
+    }
+
     if (!isSupabaseConfigured || !supabase) {
       setErrorMessage(
-  "The sample Document Engine is temporarily unavailable. Please request a walkthrough."
-);
+        "The Document Engine data connection is unavailable."
+      );
       setLoading(false);
       return;
     }
@@ -219,9 +266,10 @@ const [message, setMessage] = useState("");
     const { data: callData, error: callError } = await supabase
       .from("capital_calls")
       .select(
-        "id, fund_id, call_name, call_date, due_date, call_amount, status, funds(name)"
+        "id, fund_id, call_name, call_date, due_date, call_amount, status, funds!inner(name)"
       )
       .eq("status", "approved")
+      .eq("funds.name", activeFundName)
       .order("created_at", { ascending: false })
       .limit(10);
 
@@ -234,9 +282,10 @@ const [message, setMessage] = useState("");
     const { data: distributionData, error: distributionError } = await supabase
       .from("distributions")
       .select(
-        "id, fund_id, distribution_name, distribution_date, payment_date, distribution_amount, status, funds(name)"
+        "id, fund_id, distribution_name, distribution_date, payment_date, distribution_amount, status, funds!inner(name)"
       )
       .eq("status", "approved")
+      .eq("funds.name", activeFundName)
       .order("created_at", { ascending: false })
       .limit(10);
 
@@ -249,8 +298,9 @@ const [message, setMessage] = useState("");
     const { data: documentData, error: documentError } = await supabase
       .from("investor_documents")
       .select(
-        "id, investor_id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, storage_path, storage_url, generated_at"
+        "id, fund_id, investor_id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, storage_path, generated_at"
       )
+      .eq("fund_name", activeFundName)
       .order("generated_at", { ascending: false })
       .limit(20);
 
@@ -281,9 +331,14 @@ const matchedCapitalCall = capitalCallIdFromUrl
 if (matchedCapitalCall) {
   setSelectedCapitalCallId(matchedCapitalCall.id);
   setMessage(
-    `Capital Call Notice Batch received: ${
+    `Capital Call Notice Batch received for ${activeFundName}: ${
       matchedCapitalCall.call_name ?? "Approved Capital Call"
     }. Review and generate notices below.`
+  );
+} else if (capitalCallIdFromUrl) {
+  setSelectedCapitalCallId("");
+  setMessage(
+    `The requested capital call is not available for the governed active fund ${activeFundName}.`
   );
 } else if (approvedCalls[0]) {
   setSelectedCapitalCallId(approvedCalls[0].id);
@@ -297,13 +352,14 @@ if (matchedCapitalCall) {
   }
 
   async function loadDocumentsOnly() {
-    if (!supabase) return;
+    if (!supabase || !activeFundReady || !activeFundName) return;
 
     const { data, error } = await supabase
       .from("investor_documents")
       .select(
-        "id, investor_id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, storage_path, storage_url, generated_at"
+        "id, fund_id, investor_id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, storage_path, generated_at"
       )
+      .eq("fund_name", activeFundName)
       .order("generated_at", { ascending: false })
       .limit(20);
 
@@ -312,11 +368,131 @@ if (matchedCapitalCall) {
     }
   }
 
+  function requireActiveFundDocument(
+    documentRecord: InvestorDocument,
+    actionLabel: string
+  ) {
+    if (
+      !activeFundReady ||
+      !activeFundName ||
+      documentRecord.fund_name !== activeFundName
+    ) {
+      setMessage(
+        `${actionLabel} blocked because the document is outside the governed active fund.`
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  async function getSecureApiHeaders(includeJson = true) {
+    if (!supabase) {
+      throw new Error("The Document Engine data connection is unavailable.");
+    }
+
+    const { data, error } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token || "";
+
+    if (error || !accessToken) {
+      throw new Error("A secure VENTIQ session is required for document storage.");
+    }
+
+    return {
+      Authorization: `Bearer ${accessToken}`,
+      ...(includeJson ? { "Content-Type": "application/json" } : {}),
+    };
+  }
+
+  async function storeInvestorDocumentPdf(
+    documentRecord: InvestorDocument,
+    blob: Blob,
+    fileName: string
+  ) {
+    if (!requireActiveFundDocument(documentRecord, "Private PDF storage")) {
+      throw new Error("The document is outside the governed active fund.");
+    }
+
+    const headers = await getSecureApiHeaders(false);
+    const formData = new FormData();
+    formData.append("document_kind", "investor_document");
+    formData.append("document_id", documentRecord.id);
+    formData.append("fund_name", activeFundName);
+    formData.append(
+      "file",
+      new File([blob], fileName, { type: "application/pdf" })
+    );
+
+    const response = await fetch("/api/document-studio/file-access", {
+      method: "PUT",
+      headers,
+      body: formData,
+    });
+
+    const payload = (await response.json()) as {
+      error?: string;
+      storage_path?: string;
+      status?: string;
+      portal_status?: string;
+    };
+
+    if (!response.ok || !payload.storage_path) {
+      throw new Error(payload.error || "Unable to store the private PDF.");
+    }
+
+    return payload;
+  }
+
+  async function handleOpenStoredPdf(documentRecord: InvestorDocument) {
+    if (!documentRecord.storage_path) {
+      setMessage("Please store the PDF before opening it.");
+      return;
+    }
+
+    if (!requireActiveFundDocument(documentRecord, "Secure PDF access")) {
+      return;
+    }
+
+    setMessage("");
+
+    try {
+      const headers = await getSecureApiHeaders(true);
+      const response = await fetch("/api/document-studio/file-access", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          document_kind: "investor_document",
+          document_id: documentRecord.id,
+          fund_name: activeFundName,
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        error?: string;
+        signed_url?: string;
+      };
+
+      if (!response.ok || !payload.signed_url) {
+        throw new Error(payload.error || "Unable to create secure PDF access.");
+      }
+
+      window.open(payload.signed_url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      setMessage(
+        `Could not open stored PDF securely: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  }
+
   async function handleDeleteInvestorDocument(documentRecord: InvestorDocument) {
     if (!supabase) {
-      setMessage(
-  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
-);
+      setMessage("The Document Engine data connection is unavailable.");
+      return;
+    }
+
+    if (!requireActiveFundDocument(documentRecord, "Delete")) {
       return;
     }
 
@@ -332,7 +508,8 @@ if (matchedCapitalCall) {
     const { error } = await supabase
       .from("investor_documents")
       .delete()
-      .eq("id", documentRecord.id);
+      .eq("id", documentRecord.id)
+      .eq("fund_name", activeFundName);
 
     if (error) {
       setMessage(`Could not delete document: ${error.message}`);
@@ -354,9 +531,11 @@ if (matchedCapitalCall) {
   nextStatus: string
 ) {
   if (!supabase) {
-    setMessage(
-  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
-);
+    setMessage("The Document Engine data connection is unavailable.");
+    return;
+  }
+
+  if (!requireActiveFundDocument(documentRecord, "Email status update")) {
     return;
   }
 
@@ -369,7 +548,8 @@ if (matchedCapitalCall) {
       .update({
         email_status: nextStatus,
       })
-      .eq("id", documentRecord.id);
+      .eq("id", documentRecord.id)
+      .eq("fund_name", activeFundName);
 
     if (error) {
       throw error;
@@ -401,7 +581,7 @@ if (matchedCapitalCall) {
 async function handleQueueInvestorDocumentEmail(
   documentRecord: InvestorDocument
 ) {
-  if (!documentRecord.storage_url) {
+  if (!documentRecord.storage_path) {
     setMessage("Please store the PDF before queuing email.");
     return;
   }
@@ -412,7 +592,7 @@ async function handleQueueInvestorDocumentEmail(
 async function handleMarkInvestorDocumentEmailSent(
   documentRecord: InvestorDocument
 ) {
-  if (!documentRecord.storage_url) {
+  if (!documentRecord.storage_path) {
     setMessage("Please store the PDF before marking email as sent.");
     return;
   }
@@ -422,15 +602,13 @@ async function handleMarkInvestorDocumentEmailSent(
 
 async function handleQueueAllStoredEmails() {
   if (!supabase) {
-    setMessage(
-  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
-);
+    setMessage("The Document Engine data connection is unavailable.");
     return;
   }
 
   const queueableDocuments = documents.filter(
     (documentRecord) =>
-      documentRecord.storage_url &&
+      documentRecord.storage_path &&
       documentRecord.email_status !== "queued" &&
       documentRecord.email_status !== "sent"
   );
@@ -459,7 +637,8 @@ async function handleQueueAllStoredEmails() {
       .update({
         email_status: "queued",
       })
-      .in("id", documentIds);
+      .in("id", documentIds)
+      .eq("fund_name", activeFundName);
 
     if (error) {
       throw error;
@@ -481,9 +660,7 @@ async function handleQueueAllStoredEmails() {
 
 async function handleMarkAllQueuedEmailsSent() {
   if (!supabase) {
-    setMessage(
-  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
-);
+    setMessage("The Document Engine data connection is unavailable.");
     return;
   }
 
@@ -515,7 +692,8 @@ async function handleMarkAllQueuedEmailsSent() {
       .update({
         email_status: "sent",
       })
-      .in("id", documentIds);
+      .in("id", documentIds)
+      .eq("fund_name", activeFundName);
 
     if (error) {
       throw error;
@@ -536,6 +714,10 @@ async function handleMarkAllQueuedEmailsSent() {
 }
 
   function handlePreviewInvestorDocument(documentRecord: InvestorDocument) {
+    if (!requireActiveFundDocument(documentRecord, "Preview")) {
+      return;
+    }
+
     setSelectedPreviewDocument(documentRecord);
     setMessage(`Preview opened for "${documentRecord.document_name}".`);
 
@@ -613,6 +795,10 @@ async function buildPdfForSelectedDocument() {
 async function handleDownloadPdf() {
   if (!selectedPreviewDocument) {
     setMessage("Please preview a document before downloading PDF.");
+    return;
+  }
+
+  if (!requireActiveFundDocument(selectedPreviewDocument, "PDF download")) {
     return;
   }
 
@@ -771,9 +957,7 @@ function buildPdfBlobFromDocumentRecord(documentRecord: InvestorDocument) {
 }
 async function handleStorePdfInSupabase() {
   if (!supabase) {
-    setMessage(
-  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
-);
+    setMessage("The Document Engine data connection is unavailable.");
     return;
   }
 
@@ -782,59 +966,33 @@ async function handleStorePdfInSupabase() {
     return;
   }
 
+  if (!requireActiveFundDocument(selectedPreviewDocument, "PDF storage")) {
+    return;
+  }
+
   setUploadingPdfId(selectedPreviewDocument.id);
   setMessage("");
 
   try {
     const { blob, fileName } = await buildPdfForSelectedDocument();
-
-    const storagePath = `${selectedPreviewDocument.id}/${fileName}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("investor-documents")
-      .upload(storagePath, blob, {
-        contentType: "application/pdf",
-        upsert: true,
-        cacheControl: "3600",
-      });
-
-    if (uploadError) {
-      throw uploadError;
-    }
-
-    const { data: publicUrlData } = supabase.storage
-      .from("investor-documents")
-      .getPublicUrl(storagePath);
-
-    const publicUrl = publicUrlData.publicUrl;
-
-    const { error: updateError } = await supabase
-      .from("investor_documents")
-      .update({
-        storage_path: storagePath,
-        storage_url: publicUrl,
-        status: "stored",
-        portal_status: "available",
-      })
-      .eq("id", selectedPreviewDocument.id);
-
-    if (updateError) {
-      throw updateError;
-    }
+    const stored = await storeInvestorDocumentPdf(
+      selectedPreviewDocument,
+      blob,
+      fileName
+    );
 
     const updatedDocument = {
       ...selectedPreviewDocument,
-      storage_path: storagePath,
-      storage_url: publicUrl,
-      status: "stored",
-      portal_status: "available",
+      storage_path: stored.storage_path ?? null,
+      status: stored.status ?? "stored",
+      portal_status: stored.portal_status ?? "available",
     };
 
     setSelectedPreviewDocument(updatedDocument);
 
     await loadDocumentsOnly();
 
-    setMessage(`PDF stored in document vault: ${fileName}`);
+    setMessage(`PDF stored privately in document vault: ${fileName}`);
   } catch (error) {
     setMessage(
       `Could not store PDF: ${
@@ -847,14 +1005,12 @@ async function handleStorePdfInSupabase() {
 }
 async function handleStoreAllPdfsInSupabase() {
   if (!supabase) {
-    setMessage(
-  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
-);
+    setMessage("The Document Engine data connection is unavailable.");
     return;
   }
 
   const unstoredDocuments = documents.filter(
-    (documentRecord) => !documentRecord.storage_url
+    (documentRecord) => !documentRecord.storage_path
   );
 
   if (unstoredDocuments.length === 0) {
@@ -870,12 +1026,19 @@ async function handleStoreAllPdfsInSupabase() {
 
   setStoringAllPdfs(true);
   setMessage("");
-  setBulkStoreProgress(`Starting bulk PDF storage for ${unstoredDocuments.length} documents...`);
+  setBulkStoreProgress(
+    `Starting private PDF storage for ${unstoredDocuments.length} documents...`
+  );
 
   let storedCount = 0;
   let failedCount = 0;
 
   for (const documentRecord of unstoredDocuments) {
+    if (!requireActiveFundDocument(documentRecord, "Bulk PDF storage")) {
+      failedCount += 1;
+      continue;
+    }
+
     try {
       setBulkStoreProgress(
         `Storing ${storedCount + failedCount + 1} of ${
@@ -885,44 +1048,11 @@ async function handleStoreAllPdfsInSupabase() {
 
       const { blob, fileName } = buildPdfBlobFromDocumentRecord(documentRecord);
 
-      const storagePath = `${documentRecord.id}/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("investor-documents")
-        .upload(storagePath, blob, {
-          contentType: "application/pdf",
-          upsert: true,
-          cacheControl: "3600",
-        });
-
-      if (uploadError) {
-        throw uploadError;
-      }
-
-      const { data: publicUrlData } = supabase.storage
-        .from("investor-documents")
-        .getPublicUrl(storagePath);
-
-      const publicUrl = publicUrlData.publicUrl;
-
-      const { error: updateError } = await supabase
-        .from("investor_documents")
-        .update({
-          storage_path: storagePath,
-          storage_url: publicUrl,
-          status: "stored",
-          portal_status: "available",
-        })
-        .eq("id", documentRecord.id);
-
-      if (updateError) {
-        throw updateError;
-      }
-
+      await storeInvestorDocumentPdf(documentRecord, blob, fileName);
       storedCount += 1;
     } catch (error) {
       failedCount += 1;
-      console.error("Bulk PDF store failed:", error);
+      console.error("Bulk private PDF store failed:", error);
     }
   }
 
@@ -930,16 +1060,14 @@ async function handleStoreAllPdfsInSupabase() {
 
   setBulkStoreProgress("");
   setMessage(
-    `Bulk PDF storage completed. ${storedCount} documents stored. ${failedCount} failed.`
+    `Private PDF storage completed. ${storedCount} documents stored. ${failedCount} failed.`
   );
   setStoringAllPdfs(false);
 }
 
   async function generateCapitalCallDocuments() {
     if (!supabase) {
-      setMessage(
-  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
-);
+      setMessage("The Document Engine data connection is unavailable.");
       return;
     }
 
@@ -949,6 +1077,18 @@ async function handleStoreAllPdfsInSupabase() {
 
     if (!selectedCall) {
       setMessage("Please select an approved capital call.");
+      return;
+    }
+
+    if (
+      !activeFundReady ||
+      !activeFundName ||
+      !selectedCall.fund_id ||
+      getFundName(selectedCall.funds) !== activeFundName
+    ) {
+      setMessage(
+        "Capital call notice generation blocked because the selected workflow is outside the governed active fund."
+      );
       return;
     }
 
@@ -983,7 +1123,8 @@ async function handleStoreAllPdfsInSupabase() {
       .from("investor_documents")
       .select("investor_id")
       .eq("capital_call_id", selectedCall.id)
-      .eq("document_type", "Capital Call Notice");
+      .eq("document_type", "Capital Call Notice")
+      .eq("fund_name", activeFundName);
 
     if (existingError) {
       setMessage(`Could not check existing documents: ${existingError.message}`);
@@ -1024,7 +1165,7 @@ async function handleStoreAllPdfsInSupabase() {
         } - ${investor?.name ?? "Investor"}`,
         investor_name: investor?.name ?? "Unknown Investor",
         investor_email: investor?.email ?? null,
-        fund_name: fundName,
+        fund_name: activeFundName,
         amount: row.allocation_amount ?? row.call_amount ?? 0,
         status: "generated",
         email_status: "not_sent",
@@ -1055,9 +1196,7 @@ async function handleStoreAllPdfsInSupabase() {
 
   async function generateDistributionDocuments() {
     if (!supabase) {
-      setMessage(
-  "The sample document workflow is temporarily unavailable. Please request a walkthrough."
-);
+      setMessage("The Document Engine data connection is unavailable.");
       return;
     }
 
@@ -1067,6 +1206,18 @@ async function handleStoreAllPdfsInSupabase() {
 
     if (!selectedDistribution) {
       setMessage("Please select an approved distribution.");
+      return;
+    }
+
+    if (
+      !activeFundReady ||
+      !activeFundName ||
+      !selectedDistribution.fund_id ||
+      getFundName(selectedDistribution.funds) !== activeFundName
+    ) {
+      setMessage(
+        "Distribution notice generation blocked because the selected workflow is outside the governed active fund."
+      );
       return;
     }
 
@@ -1101,7 +1252,8 @@ async function handleStoreAllPdfsInSupabase() {
       .from("investor_documents")
       .select("investor_id")
       .eq("distribution_id", selectedDistribution.id)
-      .eq("document_type", "Distribution Notice");
+      .eq("document_type", "Distribution Notice")
+      .eq("fund_name", activeFundName);
 
     if (existingError) {
       setMessage(`Could not check existing documents: ${existingError.message}`);
@@ -1142,7 +1294,7 @@ async function handleStoreAllPdfsInSupabase() {
         } - ${investor?.name ?? "Investor"}`,
         investor_name: investor?.name ?? "Unknown Investor",
         investor_email: investor?.email ?? null,
-        fund_name: fundName,
+        fund_name: activeFundName,
         amount: row.allocation_amount ?? row.distribution_amount ?? 0,
         status: "generated",
         email_status: "not_sent",
@@ -1191,14 +1343,14 @@ const selectedCapitalCall = capitalCalls.find(
           </a>
         </div>
         <div className="sample-data-ribbon">
-          Live document workflow preview · Sample data shown for demonstration
+          Governed Active Fund: {activeFundName || "Unavailable"} | Live document workflow
         </div>
         {loading && (
           <div className="preview-card">
-            <h2>Preparing Document Engine Preview...</h2>
+            <h2>Preparing Governed Document Engine...</h2>
             <p>
               VENTIQ is reading approved capital calls, distributions and
-              investor document records.
+              investor document records only for the governed active fund.
             </p>
           </div>
         )}
@@ -1241,8 +1393,9 @@ const selectedCapitalCall = capitalCalls.find(
 
               <div className="explain-box">
                 VENTIQ only generates investor reporting documents from approved
-                workflows. Once generated, each investor document is linked to
-                the investor, fund, workflow and future portal/email status.
+                workflows inside the governed active fund. Once generated, each
+                investor document is linked to the investor, fund, workflow and
+                future portal/email status.
               </div>
 
               {message && <div className="logic-note">{message}</div>}
@@ -1293,8 +1446,8 @@ const selectedCapitalCall = capitalCalls.find(
 
               {capitalCalls.length === 0 && (
                 <div className="explain-box">
-                  No approved capital calls found yet. Approve a capital call
-                  first from the Capital Call module.
+                  No approved capital calls found for the governed active fund.
+                  Approve a capital call first from the Capital Call module.
                 </div>
               )}
 
@@ -1345,8 +1498,8 @@ const selectedCapitalCall = capitalCalls.find(
 
               {distributions.length === 0 && (
                 <div className="explain-box">
-                  No approved distributions found yet. Approve a distribution
-                  first from the Distribution Waterfall module.
+                  No approved distributions found for the governed active fund.
+                  Approve a distribution first from the Distribution Waterfall module.
                 </div>
               )}
 
@@ -1393,7 +1546,7 @@ const selectedCapitalCall = capitalCalls.find(
   <h2>Generated Investor Documents</h2>
 
   <p className="eyebrow">
-    Latest investor document records
+    Latest investor document records for the governed active fund
   </p>
   <div className="action-row">
   <button
@@ -1430,7 +1583,7 @@ const selectedCapitalCall = capitalCalls.find(
 
   {documents.length === 0 && (
     <div className="explain-box">
-      No investor documents generated yet.
+      No investor documents generated for the governed active fund yet.
     </div>
   )}
 
@@ -1547,11 +1700,11 @@ const selectedCapitalCall = capitalCalls.find(
   <span className="small-pill">No Investor Link</span>
 )}
 
-          {!documentRecord.storage_url && (
+          {!documentRecord.storage_path && (
             <span className="small-pill">Store PDF First</span>
           )}
 
-          {documentRecord.storage_url &&
+          {documentRecord.storage_path &&
             documentRecord.email_status !== "queued" &&
             documentRecord.email_status !== "sent" && (
               <button
@@ -1580,7 +1733,7 @@ const selectedCapitalCall = capitalCalls.find(
               </button>
             )}
 
-          {documentRecord.storage_url &&
+          {documentRecord.storage_path &&
             documentRecord.email_status === "queued" && (
               <button
                 type="button"
@@ -1827,7 +1980,7 @@ const selectedCapitalCall = capitalCalls.find(
           <div className="journal-row">
   <span>Storage Status</span>
   <strong>
-    {selectedPreviewDocument.storage_url ? "PDF stored" : "Not stored yet"}
+    {selectedPreviewDocument.storage_path ? "PDF stored privately" : "Not stored yet"}
   </strong>
 </div>
         </div>
@@ -1926,15 +2079,11 @@ const selectedCapitalCall = capitalCalls.find(
       : "Store PDF to Portal"}
   </button>
 
-  {selectedPreviewDocument?.storage_url && (
-    <a
-      href={selectedPreviewDocument.storage_url}
-      target="_blank"
-      rel="noreferrer"
+  {selectedPreviewDocument?.storage_path && (
+    <button
+      type="button"
+      onClick={() => handleOpenStoredPdf(selectedPreviewDocument)}
       style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
         border: "1px solid rgba(74, 222, 128, 0.45)",
         background: "rgba(22, 101, 52, 0.18)",
         color: "#bbf7d0",
@@ -1942,11 +2091,11 @@ const selectedCapitalCall = capitalCalls.find(
         padding: "12px 18px",
         fontSize: "15px",
         fontWeight: 800,
-        textDecoration: "none",
+        cursor: "pointer",
       }}
     >
-      Open Stored PDF
-    </a>
+      Open Stored PDF Securely
+    </button>
   )}
 
   {selectedPreviewDocument?.email_status !== "queued" &&
@@ -1957,7 +2106,7 @@ const selectedCapitalCall = capitalCalls.find(
         handleQueueInvestorDocumentEmail(selectedPreviewDocument)
       }
       disabled={
-        !selectedPreviewDocument.storage_url ||
+        !selectedPreviewDocument.storage_path ||
         emailActionId === selectedPreviewDocument.id
       }
     >

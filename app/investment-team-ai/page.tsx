@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { isSupabaseConfigured } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
 import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 
@@ -15,6 +15,18 @@ type PerformanceCalculationResponse = {
   reconciliations?: DataRow[];
   portfolioValuations?: DataRow[];
   error?: string;
+};
+
+type InvestmentTeamOverviewResponse = {
+  activation?: DataRow | null;
+  portfolioRows?: DataRow[];
+  valuationRows?: DataRow[];
+  repaymentRows?: DataRow[];
+  pdfRows?: DataRow[];
+  fundRow?: DataRow | null;
+  complianceRows?: DataRow[];
+  error?: string;
+  code?: string;
 };
 
 type InvestmentActivityEvent = {
@@ -152,12 +164,11 @@ function getRiskEmoji(value: string) {
 export default function InvestmentTeamAIPage() {
   const {
     activeFundName,
+    availableFundNames,
     setActiveFundName,
     isReady: isFundContextReady,
   } = useActiveFund("VENTIQ Growth Fund II");
   const { session } = useVentiqAuth();
-
-  const [fundOptions, setFundOptions] = useState<string[]>([]);
   const [activationStatus, setActivationStatus] = useState("Setup Not Started");
   const [activationDetails, setActivationDetails] = useState<DataRow | null>(null);
 
@@ -190,7 +201,7 @@ export default function InvestmentTeamAIPage() {
   async function loadInvestmentTeamWorkspace() {
     if (!isFundContextReady) return;
 
-    if (!isSupabaseConfigured || !supabase) {
+    if (!isSupabaseConfigured) {
       setErrorMessage(
         "The Investment Team workspace is unavailable because Supabase is not configured."
       );
@@ -255,139 +266,61 @@ export default function InvestmentTeamAIPage() {
         ? String(calculationSourceBatchIds[0] ?? "")
         : "";
 
-      const db = supabase as any;
+      const accessToken = session?.access_token ?? "";
 
-      function createFundBatchQuery(
-        tableName: string,
-        orderBy: string,
-        ascending: boolean
-      ) {
-        let query = db
-          .from(tableName)
-          .select("*")
-          .eq("fund_name", activeFundName);
-
-        if (calculationSourceBatch) {
-          query = query.eq("source_batch_id", calculationSourceBatch);
-        }
-
-        return query.order(orderBy, { ascending });
-      }
-
-      let fundRowQuery = db
-        .from("fund_master")
-        .select("*")
-        .eq("fund_name", activeFundName);
-
-      if (calculationSourceBatch) {
-        fundRowQuery = fundRowQuery.eq(
-          "source_batch_id",
-          calculationSourceBatch
+      if (!accessToken) {
+        throw new Error(
+          "Please sign in before opening the Investment Team workspace."
         );
       }
 
-      const [
-        fundOptionsResult,
-        activationResult,
-        portfolioRowsResult,
-        valuationRowsResult,
-        repaymentRowsResult,
-        pdfRowsResult,
-        fundRowResult,
-        complianceRowsResult,
-      ] = await Promise.all([
-        db.from("fund_master").select("fund_name").order("fund_name"),
+      const overviewParams = new URLSearchParams({
+        fundName: activeFundName,
+      });
 
-        db
-          .from("fund_activation_status")
-          .select("*")
-          .eq("fund_name", activeFundName)
-          .maybeSingle(),
-
-        createFundBatchQuery(
-          "portfolio_investments",
-          "created_at",
-          true
-        ),
-
-        createFundBatchQuery(
-          "portfolio_valuations",
-          "valuation_date",
-          false
-        ),
-
-        createFundBatchQuery(
-          "debt_repayment_schedules",
-          "due_date",
-          true
-        ),
-
-        db
-          .from("pdf_intelligence_documents")
-          .select("*")
-          .eq("fund_name", activeFundName)
-          .order("created_at", { ascending: false }),
-
-        fundRowQuery
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-
-        createFundBatchQuery(
-          "compliance_items",
-          "created_at",
-          true
-        ),
-      ]);
-
-      const firstError =
-        fundOptionsResult.error ||
-        portfolioRowsResult.error ||
-        valuationRowsResult.error ||
-        repaymentRowsResult.error ||
-        pdfRowsResult.error ||
-        fundRowResult.error ||
-        complianceRowsResult.error;
-
-      if (firstError) {
-        throw new Error(firstError.message);
+      if (calculationSourceBatch) {
+        overviewParams.set("sourceBatchId", calculationSourceBatch);
       }
 
-      const availableFundNames = Array.from(
-        new Set(
-          ((fundOptionsResult.data ?? []) as DataRow[])
-            .map((row) => getString(row, ["fund_name"], ""))
-            .filter(Boolean)
-        )
+      const overviewResponse = await fetch(
+        `/api/investment-team/overview?${overviewParams.toString()}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          cache: "no-store",
+        }
       );
+      const overviewData =
+        (await overviewResponse.json()) as InvestmentTeamOverviewResponse;
 
-      if (!availableFundNames.includes(activeFundName)) {
-        availableFundNames.unshift(activeFundName);
+      if (!overviewResponse.ok) {
+        throw new Error(
+          overviewData.error ||
+            "The Investment Team workspace is unavailable because Supabase is not configured."
+        );
       }
 
-      setFundOptions(availableFundNames);
-
-      const activation = activationResult.error
-        ? null
-        : ((activationResult.data as DataRow | null) ?? null);
+      const activation = overviewData.activation ?? null;
 
       setActivationDetails(activation);
       setActivationStatus(
         getString(activation ?? undefined, ["status"], "Setup Not Started")
       );
 
-      const rawPortfolioRows = (portfolioRowsResult.data ?? []) as DataRow[];
+      const rawPortfolioRows = overviewData.portfolioRows ?? [];
       const authenticatedValuationRows =
         performanceCalculationData?.portfolioValuations ?? [];
-      const directValuationRows = (valuationRowsResult.data ?? []) as DataRow[];
+      const directValuationRows = overviewData.valuationRows ?? [];
       const valuationRows =
         authenticatedValuationRows.length > 0
           ? authenticatedValuationRows
           : directValuationRows;
-      const rawRepaymentRows = (repaymentRowsResult.data ?? []) as DataRow[];
-      const pdfRows = (pdfRowsResult.data ?? []) as DataRow[];
-      const complianceRows = (complianceRowsResult.data ?? []) as DataRow[];
-      const fundRow = (fundRowResult.data as DataRow | null) ?? null;
+      const rawRepaymentRows = overviewData.repaymentRows ?? [];
+      const pdfRows = overviewData.pdfRows ?? [];
+      const complianceRows = overviewData.complianceRows ?? [];
+      const fundRow = overviewData.fundRow ?? null;
       const calculationPortfolioRows =
         performanceCalculationData?.portfolioMetrics ?? [];
 
@@ -1090,7 +1023,7 @@ export default function InvestmentTeamAIPage() {
                 onChange={(event) => setActiveFundName(event.target.value)}
                 value={activeFundName}
               >
-                {fundOptions.map((fundName) => (
+                {availableFundNames.map((fundName) => (
                   <option key={fundName} value={fundName}>
                     {fundName}
                   </option>

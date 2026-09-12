@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { useActiveFund } from "../../lib/useActiveFund";
 
 type CapitalCall = {
   id: string;
@@ -138,6 +139,9 @@ function getStatusIcon(status: string) {
 }
 
 export default function ActivityEnginePage() {
+  const { activeFundName, isReady: activeFundReady } = useActiveFund(
+    "VENTIQ Growth Fund II"
+  );
   const [capitalCalls, setCapitalCalls] = useState<CapitalCall[]>([]);
   const [documents, setDocuments] = useState<InvestorDocument[]>([]);
   const [dataRoomDocuments, setDataRoomDocuments] = useState<
@@ -157,9 +161,13 @@ export default function ActivityEnginePage() {
 
   useEffect(() => {
     async function loadActivityEngine() {
+      if (!activeFundReady || !activeFundName) {
+        return;
+      }
+
       if (!isSupabaseConfigured || !supabase) {
         setErrorMessage(
-          "The sample Activity Engine is temporarily unavailable. Please request a walkthrough."
+          "The Activity Engine is unavailable because Supabase is not configured"
         );
         setLoading(false);
         return;
@@ -168,49 +176,67 @@ export default function ActivityEnginePage() {
       setLoading(true);
       setErrorMessage("");
 
+                        const { data: sessionData, error: sessionError } =
+              await supabase.auth.getSession();
+
+            if (sessionError || !sessionData.session?.access_token) {
+              setErrorMessage(
+                sessionError?.message ||
+                  "Please sign in before loading the Activity Engine."
+              );
+              setLoading(false);
+              return;
+            }
+
+            const overviewResponse = await fetch(
+              `/api/activity-engine/overview?fundName=${encodeURIComponent(
+                activeFundName
+              )}`,
+              {
+                method: "GET",
+                headers: {
+                  Authorization: `Bearer ${sessionData.session.access_token}`,
+                },
+                cache: "no-store",
+              }
+            );
+
+            const overviewPayload = (await overviewResponse
+              .json()
+              .catch(() => ({}))) as {
+              error?: string;
+              capitalCallResult?: unknown[];
+              documentResult?: unknown[];
+              dataRoomDocumentResult?: unknown[];
+              engagementResult?: unknown[];
+              questionResult?: unknown[];
+              migrationActivationResult?: unknown[];
+            };
+
+            if (!overviewResponse.ok) {
+              setErrorMessage(
+                overviewPayload.error ||
+                  "Unable to load governed Activity Engine data."
+              );
+              setLoading(false);
+              return;
+            }
+
             const [
-        capitalCallResult,
-        documentResult,
-        dataRoomDocumentResult,
-        engagementResult,
-        questionResult,
-        migrationActivationResult,
-      ] = await Promise.all([
-        supabase
-          .from("capital_calls")
-          .select(
-            "id, call_name, call_date, due_date, call_amount, status, created_at, funds(name)"
-          )
-          .order("created_at", { ascending: false })
-          .limit(10),
-        supabase
-          .from("investor_documents")
-          .select(
-            "id, investor_id, document_type, document_name, investor_name, investor_email, fund_name, amount, status, email_status, portal_status, storage_url, generated_at"
-          )
-          .order("generated_at", { ascending: false })
-          .limit(40),
-        supabase
-          .from("data_room_documents")
-          .select("*")
-          .order("imported_at", { ascending: false })
-          .limit(40),
-        supabase
-          .from("data_room_engagement_events")
-          .select("*")
-          .order("event_time", { ascending: false })
-          .limit(40),
-        supabase
-          .from("data_room_questions")
-          .select("*")
-          .order("asked_at", { ascending: false })
-          .limit(40),
-                  supabase
-          .from("migration_activation_events")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(40),
-      ]);
+              capitalCallResult,
+              documentResult,
+              dataRoomDocumentResult,
+              engagementResult,
+              questionResult,
+              migrationActivationResult,
+            ] = [
+              { data: overviewPayload.capitalCallResult ?? [], error: null as { message: string } | null },
+              { data: overviewPayload.documentResult ?? [], error: null as { message: string } | null },
+              { data: overviewPayload.dataRoomDocumentResult ?? [], error: null as { message: string } | null },
+              { data: overviewPayload.engagementResult ?? [], error: null as { message: string } | null },
+              { data: overviewPayload.questionResult ?? [], error: null as { message: string } | null },
+              { data: overviewPayload.migrationActivationResult ?? [], error: null as { message: string } | null },
+            ];
 
           const firstError =
         capitalCallResult.error ||
@@ -242,7 +268,7 @@ export default function ActivityEnginePage() {
     }
 
     loadActivityEngine();
-  }, []);
+  }, [activeFundName, activeFundReady]);
 
   const activityEvents = useMemo(() => {
     const events: ActivityEvent[] = [];
@@ -452,22 +478,6 @@ export default function ActivityEnginePage() {
     (question) => question.status === "Answered"
   );
 
-  const dataRoomFolderSet = new Set(
-    dataRoomDocuments.map((documentRecord) => documentRecord.suggested_folder)
-  );
-
-  const dataRoomReadinessScore = Math.min(
-    95,
-    55 +
-      Math.min(dataRoomDocuments.length * 4, 20) +
-      Math.min(dataRoomEngagementEvents.length * 2, 10) +
-      Math.min(answeredDDQQuestions.length * 3, 12) -
-      Math.min(openDDQQuestions.length * 2, 10) +
-      (dataRoomFolderSet.has("Fund Overview") ? 5 : 0) +
-      (dataRoomFolderSet.has("Legal & Compliance") ? 5 : 0) +
-      (dataRoomFolderSet.has("Track Record & Performance") ? 5 : 0) +
-      (dataRoomFolderSet.has("Investor Reporting Samples") ? 5 : 0)
-  );
 
   const recommendedAction =
     openDDQQuestions.length > 0
@@ -734,8 +744,8 @@ export default function ActivityEnginePage() {
                 </div>
 
                 <div className="journal-row">
-                  <span>Data Room Readiness</span>
-                  <strong>{dataRoomReadinessScore}%</strong>
+                  <span>Data Room Documents</span>
+                  <strong>{dataRoomDocuments.length}</strong>
                 </div>
 
                 <div className="journal-row">

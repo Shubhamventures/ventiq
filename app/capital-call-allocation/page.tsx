@@ -1,7 +1,8 @@
-﻿"use client";
+"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { useActiveFund } from "@/lib/useActiveFund";
 
 type ImportBatch = {
   id: string;
@@ -43,6 +44,13 @@ type AllocationRow = JoinedCommitment & {
   exceptionNotes: string;
 };
 
+type CapitalCallAllocationOverviewResponse = {
+  batches?: ImportBatch[];
+  selectedBatchId?: string;
+  commitments?: JoinedCommitment[];
+  error?: string;
+};
+
 function formatAmount(value: number) {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -71,6 +79,26 @@ function chunkRows<T>(rows: T[], size: number) {
 }
 
 export default function CapitalCallAllocationPage() {
+  const { activeFundName, isReady: activeFundReady } = useActiveFund(
+    "VENTIQ Growth Fund II"
+  );
+
+  return (
+    <CapitalCallAllocationWorkspace
+      key={activeFundReady && activeFundName ? activeFundName : "__fund_loading__"}
+      activeFundName={activeFundName}
+      activeFundReady={activeFundReady}
+    />
+  );
+}
+
+function CapitalCallAllocationWorkspace({
+  activeFundName,
+  activeFundReady,
+}: {
+  activeFundName: string;
+  activeFundReady: boolean;
+}) {
   const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [commitments, setCommitments] = useState<JoinedCommitment[]>([]);
@@ -83,104 +111,148 @@ export default function CapitalCallAllocationPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedBatchId, setSavedBatchId] = useState("");
+  const skipNextCommitmentEffectRef = useRef(false);
 
   useEffect(() => {
-    loadBatches();
-  }, []);
-
-  useEffect(() => {
-    if (selectedBatchId) {
-      loadCommitments(selectedBatchId);
+    if (!activeFundReady || !activeFundName) {
+      return;
     }
-  }, [selectedBatchId]);
 
-  async function loadBatches() {
+    loadBatches();
+  }, [activeFundName, activeFundReady]);
+
+  useEffect(() => {
+    if (!activeFundReady || !activeFundName || !selectedBatchId) {
+      return;
+    }
+
+    if (skipNextCommitmentEffectRef.current) {
+      skipNextCommitmentEffectRef.current = false;
+      return;
+    }
+
+    loadCommitments(selectedBatchId);
+  }, [activeFundName, activeFundReady, selectedBatchId]);
+
+  async function getAccessToken() {
     const supabaseClient = supabase;
 
     if (!supabaseClient) {
-      setMessage("Supabase is not configured. Please check .env.local.");
+      throw new Error("Supabase is not configured. Please check .env.local.");
+    }
+
+    const { data, error } = await supabaseClient.auth.getSession();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const accessToken = data.session?.access_token ?? "";
+
+    if (!accessToken) {
+      throw new Error("Please sign in again to load governed fund data.");
+    }
+
+    return accessToken;
+  }
+
+  async function loadBatches() {
+    if (!activeFundReady || !activeFundName) {
+      setMessage("Authenticated fund access is still loading.");
       return;
     }
 
     setIsLoading(true);
 
-    const { data, error } = await supabaseClient
-      .from("investor_import_batches")
-      .select("*")
-      .order("created_at", { ascending: false });
+    try {
+      const accessToken = await getAccessToken();
+      const response = await fetch(
+        `/api/capital-call-allocation/overview?fundName=${encodeURIComponent(
+          activeFundName
+        )}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: "no-store",
+        }
+      );
+      const result =
+        (await response.json()) as CapitalCallAllocationOverviewResponse;
 
-    if (error) {
-      setMessage(error.message);
+      if (!response.ok) {
+        throw new Error(result.error || "Unable to load investor import batches.");
+      }
+
+      const loadedBatches = Array.isArray(result.batches) ? result.batches : [];
+      const nextSelectedBatchId = String(result.selectedBatchId || "");
+      const nextCommitments = Array.isArray(result.commitments)
+        ? result.commitments
+        : [];
+
+      setBatches(loadedBatches);
+      skipNextCommitmentEffectRef.current = Boolean(nextSelectedBatchId);
+      setSelectedBatchId(nextSelectedBatchId);
+      setCommitments(nextCommitments);
+      setSavedBatchId("");
+
+      if (nextSelectedBatchId) {
+        setMessage(
+          `${nextCommitments.length} commitments loaded for allocation.`
+        );
+      }
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Unable to load allocation data."
+      );
+    } finally {
       setIsLoading(false);
-      return;
     }
-
-    const loadedBatches = (data || []) as ImportBatch[];
-
-    setBatches(loadedBatches);
-
-    if (loadedBatches.length > 0 && !selectedBatchId) {
-      setSelectedBatchId(loadedBatches[0].id);
-    }
-
-    setIsLoading(false);
   }
 
   async function loadCommitments(batchId: string) {
-    const supabaseClient = supabase;
-
-    if (!supabaseClient) {
-      setMessage("Supabase is not configured. Please check .env.local.");
+    if (!activeFundReady || !activeFundName) {
+      setMessage("Authenticated fund access is still loading.");
       return;
     }
 
     setIsLoading(true);
     setMessage("Loading imported commitments...");
 
-    const { data: commitmentData, error: commitmentError } = await supabaseClient
-      .from("fund_commitments")
-      .select("*")
-      .eq("batch_id", batchId)
-      .order("created_at", { ascending: true });
+    try {
+      const accessToken = await getAccessToken();
+      const params = new URLSearchParams({
+        fundName: activeFundName,
+        batchId,
+      });
+      const response = await fetch(
+        `/api/capital-call-allocation/overview?${params.toString()}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: "no-store",
+        }
+      );
+      const result =
+        (await response.json()) as CapitalCallAllocationOverviewResponse;
 
-    if (commitmentError) {
-      setMessage(commitmentError.message);
+      if (!response.ok) {
+        throw new Error(result.error || "Unable to load imported commitments.");
+      }
+
+      const nextCommitments = Array.isArray(result.commitments)
+        ? result.commitments
+        : [];
+
+      setCommitments(nextCommitments);
+      setSavedBatchId("");
+      setMessage(`${nextCommitments.length} commitments loaded for allocation.`);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load imported commitments."
+      );
+    } finally {
       setIsLoading(false);
-      return;
     }
-
-    const commitmentRows = (commitmentData || []) as CommitmentRow[];
-    const investorIds = commitmentRows
-      .map((row) => row.investor_id)
-      .filter(Boolean);
-
-    const { data: investorData, error: investorError } = await supabaseClient
-      .from("investor_master")
-      .select("*")
-      .in("id", investorIds);
-
-    if (investorError) {
-      setMessage(investorError.message);
-      setIsLoading(false);
-      return;
-    }
-
-    const investorRows = (investorData || []) as InvestorRow[];
-    const investorById = new Map<string, InvestorRow>();
-
-    investorRows.forEach((investor) => {
-      investorById.set(investor.id, investor);
-    });
-
-    const joinedRows = commitmentRows.map((commitment) => ({
-      ...commitment,
-      investor: investorById.get(commitment.investor_id),
-    }));
-
-    setCommitments(joinedRows);
-    setSavedBatchId("");
-    setMessage(`${joinedRows.length} commitments loaded for allocation.`);
-    setIsLoading(false);
   }
 
   const selectedBatch = useMemo(() => {
@@ -275,8 +347,18 @@ export default function CapitalCallAllocationPage() {
       return;
     }
 
+    if (!activeFundReady || !activeFundName) {
+      setMessage("Authenticated fund access is still loading.");
+      return;
+    }
+
     if (!selectedBatch) {
       setMessage("Select an imported investor batch first.");
+      return;
+    }
+
+    if (selectedBatch.fund_name !== activeFundName) {
+      setMessage("Selected investor batch does not belong to the active fund.");
       return;
     }
 
@@ -296,7 +378,7 @@ export default function CapitalCallAllocationPage() {
           call_name: `Capital Call Draft - ${new Date().toLocaleDateString(
             "en-IN"
           )}`,
-          fund_name: selectedBatch.fund_name,
+          fund_name: activeFundName,
           call_method: callMethod,
           call_percentage: callMethod === "percentage" ? callPercentage : 0,
           target_call_amount:

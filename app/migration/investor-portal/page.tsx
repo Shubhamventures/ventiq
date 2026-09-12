@@ -2,6 +2,7 @@
 
 import { type ChangeEvent, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { useActiveFund } from "@/lib/useActiveFund";
 
 type Investor = {
   id: string;
@@ -227,6 +228,26 @@ function chunkRows<T>(rows: T[], size: number) {
 }
 
 export default function InvestorPortalMigrationPage() {
+  const { activeFundName, isReady: activeFundReady } = useActiveFund(
+    "VENTIQ Growth Fund II"
+  );
+
+  return (
+    <InvestorPortalMigrationWorkspace
+      key={activeFundReady && activeFundName ? activeFundName : "__fund_loading__"}
+      activeFundName={activeFundName}
+      activeFundReady={activeFundReady}
+    />
+  );
+}
+
+function InvestorPortalMigrationWorkspace({
+  activeFundName,
+  activeFundReady,
+}: {
+  activeFundName: string;
+  activeFundReady: boolean;
+}) {
   const [latestBatch, setLatestBatch] = useState<ImportBatch | null>(null);
   const [investors, setInvestors] = useState<Investor[]>([]);
   const [documents, setDocuments] = useState<MigrationDocument[]>([]);
@@ -236,6 +257,11 @@ export default function InvestorPortalMigrationPage() {
 
   async function loadLatestInvestorBatch() {
     const supabaseClient = supabase;
+
+    if (!activeFundReady || !activeFundName) {
+      setMessage("Authenticated fund access is still loading.");
+      return;
+    }
 
     if (!supabaseClient) {
       setMessage("Supabase is not configured. Please check .env.local.");
@@ -248,6 +274,7 @@ export default function InvestorPortalMigrationPage() {
     const { data: batches, error: batchError } = await supabaseClient
       .from("investor_import_batches")
       .select("*")
+      .eq("fund_name", activeFundName)
       .order("created_at", { ascending: false })
       .limit(1);
 
@@ -319,6 +346,11 @@ export default function InvestorPortalMigrationPage() {
   async function handlePublishPreview() {
   const supabaseClient = supabase;
 
+  if (!activeFundReady || !activeFundName) {
+    setMessage("Authenticated fund access is still loading.");
+    return;
+  }
+
   if (!supabaseClient) {
     setMessage("Supabase is not configured. Please check .env.local.");
     return;
@@ -326,6 +358,11 @@ export default function InvestorPortalMigrationPage() {
 
   if (!latestBatch) {
     setMessage("Load latest investor batch before publishing.");
+    return;
+  }
+
+  if (latestBatch.fund_name !== activeFundName) {
+    setMessage("Loaded investor batch does not belong to the active fund.");
     return;
   }
 
@@ -353,7 +390,7 @@ export default function InvestorPortalMigrationPage() {
     .from("investor_document_migration_batches")
     .insert({
       import_batch_id: latestBatch.id,
-      fund_name: latestBatch.fund_name,
+      fund_name: activeFundName,
       total_documents: documents.length,
       published_documents: readyDocuments.length,
       review_documents: reviewDocuments.length,
@@ -374,7 +411,7 @@ export default function InvestorPortalMigrationPage() {
     investor_code: document.matchedInvestorCode,
     investor_name: document.matchedInvestorName,
     email: document.matchedInvestorEmail,
-    fund_name: latestBatch.fund_name,
+    fund_name: activeFundName,
     document_name: document.fileName,
     document_type: document.category,
     document_category: document.category,

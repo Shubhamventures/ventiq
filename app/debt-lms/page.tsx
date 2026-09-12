@@ -2,7 +2,19 @@
 
 import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { useActiveFund } from "../../lib/useActiveFund";
+import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 type DataRow = Record<string, unknown>;
+
+type DebtLmsOverviewResponse = {
+  loanRows?: DataRow[];
+  repaymentRows?: DataRow[];
+  covenantRows?: DataRow[];
+  securityRows?: DataRow[];
+  noticeRows?: DataRow[];
+  bankMatchRows?: DataRow[];
+  error?: string;
+};
 type LoanStatus = "Performing" | "Due Soon" | "Overdue" | "Default Watch";
 type CovenantStatus = "Compliant" | "Pending" | "Breached" | "Waived";
 type NoticeStatus = "Draft" | "Queued" | "Sent" | "Failed";
@@ -272,7 +284,7 @@ const emptyTermSheetForm: TermSheetUploadForm = {
   extractionStatus: "Not Uploaded",
   borrowerName: "",
   borrowerEmail: "",
-  fundName: "VENTIQ Venture Debt Fund I",
+  fundName: "",
   instrumentType: "NCD",
   sanctionAmount: "",
   disbursedAmount: "",
@@ -1352,7 +1364,7 @@ function deriveTermSheetExtraction(fileName: string): TermSheetUploadForm {
     extractionStatus: "AI Draft Extracted",
     borrowerName,
     borrowerEmail: "finance@borrower.com",
-    fundName: "VENTIQ Venture Debt Fund I",
+    fundName: "",
     instrumentType: "NCD",
     sanctionAmount: "100000000",
     disbursedAmount: "100000000",
@@ -1433,26 +1445,91 @@ function buildSecurityTrackerFromTermSheet(
   };
 }
 
-export default function DebtLMSPage() {
-  const [loans, setLoans] = useState<DebtLoan[]>(sampleLoans);
-  const [repaymentRows, setRepaymentRows] =
-    useState<RepaymentRow[]>(sampleRepaymentRows);
-  const [covenantRows, setCovenantRows] =
-    useState<CovenantRow[]>(sampleCovenantRows);
-  const [securityRows, setSecurityRows] =
-    useState<SecurityTrackerRow[]>(sampleSecurityRows);
-  const [noticeRows, setNoticeRows] = useState<NoticeRow[]>(sampleNoticeRows);
-  const [bankMatches, setBankMatches] =
-    useState<BankMatchRow[]>(sampleBankMatches);
+function buildEmptyLoanPlaceholder(activeFundName: string): DebtLoan {
+  return {
+    id: "",
+    borrowerName: "No loan selected",
+    fundName: activeFundName,
+    instrument: "Debt",
+    sanctionAmount: 0,
+    disbursedAmount: 0,
+    disbursementDate: "2026-01-01",
+    tenureMonths: 0,
+    couponRate: 0,
+    interestFrequency: "N/A",
+    principalFrequency: "N/A",
+    moratoriumMonths: 0,
+    moratoriumStart: "N/A",
+    repaymentStartDate: "2026-01-01",
+    maturityDate: "2026-01-01",
+    processingFee: 0,
+    exitFee: 0,
+    penalRate: 0,
+    security: "No security record",
+    status: "Performing",
+    nextDueDate: "2026-01-01",
+    nextDueAmount: 0,
+    overdueAmount: 0,
+  };
+}
 
-   const [selectedLoanId, setSelectedLoanId] = useState(sampleLoans[0].id);
+export default function DebtLMSPage() {
+  const {
+    activeFundName,
+    isReady: activeFundReady,
+  } = useActiveFund("");
+
+  return (
+    <DebtLMSWorkspace
+      key={
+        activeFundReady && activeFundName
+          ? activeFundName
+          : "__fund_loading__"
+      }
+      activeFundName={activeFundName}
+      activeFundReady={activeFundReady}
+    />
+  );
+}
+
+function DebtLMSWorkspace({
+  activeFundName,
+  activeFundReady,
+}: {
+  activeFundName: string;
+  activeFundReady: boolean;
+}) {
+  const { session } = useVentiqAuth();
+
+  const [loans, setLoans] = useState<DebtLoan[]>(
+    isSupabaseConfigured ? [] : sampleLoans
+  );
+  const [repaymentRows, setRepaymentRows] = useState<RepaymentRow[]>(
+    isSupabaseConfigured ? [] : sampleRepaymentRows
+  );
+  const [covenantRows, setCovenantRows] = useState<CovenantRow[]>(
+    isSupabaseConfigured ? [] : sampleCovenantRows
+  );
+  const [securityRows, setSecurityRows] = useState<SecurityTrackerRow[]>(
+    isSupabaseConfigured ? [] : sampleSecurityRows
+  );
+  const [noticeRows, setNoticeRows] = useState<NoticeRow[]>(
+    isSupabaseConfigured ? [] : sampleNoticeRows
+  );
+  const [bankMatches, setBankMatches] = useState<BankMatchRow[]>(
+    isSupabaseConfigured ? [] : sampleBankMatches
+  );
+
+  const [selectedLoanId, setSelectedLoanId] = useState(
+    isSupabaseConfigured ? "" : sampleLoans[0].id
+  );
   const [loading, setLoading] = useState(true);
   const [dataMessage, setDataMessage] = useState(
     "Loading Debt LMS workspace..."
   );
 
   const [isAddLoanOpen, setIsAddLoanOpen] = useState(false);
-  const [loanForm, setLoanForm] = useState<NewLoanForm>(emptyLoanForm);
+  const [loanForm, setLoanForm] = useState<NewLoanForm>(() => ({ ...emptyLoanForm, fundName: activeFundName }));
   const [isSavingLoan, setIsSavingLoan] = useState(false);
   const [loanFormMessage, setLoanFormMessage] = useState("");
   const [loanFormError, setLoanFormError] = useState("");
@@ -1477,7 +1554,7 @@ export default function DebtLMSPage() {
 
   const [isTermSheetOpen, setIsTermSheetOpen] = useState(false);
   const [termSheetForm, setTermSheetForm] =
-    useState<TermSheetUploadForm>(emptyTermSheetForm);
+    useState<TermSheetUploadForm>(() => ({ ...emptyTermSheetForm, fundName: activeFundName }));
   const [termSheetMessage, setTermSheetMessage] = useState("");
   const [isExtractingTermSheet, setIsExtractingTermSheet] = useState(false);
   const [isSavingTermSheet, setIsSavingTermSheet] = useState(false);
@@ -1500,8 +1577,14 @@ export default function DebtLMSPage() {
 
   useEffect(() => {
     async function loadDebtLmsData() {
+      if (!activeFundReady || !activeFundName) {
+        return;
+      }
+
       if (!isSupabaseConfigured || !supabase) {
-        setDataMessage("Using sample Debt LMS data. Supabase is not configured.");
+        setDataMessage(
+          "Controlled preview: Supabase is not configured. Illustrative Debt LMS data is not treated as active-fund production data."
+        );
         setLoading(false);
         return;
       }
@@ -1509,135 +1592,106 @@ export default function DebtLMSPage() {
       try {
         setLoading(true);
 
-        const db = supabase as any;
+        const accessToken = session?.access_token ?? "";
 
-        const [
-          loansResult,
-          repaymentResult,
-          covenantsResult,
-          securityResult,
-          noticesResult,
-          bankMatchesResult,
-        ] = await Promise.all([
-          db
-            .from("debt_lms_loans")
-            .select("*")
-            .order("created_at", { ascending: false }),
-
-          db
-            .from("debt_lms_repayment_schedule")
-            .select("*")
-            .order("due_date", { ascending: true }),
-
-          db
-            .from("debt_lms_covenants")
-            .select("*")
-            .order("due_date", { ascending: true }),
-
-          db
-            .from("debt_lms_security_tracker")
-            .select("*")
-            .order("charge_creation_due_date", { ascending: true }),
-
-          db
-            .from("debt_lms_notices")
-            .select("*")
-            .order("created_at", { ascending: false }),
-
-          db
-            .from("debt_lms_bank_matches")
-            .select("*")
-            .order("created_at", { ascending: false }),
-        ]);
-
-        if (loansResult.error) throw new Error(loansResult.error.message);
-        if (repaymentResult.error) throw new Error(repaymentResult.error.message);
-        if (covenantsResult.error) throw new Error(covenantsResult.error.message);
-        if (securityResult.error) throw new Error(securityResult.error.message);
-        if (noticesResult.error) throw new Error(noticesResult.error.message);
-        if (bankMatchesResult.error) {
-          throw new Error(bankMatchesResult.error.message);
+        if (!accessToken) {
+          throw new Error("Please sign in before opening the Debt LMS workspace.");
         }
 
-        const hasRealLoans = Boolean(loansResult.data && loansResult.data.length > 0);
+        const response = await fetch(
+          `/api/debt-lms/overview?fundName=${encodeURIComponent(activeFundName)}`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            cache: "no-store",
+          }
+        );
 
-        // Once the workspace has real Supabase-backed loans, empty child tables must
-        // remain empty. Falling back to sample child rows would mix demo data into a
-        // live fund workspace and can mislead users about notices, covenants, security
-        // items or bank matches that do not actually exist in the database.
-        const nextLoans = hasRealLoans
-          ? (loansResult.data as DataRow[]).map(mapLoan)
-          : sampleLoans;
+        const result = (await response.json()) as DebtLmsOverviewResponse;
 
-        const nextRepayments =
-          repaymentResult.data && repaymentResult.data.length > 0
-            ? (repaymentResult.data as DataRow[]).map(mapRepayment)
-            : hasRealLoans
-              ? []
-              : sampleRepaymentRows;
+        if (!response.ok) {
+          throw new Error(result.error || "Unable to load Debt LMS workspace.");
+        }
 
-        const nextCovenants =
-          covenantsResult.data && covenantsResult.data.length > 0
-            ? (covenantsResult.data as DataRow[]).map(mapCovenant)
-            : hasRealLoans
-              ? []
-              : sampleCovenantRows;
+        const nextLoans = (result.loanRows ?? []).map(mapLoan);
 
-        const nextSecurityRows =
-          securityResult.data && securityResult.data.length > 0
-            ? (securityResult.data as DataRow[]).map(mapSecurityTracker)
-            : hasRealLoans
-              ? []
-              : sampleSecurityRows;
+        const activeLoanIds = nextLoans
+          .map((loan) => loan.id)
+          .filter(isUuid);
 
-        const nextNotices =
-          noticesResult.data && noticesResult.data.length > 0
-            ? (noticesResult.data as DataRow[]).map(mapNotice)
-            : hasRealLoans
-              ? []
-              : sampleNoticeRows;
-
-        const nextBankMatches =
-          bankMatchesResult.data && bankMatchesResult.data.length > 0
-            ? (bankMatchesResult.data as DataRow[]).map(mapBankMatch)
-            : hasRealLoans
-              ? []
-              : sampleBankMatches;
+        if (activeLoanIds.length === 0) {
+          setLoans([]);
+          setRepaymentRows([]);
+          setCovenantRows([]);
+          setSecurityRows([]);
+          setNoticeRows([]);
+          setBankMatches([]);
+          setSelectedLoanId("");
+          setDataMessage(
+            `No Debt LMS loans are recorded for ${activeFundName}. Add a loan to start this fund's debt workspace.`
+          );
+          return;
+        }
 
         setLoans(nextLoans);
-        setRepaymentRows(nextRepayments);
-        setCovenantRows(nextCovenants);
-        setSecurityRows(nextSecurityRows);
-        setNoticeRows(nextNotices);
-        setBankMatches(nextBankMatches);
-        setSelectedLoanId(nextLoans[0]?.id || sampleLoans[0].id);
-
-        setDataMessage(
-          hasRealLoans
-            ? "Connected to Debt LMS Supabase records."
-            : "Debt LMS tables are ready. Showing sample data until loans are added."
-        );
+        setRepaymentRows((result.repaymentRows ?? []).map(mapRepayment));
+        setCovenantRows((result.covenantRows ?? []).map(mapCovenant));
+        setSecurityRows((result.securityRows ?? []).map(mapSecurityTracker));
+        setNoticeRows((result.noticeRows ?? []).map(mapNotice));
+        setBankMatches((result.bankMatchRows ?? []).map(mapBankMatch));
+        setSelectedLoanId(nextLoans[0]?.id || "");
+        setDataMessage(`Connected to ${activeFundName} Debt LMS records.`);
       } catch (error) {
         setDataMessage(
           error instanceof Error
-            ? `Debt LMS database issue: ${error.message}`
-            : "Unable to load Debt LMS data. Showing sample data."
+            ? `Debt LMS database issue for ${activeFundName}: ${error.message}`
+            : `Unable to load Debt LMS data for ${activeFundName}.`
         );
 
-        setLoans(sampleLoans);
-        setRepaymentRows(sampleRepaymentRows);
-        setCovenantRows(sampleCovenantRows);
-        setSecurityRows(sampleSecurityRows);
-        setNoticeRows(sampleNoticeRows);
-        setBankMatches(sampleBankMatches);
+        setLoans([]);
+        setRepaymentRows([]);
+        setCovenantRows([]);
+        setSecurityRows([]);
+        setNoticeRows([]);
+        setBankMatches([]);
+        setSelectedLoanId("");
       } finally {
         setLoading(false);
       }
     }
 
     loadDebtLmsData();
-  }, []);
+  }, [activeFundName, activeFundReady, session?.access_token]);
+
+  const activeLoanIdSet = useMemo(
+    () =>
+      new Set(
+        loans
+          .filter((loan) => loan.fundName === activeFundName && isUuid(loan.id))
+          .map((loan) => loan.id)
+      ),
+    [activeFundName, loans]
+  );
+
+  function requireActiveLoanId(loanId: string, action: string) {
+    if (!activeFundReady || !activeFundName) {
+      throw new Error(`${action} is blocked until the governed active fund is ready.`);
+    }
+
+    if (!isUuid(loanId) || !activeLoanIdSet.has(loanId)) {
+      throw new Error(
+        `${action} is blocked because the loan is outside the governed active fund ${activeFundName}.`
+      );
+    }
+  }
+
   function updateLoanForm(field: keyof NewLoanForm, value: string) {
+    if (field === "fundName") {
+      return;
+    }
+
     setLoanForm((currentForm) => ({
       ...currentForm,
       [field]: value,
@@ -1646,7 +1700,7 @@ export default function DebtLMSPage() {
 
   function closeAddLoanModal() {
     setIsAddLoanOpen(false);
-    setLoanForm(emptyLoanForm);
+    setLoanForm({ ...emptyLoanForm, fundName: activeFundName });
     setLoanFormMessage("");
     setLoanFormError("");
   }
@@ -1662,8 +1716,15 @@ export default function DebtLMSPage() {
       return;
     }
 
-    if (!loanForm.fundName.trim()) {
-      setLoanFormError("Fund name is required.");
+    if (!activeFundReady || !activeFundName) {
+      setLoanFormError("Governed active fund is not ready.");
+      return;
+    }
+
+    if (loanForm.fundName.trim() !== activeFundName) {
+      setLoanFormError(
+        "Loan creation is blocked because the form fund does not match the governed active fund."
+      );
       return;
     }
 
@@ -1677,7 +1738,7 @@ export default function DebtLMSPage() {
       escalation_contact_name: loanForm.escalationContactName.trim(),
       escalation_contact_email: loanForm.escalationContactEmail.trim(),
 
-      fund_name: loanForm.fundName.trim(),
+      fund_name: activeFundName,
       instrument_type: loanForm.instrumentType,
       facility_reference: loanForm.facilityReference.trim(),
 
@@ -1764,6 +1825,10 @@ export default function DebtLMSPage() {
 
       const savedLoan = mapLoan(data as DataRow);
 
+      if (savedLoan.fundName !== activeFundName) {
+        throw new Error("Saved loan does not belong to the governed active fund.");
+      }
+
       setLoans((currentLoans) => [savedLoan, ...currentLoans]);
       setSelectedLoanId(savedLoan.id);
       setDataMessage("New debt loan saved to Supabase.");
@@ -1782,6 +1847,17 @@ export default function DebtLMSPage() {
 
     if (!selectedLoan) {
       setScheduleMessage("No loan selected.");
+      return;
+    }
+
+    try {
+      requireActiveLoanId(selectedLoan.id, "Repayment schedule generation");
+    } catch (error) {
+      setScheduleMessage(
+        error instanceof Error
+          ? error.message
+          : "Repayment schedule generation is blocked."
+      );
       return;
     }
 
@@ -1901,7 +1977,10 @@ export default function DebtLMSPage() {
       }
 
       const persistableRows = rowsNeedingNotice.filter(
-        (row) => isUuid(row.id) && isUuid(row.loanId)
+        (row) =>
+          isUuid(row.id) &&
+          isUuid(row.loanId) &&
+          activeLoanIdSet.has(row.loanId)
       );
 
       if (persistableRows.length === 0) {
@@ -2011,7 +2090,10 @@ export default function DebtLMSPage() {
       }
 
       const noticesToQueue = draftNotices.filter(
-        (notice) => isUuid(notice.id) && isUuid(notice.loanId)
+        (notice) =>
+          isUuid(notice.id) &&
+          isUuid(notice.loanId) &&
+          activeLoanIdSet.has(notice.loanId)
       );
 
       if (noticesToQueue.length === 0) {
@@ -2055,7 +2137,8 @@ export default function DebtLMSPage() {
           notice_status: "Queued",
           queued_at: new Date().toISOString(),
         })
-        .in("id", noticeIds);
+        .in("id", noticeIds)
+        .in("loan_id", noticesToQueue.map((notice) => notice.loanId));
 
       if (updateError) {
         throw new Error(updateError.message);
@@ -2165,6 +2248,8 @@ export default function DebtLMSPage() {
     setReceiptMessage("");
 
     try {
+      requireActiveLoanId(receiptRow.loanId, "Repayment receipt update");
+
       if (isSupabaseConfigured && supabase && isUuid(receiptRow.id)) {
         const db = supabase as any;
 
@@ -2184,7 +2269,8 @@ export default function DebtLMSPage() {
             collection_status: nextStatus,
             days_past_due: updatedRow.daysPastDue,
           })
-          .eq("id", receiptRow.id);
+          .eq("id", receiptRow.id)
+          .eq("loan_id", receiptRow.loanId);
 
         if (error) {
           throw new Error(error.message);
@@ -2225,9 +2311,20 @@ export default function DebtLMSPage() {
       if (isSupabaseConfigured && supabase) {
         const db = supabase as any;
 
+        const activeLoanIds = Array.from(activeLoanIdSet);
+
+        if (activeLoanIds.length === 0) {
+          setBankReconSyncMessage(
+            `No Debt LMS loans are available for ${activeFundName}.`
+          );
+          return;
+        }
+
         const { data, error } = await db
           .from("bank_reconciliation_debt_receipts")
           .select("*")
+          .eq("fund_name", activeFundName)
+          .in("loan_id", activeLoanIds)
           .eq("match_status", "Approved")
           .eq("sync_status", "Ready")
           .order("receipt_date", { ascending: false });
@@ -2281,7 +2378,7 @@ export default function DebtLMSPage() {
         const db = supabase as any;
 
         const scheduleUpdates = updatedScheduleRows
-          .filter((row) => isUuid(row.id))
+          .filter((row) => isUuid(row.id) && activeLoanIdSet.has(row.loanId))
           .map((row) =>
             db
               .from("debt_lms_repayment_schedule")
@@ -2298,6 +2395,7 @@ export default function DebtLMSPage() {
                 receipt_date: new Date().toISOString().slice(0, 10),
               })
               .eq("id", row.id)
+              .eq("loan_id", row.loanId)
           );
 
         if (scheduleUpdates.length > 0) {
@@ -2310,7 +2408,9 @@ export default function DebtLMSPage() {
         }
 
         if (nextBankMatches.length > 0) {
-          const bankMatchPayload = nextBankMatches.map((match) => ({
+          const bankMatchPayload = nextBankMatches
+            .filter((match) => activeLoanIdSet.has(match.loanId))
+            .map((match) => ({
             loan_id: match.loanId,
             repayment_schedule_id: match.repaymentScheduleId,
             borrower_name: match.borrowerName,
@@ -2356,7 +2456,9 @@ export default function DebtLMSPage() {
               sync_status: "Synced",
               synced_at: new Date().toISOString(),
             })
-            .in("id", validReceiptIds);
+            .in("id", validReceiptIds)
+            .eq("fund_name", activeFundName)
+            .in("loan_id", Array.from(activeLoanIdSet));
 
           if (syncError) {
             throw new Error(syncError.message);
@@ -2460,7 +2562,7 @@ export default function DebtLMSPage() {
         const db = supabase as any;
 
         const scheduleUpdates = reviewedRows
-          .filter((row) => isUuid(row.id))
+          .filter((row) => isUuid(row.id) && activeLoanIdSet.has(row.loanId))
           .map((row) =>
             db
               .from("debt_lms_repayment_schedule")
@@ -2481,6 +2583,7 @@ export default function DebtLMSPage() {
                 last_penalty_calculated_at: new Date().toISOString(),
               })
               .eq("id", row.id)
+              .eq("loan_id", row.loanId)
           );
 
         if (scheduleUpdates.length > 0) {
@@ -2493,7 +2596,7 @@ export default function DebtLMSPage() {
         }
 
         const loanUpdates = reviewedLoans
-          .filter((loan) => isUuid(loan.id))
+          .filter((loan) => isUuid(loan.id) && activeLoanIdSet.has(loan.id))
           .map((loan) =>
             db
               .from("debt_lms_loans")
@@ -2511,6 +2614,7 @@ export default function DebtLMSPage() {
                 last_default_review_at: new Date().toISOString(),
               })
               .eq("id", loan.id)
+              .eq("fund_name", activeFundName)
           );
 
         if (loanUpdates.length > 0) {
@@ -2524,7 +2628,18 @@ export default function DebtLMSPage() {
         }
 
         if (generatedDefaultNotices.length > 0) {
-          const noticePayload = generatedDefaultNotices.map((notice) => ({
+          const noticePayload = generatedDefaultNotices
+            .filter(
+              (notice) =>
+                isUuid(notice.loanId) &&
+                activeLoanIdSet.has(notice.loanId)
+            )
+            .map((notice) => ({
+            loan_id: notice.loanId,
+            repayment_schedule_id:
+              notice.repaymentScheduleId && isUuid(notice.repaymentScheduleId)
+                ? notice.repaymentScheduleId
+                : null,
             borrower_name: notice.borrowerName,
             notice_type: notice.noticeType,
             notice_title: `${notice.noticeType} - ${notice.borrowerName}`,
@@ -2588,17 +2703,21 @@ export default function DebtLMSPage() {
 
   function openTermSheetModal() {
     setIsTermSheetOpen(true);
-    setTermSheetForm(emptyTermSheetForm);
+    setTermSheetForm({ ...emptyTermSheetForm, fundName: activeFundName });
     setTermSheetMessage("");
   }
 
   function closeTermSheetModal() {
     setIsTermSheetOpen(false);
-    setTermSheetForm(emptyTermSheetForm);
+    setTermSheetForm({ ...emptyTermSheetForm, fundName: activeFundName });
     setTermSheetMessage("");
   }
 
   function updateTermSheetForm(field: keyof TermSheetUploadForm, value: string) {
+    if (field === "fundName") {
+      return;
+    }
+
     setTermSheetForm((currentForm) => ({
       ...currentForm,
       [field]: value,
@@ -2614,7 +2733,10 @@ export default function DebtLMSPage() {
     setTermSheetMessage("Reading term sheet and preparing draft extraction...");
 
     const extractedForm = deriveTermSheetExtraction(file.name);
-    setTermSheetForm(extractedForm);
+    setTermSheetForm({
+      ...extractedForm,
+      fundName: activeFundName,
+    });
 
     setTimeout(() => {
       setIsExtractingTermSheet(false);
@@ -2633,8 +2755,15 @@ export default function DebtLMSPage() {
       return;
     }
 
-    if (!termSheetForm.fundName.trim()) {
-      setTermSheetMessage("Fund name is required before creating the loan.");
+    if (!activeFundReady || !activeFundName) {
+      setTermSheetMessage("Governed active fund is not ready.");
+      return;
+    }
+
+    if (termSheetForm.fundName.trim() !== activeFundName) {
+      setTermSheetMessage(
+        "Term sheet conversion is blocked because its fund does not match the governed active fund."
+      );
       return;
     }
 
@@ -2643,7 +2772,7 @@ export default function DebtLMSPage() {
     const loanPayload = {
       borrower_name: termSheetForm.borrowerName.trim(),
       borrower_email: termSheetForm.borrowerEmail.trim(),
-      fund_name: termSheetForm.fundName.trim(),
+      fund_name: activeFundName,
       instrument_type: termSheetForm.instrumentType,
       facility_reference: `${termSheetForm.borrowerName.trim()} term sheet`,
       sanction_amount: Number(termSheetForm.sanctionAmount || 0),
@@ -2729,7 +2858,7 @@ export default function DebtLMSPage() {
           extraction_confidence: 82,
           extracted_loan_terms: {
             borrowerName: termSheetForm.borrowerName,
-            fundName: termSheetForm.fundName,
+            fundName: activeFundName,
             instrumentType: termSheetForm.instrumentType,
             sanctionAmount: Number(termSheetForm.sanctionAmount || 0),
             disbursedAmount: Number(termSheetForm.disbursedAmount || 0),
@@ -2786,6 +2915,11 @@ export default function DebtLMSPage() {
       }
 
       const savedLoan = mapLoan(loanData as DataRow);
+
+      if (savedLoan.fundName !== activeFundName) {
+        throw new Error("Term-sheet loan does not belong to the governed active fund.");
+      }
+
       const extractedCovenants = buildCovenantsFromTermSheet(
         savedLoan.id,
         savedLoan.borrowerName,
@@ -2952,6 +3086,8 @@ export default function DebtLMSPage() {
         const db = supabase as any;
 
         if (covenantActionRow && isUuid(covenantActionRow.id)) {
+          requireActiveLoanId(covenantActionRow.loanId, "Covenant update");
+
           const { error } = await db
             .from("debt_lms_covenants")
             .update({
@@ -2965,10 +3101,13 @@ export default function DebtLMSPage() {
               waiver_reason: covenantForm.waiverReason.trim(),
               waiver_status: nextRow.status === "Waived" ? "Waived" : "Not Waived",
             })
-            .eq("id", covenantActionRow.id);
+            .eq("id", covenantActionRow.id)
+            .eq("loan_id", covenantActionRow.loanId);
 
           if (error) throw new Error(error.message);
         } else if (isUuid(selectedLoan.id)) {
+          requireActiveLoanId(selectedLoan.id, "Covenant creation");
+
           const { data, error } = await db
             .from("debt_lms_covenants")
             .insert({
@@ -3106,6 +3245,8 @@ export default function DebtLMSPage() {
         const db = supabase as any;
 
         if (securityActionRow && isUuid(securityActionRow.id)) {
+          requireActiveLoanId(securityActionRow.loanId, "Security tracker update");
+
           const { error } = await db
             .from("debt_lms_security_tracker")
             .update({
@@ -3121,10 +3262,13 @@ export default function DebtLMSPage() {
               trustee_document_status: nextRow.trusteeDocumentStatus,
               evidence_storage_path: nextRow.evidence,
             })
-            .eq("id", securityActionRow.id);
+            .eq("id", securityActionRow.id)
+            .eq("loan_id", securityActionRow.loanId);
 
           if (error) throw new Error(error.message);
         } else if (isUuid(selectedLoan.id)) {
+          requireActiveLoanId(selectedLoan.id, "Security tracker creation");
+
           const { data, error } = await db
             .from("debt_lms_security_tracker")
             .insert({
@@ -3170,7 +3314,9 @@ export default function DebtLMSPage() {
   }
 
   const selectedLoan =
-    loans.find((loan) => loan.id === selectedLoanId) ?? loans[0] ?? sampleLoans[0];
+    loans.find((loan) => loan.id === selectedLoanId) ??
+    loans[0] ??
+    buildEmptyLoanPlaceholder(activeFundName);
   const summary = useMemo(() => {
     const totalSanctioned = loans.reduce((sum, loan) => sum + loan.sanctionAmount, 0);
     const totalDisbursed = loans.reduce((sum, loan) => sum + loan.disbursedAmount, 0);
@@ -3912,6 +4058,14 @@ export default function DebtLMSPage() {
             <p className="debt-eyebrow">VENTIQ Debt LMS</p>
             <h1>Loan, Covenant & Collection Control</h1>
             <p>
+              Governed active fund:{" "}
+              <strong>
+                {activeFundReady && activeFundName
+                  ? activeFundName
+                  : "Loading fund context..."}
+              </strong>
+            </p>
+            <p>
               Convert every debt term sheet into a live operating workflow:
               loan master, repayment schedule, covenants, notices, email
               dispatch, bank reconciliation and default alerts.
@@ -4041,11 +4195,9 @@ export default function DebtLMSPage() {
                 <div className="loan-form-field">
                   <label>Fund Name *</label>
                   <input
+                    readOnly
                     value={termSheetForm.fundName}
-                    onChange={(event) =>
-                      updateTermSheetForm("fundName", event.target.value)
-                    }
-                    placeholder="Fund name"
+                    placeholder="Governed active fund"
                   />
                 </div>
 
@@ -4821,12 +4973,10 @@ export default function DebtLMSPage() {
                 <div className="loan-form-field">
                   <label>Fund Name *</label>
                   <input
+                    readOnly
                     required
                     value={loanForm.fundName}
-                    onChange={(event) =>
-                      updateLoanForm("fundName", event.target.value)
-                    }
-                    placeholder="Venture Debt Fund I"
+                    placeholder="Governed active fund"
                   />
                 </div>
 

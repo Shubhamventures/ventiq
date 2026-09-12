@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { useActiveFund } from "../../lib/useActiveFund";
 
 type Fund = {
   id: string;
@@ -35,6 +36,7 @@ type Commitment = {
 };
 type SavedCapitalCall = {
   id: string;
+  fund_id: string;
   call_name: string | null;
   call_date: string | null;
   due_date: string | null;
@@ -163,11 +165,36 @@ async function getAccessToken() {
 }
 
 export default function CapitalCallPage() {
+  const {
+    activeFundName,
+    isReady: activeFundReady,
+  } = useActiveFund("");
+
+  return (
+    <CapitalCallWorkspace
+      key={
+        activeFundReady && activeFundName
+          ? activeFundName
+          : "__fund_loading__"
+      }
+      activeFundName={activeFundName}
+      activeFundReady={activeFundReady}
+    />
+  );
+}
+
+function CapitalCallWorkspace({
+  activeFundName,
+  activeFundReady,
+}: {
+  activeFundName: string;
+  activeFundReady: boolean;
+}) {
   const [funds, setFunds] = useState<Fund[]>([]);
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [selectedFundId, setSelectedFundId] = useState("");
   const [fundType, setFundType] = useState("Close-ended Fund");
-  const [callAmount, setCallAmount] = useState(25);
+  const [callAmount, setCallAmount] = useState(0);
   const [allocationMethod, setAllocationMethod] = useState(
     "Pro-rata based on committed capital"
   );
@@ -194,9 +221,27 @@ const [approvingDraftId, setApprovingDraftId] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    async function loadFunds() {
+    async function loadActiveFund() {
+      if (!activeFundReady) {
+        return;
+      }
+
+      if (!activeFundName) {
+        setFunds([]);
+        setSelectedFundId("");
+        setErrorMessage(
+          "No governed active fund is available for this account."
+        );
+        setLoading(false);
+        return;
+      }
+
       if (!isSupabaseConfigured || !supabase) {
-        setErrorMessage("The sample workflow is temporarily unavailable. Please request a walkthrough.");
+        setFunds([]);
+        setSelectedFundId("");
+        setErrorMessage(
+          "The capital call data connection is unavailable."
+        );
         setLoading(false);
         return;
       }
@@ -206,34 +251,46 @@ const [approvingDraftId, setApprovingDraftId] = useState("");
         .select(
           "id, name, fund_type, category, jurisdiction, currency, committed_capital, called_capital, status"
         )
-        .order("created_at", { ascending: true });
+        .eq("name", activeFundName)
+        .limit(2);
 
       if (error) {
+        setFunds([]);
+        setSelectedFundId("");
         setErrorMessage(error.message);
-      } else {
-        const fundData = data ?? [];
-        setFunds(fundData);
-
-        const recommendedFund =
-          fundData.find((fund) =>
-            fund.name.toLowerCase().includes("venture debt")
-          ) ?? fundData[0];
-
-        if (recommendedFund) {
-          setSelectedFundId(recommendedFund.id);
-        }
+        setLoading(false);
+        return;
       }
 
+      const fundData = (data ?? []) as Fund[];
+
+      if (fundData.length !== 1) {
+        setFunds([]);
+        setSelectedFundId("");
+        setErrorMessage(
+          fundData.length === 0
+            ? `No capital-call fund record was found for ${activeFundName}.`
+            : `Multiple capital-call fund records matched ${activeFundName}; refusing ambiguous fund scope.`
+        );
+        setLoading(false);
+        return;
+      }
+
+      setFunds(fundData);
+      setSelectedFundId(fundData[0].id);
+      setErrorMessage("");
       setLoading(false);
     }
 
-    loadFunds();
-  }, []);
+    loadActiveFund();
+  }, [activeFundName, activeFundReady]);
 
   useEffect(() => {
     async function loadCommitments() {
-      if (!selectedFundId || !supabase) return;
-     
+      if (!activeFundReady || !activeFundName || !selectedFundId || !supabase) {
+        return;
+      }
+
 
       setLoadingCommitments(true);
       setErrorMessage("");
@@ -258,10 +315,15 @@ const [approvingDraftId, setApprovingDraftId] = useState("");
     }
 
     loadCommitments();
-  }, [selectedFundId]);
+  }, [activeFundName, activeFundReady, selectedFundId]);
+
   useEffect(() => {
-  loadSavedDrafts();
-}, []);
+    if (!selectedFundId) {
+      return;
+    }
+
+    loadSavedDrafts();
+  }, [selectedFundId]);
 
   const selectedFund = funds.find((fund) => fund.id === selectedFundId);
 
@@ -357,15 +419,19 @@ const [approvingDraftId, setApprovingDraftId] = useState("");
 
   const selectedFundName = cleanFundName(selectedFund?.name);
   async function loadSavedDrafts() {
-  if (!supabase) return;
+  if (!supabase || !selectedFundId) {
+    setSavedDrafts([]);
+    return;
+  }
 
   setLoadingSavedDrafts(true);
 
   const { data, error } = await supabase
     .from("capital_calls")
     .select(
-      "id, call_name, call_date, due_date, call_amount, status, created_at, funds(name)"
+      "id, fund_id, call_name, call_date, due_date, call_amount, status, created_at, funds(name)"
     )
+    .eq("fund_id", selectedFundId)
     .order("created_at", { ascending: false })
     .limit(5);
 
@@ -376,9 +442,16 @@ const [approvingDraftId, setApprovingDraftId] = useState("");
   setLoadingSavedDrafts(false);
 }
 async function handleOpenSavedDraft(draft: SavedCapitalCall) {
+  if (!selectedFundId || draft.fund_id !== selectedFundId) {
+    setDraftAllocationMessage(
+      "This capital call does not belong to the governed active fund."
+    );
+    return;
+  }
+
   if (!supabase) {
     setDraftAllocationMessage(
-  "The sample allocation workflow is temporarily unavailable. Please request a walkthrough."
+  "The capital call allocation workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -417,9 +490,16 @@ function handleCloseSavedDraftPreview() {
   setDraftAllocationMessage("");
 }
 async function handleDeleteSavedDraft(draft: SavedCapitalCall) {
+  if (!selectedFundId || draft.fund_id !== selectedFundId) {
+    setDraftActionMessage(
+      "This capital call does not belong to the governed active fund."
+    );
+    return;
+  }
+
   if (!supabase) {
     setDraftActionMessage(
-  "The sample capital call workflow is temporarily unavailable. Please request a walkthrough."
+  "The capital call workflow is unavailable because Supabase is not configured."
 );
     return;
   }
@@ -450,7 +530,8 @@ async function handleDeleteSavedDraft(draft: SavedCapitalCall) {
   const { error: draftDeleteError } = await supabase
     .from("capital_calls")
     .delete()
-    .eq("id", draft.id);
+    .eq("id", draft.id)
+    .eq("fund_id", selectedFundId);
 
   if (draftDeleteError) {
     setDraftActionMessage(
@@ -471,6 +552,13 @@ async function handleDeleteSavedDraft(draft: SavedCapitalCall) {
   setDeletingDraftId("");
 }
 async function handleSubmitSavedDraftForApproval(draft: SavedCapitalCall) {
+  if (!selectedFundId || draft.fund_id !== selectedFundId) {
+    setDraftActionMessage(
+      "This capital call does not belong to the governed active fund."
+    );
+    return;
+  }
+
   if (!supabase) {
     setDraftActionMessage(
       "The secured approval workflow is temporarily unavailable. Please request a walkthrough."
@@ -549,8 +637,20 @@ async function handleSubmitSavedDraftForApproval(draft: SavedCapitalCall) {
   }
 }
 function handleProceedWithCapitalCall() {
-  if (!selectedFundId) {
-    setSaveMessage("Please select a fund before proceeding.");
+  if (!activeFundReady || !activeFundName || !selectedFundId) {
+    setSaveMessage("A governed active fund is required before proceeding.");
+    return;
+  }
+
+  if (selectedFund?.name !== activeFundName) {
+    setSaveMessage(
+      "The resolved capital-call fund does not match the governed active fund."
+    );
+    return;
+  }
+
+  if (!Number.isFinite(callAmount) || callAmount <= 0) {
+    setSaveMessage("Enter a capital call amount greater than zero before proceeding.");
     return;
   }
 
@@ -570,13 +670,25 @@ function handleProceedWithCapitalCall() {
 async function handleSaveDraft() {
   if (!supabase) {
     setSaveMessage(
-  "The sample draft workflow is temporarily unavailable. Please request a walkthrough."
+  "The capital call draft workflow is unavailable because Supabase is not configured."
 );
     return;
   }
 
-  if (!selectedFundId) {
-  setSaveMessage("Please select a fund before saving.");
+  if (!activeFundReady || !activeFundName || !selectedFundId) {
+  setSaveMessage("A governed active fund is required before saving.");
+  return;
+}
+
+if (selectedFund?.name !== activeFundName) {
+  setSaveMessage(
+    "The resolved capital-call fund does not match the governed active fund."
+  );
+  return;
+}
+
+if (!Number.isFinite(callAmount) || callAmount <= 0) {
+  setSaveMessage("Enter a capital call amount greater than zero before saving.");
   return;
 }
 
@@ -676,13 +788,13 @@ return (
           </a>
         </div>
                 <div className="sample-data-ribbon">
-          Live workflow preview · Sample data shown for demonstration
+          {activeFundName || "Governed fund"} · Live governed capital-call data
         </div>
 
         {loading && (
           <div className="preview-card">
             <h2>Preparing Capital Call Workspace...</h2>
-<p>VENTIQ is preparing the sample fund, investor commitment and allocation workflow.</p>
+<p>VENTIQ is loading the governed fund, investor commitments and allocation workflow.</p>
           </div>
         )}
 
@@ -698,66 +810,36 @@ return (
         {!loading && !errorMessage && (
           <>
             <div className="preview-card">
-              <h2>AI Morning Brief</h2>
+              <h2>Capital Call Planning Snapshot</h2>
 
               <div className="explain-box">
-                <strong>AI Capital Call Brief.</strong>
-                <br />
-                <br />
-                VENTIQ analysed all active funds overnight.
-                <br />
-                <br />
-                {funds.map((fund) => (
-                  <span key={fund.id}>
-                    {fund.id === selectedFundId ? "⚠" : "✓"}{" "}
-                    <strong>{cleanFundName(fund.name)}</strong> —{" "}
-                    {fund.id === selectedFundId
-                      ? "Capital call recommended"
-                      : fund.name.toLowerCase().includes("gift")
-                      ? "No funding action required"
-                      : "Liquidity healthy"}
-                    <br />
-                  </span>
-                ))}
-                <br />
-                <strong>Today&apos;s Priority</strong>
-                <br />
-                Raise <strong>{formatCr(callAmount)}</strong>
-                <br />
-                Confidence: <strong>98%</strong>
-                <br />
-                Expected Collection: <strong>92% within 7 days</strong>
-                <br />
-                <br />
-                <strong>Reason</strong>
-                <br />
-                Based on overnight cash forecasting, approved investments,
-                management fee schedule and the fund&apos;s minimum liquidity
-                policy, VENTIQ recommends initiating a capital call today.
+                VENTIQ is using the governed active fund and connected investor
+                commitment records below. Enter the proposed call amount before
+                generating a draft. No liquidity forecast, collection probability,
+                or AI confidence is inferred unless those governed inputs are
+                explicitly connected.
               </div>
             </div>
 
             <div className="impact-grid">
               <div className="impact-card">
-                <h3>{funds.length}</h3>
-                <p>Funds analysed</p>
+                <h3>{selectedFundName}</h3>
+                <p>Governed active fund</p>
               </div>
-
               <div className="impact-card">
-                <h3>{formatCr(callAmount)}</h3>
-                <p>Capital required</p>
+                <h3>{formatCr(totalCommitment)}</h3>
+                <p>Total commitments</p>
               </div>
-
               <div className="impact-card">
-                <h3>92%</h3>
-                <p>Expected collection</p>
+                <h3>{formatCr(totalCalledTillDate)}</h3>
+                <p>Called till date</p>
               </div>
-
               <div className="impact-card">
-                <h3>LOW</h3>
-                <p>Liquidity risk after call</p>
+                <h3>{formatCr(totalUnfunded)}</h3>
+                <p>Unfunded commitments</p>
               </div>
             </div>
+
 <div className="preview-card">
   <h2>Saved Capital Call Drafts</h2>
 
@@ -980,69 +1062,36 @@ return (
   </div>
 )}
             <div className="preview-card">
-              <h2>AI Financial Reasoning</h2>
+              <h2>Governed Financial Inputs</h2>
 
               <div className="journal-preview">
                 <div className="journal-row">
                   <span>Selected Fund</span>
                   <strong>{selectedFundName}</strong>
                 </div>
-
                 <div className="journal-row">
                   <span>Total Commitments</span>
                   <strong>{formatCr(totalCommitment)}</strong>
                 </div>
-
                 <div className="journal-row">
                   <span>Called Till Date</span>
                   <strong>{formatCr(totalCalledTillDate)}</strong>
                 </div>
-
                 <div className="journal-row">
                   <span>Unfunded Commitment</span>
                   <strong>{formatCr(totalUnfunded)}</strong>
                 </div>
-
                 <div className="journal-row">
-                  <span>Current Deployable Cash</span>
-                  <strong>₹81 Cr</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Less: Approved Investments</span>
-                  <strong>(₹63 Cr)</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Less: Management Fees Due</span>
-                  <strong>(₹8 Cr)</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Less: Liquidity Buffer Required</span>
-                  <strong>(₹10 Cr)</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Projected Available Cash</span>
-                  <strong>₹0 Cr</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>AI Recommendation</span>
-                  <strong>Raise {formatCr(callAmount)}</strong>
-                </div>
-
-                <div className="journal-row">
-                  <span>Confidence</span>
-                  <strong>98%</strong>
+                  <span>Proposed Call Amount</span>
+                  <strong>{formatCr(callAmount)}</strong>
                 </div>
               </div>
 
               <div className="explain-box">
-                <strong>Why?</strong> Without this capital call, scheduled
-                deployments and fund expenses will reduce deployable cash below
-                the minimum liquidity threshold.
+                Cash forecasting, approved-investment obligations, fee schedules,
+                liquidity buffers, collection probabilities and confidence scores
+                are not displayed until those inputs are connected to governed
+                canonical records.
               </div>
             </div>
 
@@ -1051,7 +1100,7 @@ return (
 
               <div className="progress-steps">
                 <div className="progress-step active">✓ Fund Selected</div>
-                <div className="progress-step active">✓ AI Recommendation</div>
+                <div className="progress-step active">✓ Draft Prepared</div>
                 <div className="progress-step active">✓ Allocation Generated</div>
                 <div className="progress-step active">
                   {isApproved ? "✓ Approved" : "◐ Approval Pending"}
@@ -1069,17 +1118,17 @@ return (
             </div>
 
             <div className="preview-card">
-              <h2>AI Generated Capital Call</h2>
+              <h2>Capital Call Draft</h2>
 
               <div className="impact-grid">
                 <div className="impact-card">
                   <h3>{selectedFundName}</h3>
-                  <p>Fund selected by AI</p>
+                  <p>Governed active fund</p>
                 </div>
 
                 <div className="impact-card">
                   <h3>{formatCr(callAmount)}</h3>
-                  <p>Recommended amount</p>
+                  <p>Proposed call amount</p>
                 </div>
 
                 <div className="impact-card">
@@ -1088,33 +1137,27 @@ return (
                 </div>
 
                 <div className="impact-card">
-                  <h3>98%</h3>
-                  <p>AI confidence</p>
+                  <h3>{formatCr(totalUnfunded)}</h3>
+                  <p>Unfunded commitments</p>
                 </div>
               </div>
 
               <div className="form-card">
                 <p className="eyebrow">
-                  Prepared automatically by VENTIQ AI — editable before approval
+                  Prepared from governed fund and commitment data — editable before approval
                 </p>
 
                 <label>Fund</label>
-                <select
-                  value={selectedFundId}
-                  onChange={(event) => {
-                    setSelectedFundId(event.target.value);
-                    setInvestorBatch("All investors");
-                    setExcludedInvestor("None");
-                    setIsApproved(false);
-                    setHasGeneratedCapitalCall(false);
-                  }}
-                >
-                  {funds.map((fund) => (
-                    <option key={fund.id} value={fund.id}>
-                      {fund.name}
-                    </option>
-                  ))}
+                <select value={selectedFundId} disabled>
+                  {selectedFund ? (
+                    <option value={selectedFund.id}>{selectedFund.name}</option>
+                  ) : (
+                    <option value="">No governed active fund resolved</option>
+                  )}
                 </select>
+                <p className="field-help">
+                  Fund scope is controlled by the authenticated VENTIQ Active Fund selector.
+                </p>
 
                 <label>Fund Structure</label>
                 <select

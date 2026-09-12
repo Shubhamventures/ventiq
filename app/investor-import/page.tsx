@@ -1,7 +1,7 @@
-﻿"use client";
+"use client";
 
 import { useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { useActiveFund } from "@/lib/useActiveFund";
 
 type InvestorRow = {
   investorCode: string;
@@ -15,10 +15,6 @@ type InvestorRow = {
   commitmentAmount: number;
 };
 
-type InsertedInvestor = {
-  id: string;
-  investor_code: string;
-};
 
 const investorTypes = [
   "Individual",
@@ -98,10 +94,11 @@ function generateInvestors(total: number): InvestorRow[] {
 }
 
 export default function InvestorImportPage() {
+  const { activeFundName, isReady: activeFundReady } = useActiveFund(
+    "VENTIQ Growth Fund II"
+  );
   const [investors, setInvestors] = useState<InvestorRow[]>([]);
   const [message, setMessage] = useState("");
-  const [isImporting, setIsImporting] = useState(false);
-  const [batchId, setBatchId] = useState("");
 
   const stats = useMemo(() => {
     const totalCommitment = investors.reduce(
@@ -128,115 +125,15 @@ export default function InvestorImportPage() {
   }, [investors]);
 
   function handleGenerate() {
+    if (!activeFundReady || !activeFundName) {
+      setMessage("Authenticated fund access is still loading.");
+      return;
+    }
+
     setInvestors(generateInvestors(600));
-    setBatchId("");
-    setMessage("600 investor records generated for VENTIQ Growth Fund II.");
+    setMessage(`600 synthetic investor records generated in memory for ${activeFundName}. Nothing was written to governed tables.`);
   }
 
-  async function handleImport() {
-    if (investors.length === 0) {
-      setMessage("Generate investor records first.");
-      return;
-    }
-
-        const supabaseClient = supabase;
-
-    if (!supabaseClient) {
-      setMessage("Supabase is not configured. Please check .env.local.");
-      return;
-    }
-
-    setIsImporting(true);
-    setMessage("Importing investor master and commitment records...");
-
-    try {
-      const { data: batch, error: batchError } = await supabaseClient
-        .from("investor_import_batches")
-        .insert({
-          batch_name: `600 investor import - ${new Date().toLocaleDateString(
-            "en-IN"
-          )}`,
-          fund_name: "VENTIQ Growth Fund II",
-          source: "sample_600",
-          total_records: investors.length,
-          total_commitment: stats.totalCommitment,
-          status: "importing",
-        })
-        .select("id")
-        .single();
-
-      if (batchError || !batch) {
-        throw batchError || new Error("Batch creation failed.");
-      }
-
-      const newBatchId = String(batch.id);
-
-      const investorRows = investors.map((investor) => ({
-        batch_id: newBatchId,
-        investor_code: investor.investorCode,
-        investor_name: investor.investorName,
-        email: investor.email,
-        investor_type: investor.investorType,
-        country: investor.country,
-        tax_id: investor.investorCode,
-        kyc_status: investor.kycStatus,
-        bank_status: investor.bankStatus,
-        onboarding_status: "Active",
-      }));
-
-      const { data: insertedInvestors, error: investorError } = await supabaseClient
-        .from("investor_master")
-        .insert(investorRows)
-        .select("id, investor_code");
-
-      if (investorError || !insertedInvestors) {
-        throw investorError || new Error("Investor import failed.");
-      }
-
-      const investorIdByCode = new Map<string, string>();
-
-      (insertedInvestors as InsertedInvestor[]).forEach((investor) => {
-        investorIdByCode.set(investor.investor_code, investor.id);
-      });
-
-      const commitmentRows = investors.map((investor) => ({
-        batch_id: newBatchId,
-        investor_id: investorIdByCode.get(investor.investorCode),
-        fund_name: "VENTIQ Growth Fund II",
-        class_name: investor.className,
-        commitment_amount: investor.commitmentAmount,
-        unfunded_commitment: investor.commitmentAmount,
-        commitment_status: "Active",
-      }));
-
-      const { error: commitmentError } = await supabaseClient 
-        .from("fund_commitments")
-        .insert(commitmentRows);
-
-      if (commitmentError) {
-        throw commitmentError;
-      }
-
-      await supabaseClient
-        .from("investor_import_batches")
-        .update({
-          status: "imported",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", newBatchId);
-
-      setBatchId(newBatchId);
-      setMessage(
-        "Import completed. 600 investors and 600 commitment records are now stored."
-      );
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Import failed.";
-      setMessage(errorMessage);
-    } finally {
-      setIsImporting(false);
-    }
-  }
 
   return (
     <main className="investor-import-page">
@@ -496,7 +393,7 @@ export default function InvestorImportPage() {
         <nav className="nav">
           <div className="brand">
             <strong>VENTIQ</strong>
-            <span>Investor Import Engine</span>
+            <span>Investor Import Simulation</span>
           </div>
 
           <div className="nav-links">
@@ -508,22 +405,22 @@ export default function InvestorImportPage() {
 
         <section className="hero">
           <div>
-            <p className="eyebrow">Commercial data foundation</p>
+            <p className="eyebrow">Controlled synthetic simulation</p>
             <h1>Import investors. Create commitments. Power capital calls.</h1>
             <p>
-              This engine converts investor master data and commitment records
-              into the structured fund data layer required for capital calls,
-              finance dashboards, investor portals and performance reporting.
+              This page generates synthetic investor records in memory for UI
+              and scale testing only. Governed investor imports must use the
+              canonical Migration Data Intake workflow.
             </p>
           </div>
 
           <div className="card">
-            <p className="eyebrow">First commercial milestone</p>
+            <p className="eyebrow">Simulation only</p>
             <h2>600-investor fund simulation</h2>
             <p>
-              Generate 600 investor records, store them in Supabase, create
-              commitment records and prepare the next capital call allocation
-              engine.
+              Generate 600 clearly synthetic investor records for local
+              interface testing. This page cannot persist them into investor
+              master, commitment or readiness tables.
             </p>
           </div>
         </section>
@@ -532,66 +429,56 @@ export default function InvestorImportPage() {
           <div className="stat">
             <span>Investor records</span>
             <strong>{stats.totalInvestors}</strong>
-            <small>Generated for import</small>
+            <small>Synthetic in-memory records</small>
           </div>
 
           <div className="stat">
             <span>Total commitment</span>
             <strong>{formatCr(stats.totalCommitment)}</strong>
-            <small>Across selected fund</small>
+            <small>Synthetic simulation total</small>
           </div>
 
           <div className="stat">
             <span>KYC completed</span>
             <strong>{stats.kycCompleted}</strong>
-            <small>Ready records</small>
+            <small>Synthetic KYC status</small>
           </div>
 
           <div className="stat">
             <span>Bank verified</span>
             <strong>{stats.bankVerified}</strong>
-            <small>Payment-ready investors</small>
+            <small>Synthetic bank status</small>
           </div>
         </section>
 
         <section className="card">
-          <p className="eyebrow">Import control</p>
-          <h2>Create the investor dataset</h2>
+          <p className="eyebrow">Simulation control</p>
+          <h2>Create a non-persistent synthetic dataset</h2>
           <p>
-            Generate a 600-investor sample dataset, then import investor master
-            and commitment records into Supabase.
+            Generate a 600-investor synthetic dataset for interface testing.
+            Production data must enter through governed Migration Data Intake.
           </p>
 
           <div className="button-row">
             <button className="primary" onClick={handleGenerate}>
-              Generate 600 Investors
+              Generate 600 Synthetic Investors
             </button>
 
-            <button
-              className="secondary"
-              disabled={isImporting || investors.length === 0}
-              onClick={handleImport}
-            >
-              {isImporting ? "Importing..." : "Import to Supabase"}
-            </button>
+            <a className="secondary" href="/migration/data-intake">
+              Open Governed Data Intake
+            </a>
           </div>
 
           {message && <div className="message">{message}</div>}
-
-          {batchId && (
-            <div className="message">
-              Import batch created: <strong>{batchId}</strong>
-            </div>
-          )}
         </section>
 
         <section className="grid-two">
           <div className="card">
-            <p className="eyebrow">Readiness summary</p>
+            <p className="eyebrow">Synthetic quality summary</p>
             <h2>Data quality view</h2>
             <p>
-              Investor master, commitment, KYC and bank readiness must be
-              visible before capital calls can run commercially.
+              These counts describe only the in-memory synthetic dataset.
+              They do not indicate governed production readiness.
             </p>
 
             <div className="check-list">
@@ -607,34 +494,34 @@ export default function InvestorImportPage() {
 
               <div className="check-row">
                 <span>Fund</span>
-                <strong>VENTIQ Growth Fund II</strong>
+                <strong>{activeFundName}</strong>
               </div>
             </div>
           </div>
 
           <div className="card">
-            <p className="eyebrow">Commercial flow</p>
-            <h2>What this unlocks next</h2>
+            <p className="eyebrow">Production path</p>
+            <h2>Use governed intake for real records</h2>
 
             <div className="check-list">
               <div className="check-row">
                 <span>Step 1</span>
-                <strong>Investor master imported</strong>
+                <strong>Upload governed investor master data</strong>
               </div>
 
               <div className="check-row">
                 <span>Step 2</span>
-                <strong>Commitments created</strong>
+                <strong>Validate canonical commitments</strong>
               </div>
 
               <div className="check-row">
                 <span>Step 3</span>
-                <strong>Capital call allocation ready</strong>
+                <strong>Resolve readiness exceptions</strong>
               </div>
 
               <div className="check-row">
                 <span>Step 4</span>
-                <strong>Finance dashboard impact</strong>
+                <strong>Activate through maker-checker controls</strong>
               </div>
             </div>
           </div>
@@ -642,10 +529,10 @@ export default function InvestorImportPage() {
 
         <section className="card" style={{ marginTop: 24 }}>
           <p className="eyebrow">Investor preview</p>
-          <h2>Sample investor master records</h2>
+          <h2>Synthetic investor preview</h2>
           <p>
-            Showing the first 12 rows from the generated dataset. Full import
-            creates 600 investor records and 600 commitment records.
+            Showing the first 12 rows from the generated in-memory dataset.
+            These rows are not persisted and are not production fund records.
           </p>
 
           <div className="table-wrap">
@@ -692,8 +579,8 @@ export default function InvestorImportPage() {
                 {investors.length === 0 && (
                   <tr>
                     <td colSpan={8}>
-                      No investor records generated yet. Click Generate 600
-                      Investors to begin.
+                      No synthetic investor records generated yet. Click Generate 600
+                      Synthetic Investors to begin.
                     </td>
                   </tr>
                 )}

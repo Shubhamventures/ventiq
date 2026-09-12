@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
+import { isSupabaseConfigured } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
 import { useVentiqAuth } from "../../lib/auth/AuthProvider";
 
@@ -11,6 +11,19 @@ type PerformanceCalculationResponse = {
   run?: DataRow | null;
   reconciliations?: DataRow[];
   error?: string;
+};
+
+type ComplianceOverviewResponse = {
+  activation?: DataRow | null;
+  complianceRows?: DataRow[];
+  migrationPdfFiles?: DataRow[];
+  fundRow?: DataRow | null;
+  regulatoryMatchRows?: DataRow[];
+  regulatoryCircularRows?: DataRow[];
+  pdfRows?: DataRow[];
+  investorDocumentRows?: DataRow[];
+  error?: string;
+  code?: string;
 };
 
 type ComplianceWorkflowActor = {
@@ -181,12 +194,11 @@ function isOpenComplianceStatus(row: DataRow) {
 export default function ComplianceAIPage() {
   const {
     activeFundName,
+    availableFundNames,
     setActiveFundName,
     isReady: isFundContextReady,
   } = useActiveFund("VENTIQ Growth Fund II");
   const { session } = useVentiqAuth();
-
-  const [fundOptions, setFundOptions] = useState<string[]>([]);
   const [activationStatus, setActivationStatus] = useState("Setup Not Started");
   const [activationDetails, setActivationDetails] = useState<DataRow | null>(null);
 
@@ -448,7 +460,7 @@ export default function ComplianceAIPage() {
   async function loadComplianceWorkspace() {
     if (!isFundContextReady) return;
 
-    if (!isSupabaseConfigured || !supabase) {
+    if (!isSupabaseConfigured) {
       setErrorMessage(
         "The Compliance workspace is unavailable because Supabase is not configured."
       );
@@ -504,140 +516,41 @@ export default function ComplianceAIPage() {
       );
       setCalculationLoadMessage("");
 
-      const [
-        fundOptionsResult,
-        activationResult,
-        complianceItemsResult,
-        migrationPdfFilesResult,
-        fundRowResult,
-        regulatoryMatchesResult,
-        regulatoryCircularsResult,
-      ] = await Promise.all([
-        supabase.from("fund_master").select("fund_name").order("fund_name"),
-
-        supabase
-          .from("fund_activation_status")
-          .select("*")
-          .eq("fund_name", activeFundName)
-          .maybeSingle(),
-
-        supabase
-          .from("compliance_items")
-          .select("*")
-          .eq("fund_name", activeFundName)
-          .eq("source_batch_id", sourceBatch)
-          .order("due_date", { ascending: true }),
-
-        supabase
-          .from("migration_file_uploads")
-          .select(
-            "id, batch_id, fund_name, category, original_file_name, storage_path, upload_status, processing_status"
-          )
-          .eq("batch_id", sourceBatch)
-          .eq("fund_name", activeFundName)
-          .eq("category", "pdf")
-          .order("created_at", { ascending: false }),
-
-        supabase
-          .from("fund_master")
-          .select("*")
-          .eq("fund_name", activeFundName)
-          .eq("source_batch_id", sourceBatch)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-
-        supabase
-          .from("regulatory_source_matches")
-          .select("*")
-          .eq("status", "needs_review"),
-
-        supabase
-          .from("regulatory_circulars")
-          .select("*")
-          .eq("status", "active"),
-      ]);
-
-      const firstError =
-        fundOptionsResult.error ||
-        complianceItemsResult.error ||
-        migrationPdfFilesResult.error ||
-        fundRowResult.error;
-
-      if (firstError) {
-        throw new Error(firstError.message);
-      }
-
-      const availableFundNames = Array.from(
-        new Set(
-          ((fundOptionsResult.data ?? []) as DataRow[])
-            .map((row) => getString(row, ["fund_name"], ""))
-            .filter(Boolean)
-        )
+      const overviewResponse = await fetch(
+        `/api/compliance/overview?fundName=${encodeURIComponent(
+          activeFundName
+        )}&sourceBatchId=${encodeURIComponent(sourceBatch)}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: "no-store",
+        }
       );
+      const overviewResult =
+        (await overviewResponse.json().catch(() => ({}))) as
+          ComplianceOverviewResponse;
 
-      if (!availableFundNames.includes(activeFundName)) {
-        availableFundNames.unshift(activeFundName);
+      if (!overviewResponse.ok) {
+        throw new Error(
+          overviewResult.error ||
+            "Unable to load the verified Compliance operating data."
+        );
       }
 
-      setFundOptions(availableFundNames);
-
-      const activation = activationResult.error
-        ? null
-        : ((activationResult.data as DataRow | null) ?? null);
+      const activation = overviewResult.activation ?? null;
 
       setActivationDetails(activation);
       setActivationStatus(
         getString(activation ?? undefined, ["status"], "Setup Not Started")
       );
 
-      const complianceRows = (complianceItemsResult.data ?? []) as DataRow[];
-      const migrationPdfFiles = (migrationPdfFilesResult.data ?? []) as DataRow[];
-      const pdfStoragePaths = Array.from(
-        new Set(
-          migrationPdfFiles
-            .map((row) => getString(row, ["storage_path"], ""))
-            .filter(Boolean)
-        )
-      );
-
-      let pdfRows: DataRow[] = [];
-      let investorDocumentRows: DataRow[] = [];
-
-      if (pdfStoragePaths.length > 0) {
-        const [pdfDocumentsResult, investorDocumentsResult] = await Promise.all([
-          supabase
-            .from("pdf_intelligence_documents")
-            .select("*")
-            .eq("fund_name", activeFundName)
-            .in("storage_path", pdfStoragePaths)
-            .order("created_at", { ascending: false }),
-
-          supabase
-            .from("investor_documents")
-            .select("*")
-            .eq("fund_name", activeFundName)
-            .in("storage_path", pdfStoragePaths)
-            .order("created_at", { ascending: false }),
-        ]);
-
-        if (pdfDocumentsResult.error) {
-          throw new Error(pdfDocumentsResult.error.message);
-        }
-
-        pdfRows = (pdfDocumentsResult.data ?? []) as DataRow[];
-        investorDocumentRows = investorDocumentsResult.error
-          ? []
-          : ((investorDocumentsResult.data ?? []) as DataRow[]);
-      }
-
-      const fundRow = (fundRowResult.data as DataRow | null) ?? null;
-      const regulatoryMatchRows = regulatoryMatchesResult.error
-        ? []
-        : ((regulatoryMatchesResult.data ?? []) as DataRow[]);
-      const regulatoryCircularRows = regulatoryCircularsResult.error
-        ? []
-        : ((regulatoryCircularsResult.data ?? []) as DataRow[]);
+      const complianceRows = overviewResult.complianceRows ?? [];
+      const migrationPdfFiles = overviewResult.migrationPdfFiles ?? [];
+      const pdfRows = overviewResult.pdfRows ?? [];
+      const investorDocumentRows = overviewResult.investorDocumentRows ?? [];
+      const fundRow = overviewResult.fundRow ?? null;
+      const regulatoryMatchRows = overviewResult.regulatoryMatchRows ?? [];
+      const regulatoryCircularRows = overviewResult.regulatoryCircularRows ?? [];
 
       setComplianceItems(complianceRows);
       setFundMasterRows(fundRow ? [fundRow] : []);
@@ -1196,7 +1109,7 @@ export default function ComplianceAIPage() {
                 onChange={(event) => setActiveFundName(event.target.value)}
                 value={activeFundName}
               >
-                {fundOptions.map((fundName) => (
+                {availableFundNames.map((fundName) => (
                   <option key={fundName} value={fundName}>
                     {fundName}
                   </option>

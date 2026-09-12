@@ -1,6 +1,12 @@
 ﻿"use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import { useVentiqAuth } from "../../lib/auth/AuthProvider";
+import {
+  loadCanonicalFundReadiness,
+  type CanonicalFundReadiness,
+} from "../../lib/readiness/canonicalFundReadiness";
 
 type AdoptionModule = {
   key: string;
@@ -188,16 +194,28 @@ financialLabel: "Open Financial Migration",
   },
 ];
 
-function getReadinessScore(module: AdoptionModule) {
-  const baseScore = 58;
-  const dataScore = Math.min(module.dataNeeded.length * 4, 28);
-  const expansionScore = Math.min(module.expansionPath.length * 2, 12);
+function formatReadinessDate(value: string) {
+  if (!value) return "Not available";
 
-  return Math.min(baseScore + dataScore + expansionScore, 98);
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+
+  return parsed.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function MigrationPage() {
+  const { activeFundName, fundContextReady, session } = useVentiqAuth();
   const [selectedKey, setSelectedKey] = useState(adoptionModules[0].key);
+  const [readiness, setReadiness] =
+    useState<CanonicalFundReadiness | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
+  const [readinessError, setReadinessError] = useState("");
 
   const selectedModule = useMemo(() => {
     return (
@@ -206,7 +224,124 @@ export default function MigrationPage() {
     );
   }, [selectedKey]);
 
-  const readinessScore = getReadinessScore(selectedModule);
+  const accessToken = session?.access_token?.trim() || "";
+
+  useEffect(() => {
+    let cancelled = false;
+    const fundName = activeFundName.trim();
+
+    if (!fundContextReady || !fundName || !accessToken) {
+      void Promise.resolve().then(() => {
+        if (!cancelled) {
+          setReadiness(null);
+          setReadinessError("");
+          setReadinessLoading(false);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void Promise.resolve().then(() => {
+      if (!cancelled) {
+        setReadinessLoading(true);
+        setReadinessError("");
+      }
+    });
+
+    loadCanonicalFundReadiness(fundName, accessToken)
+      .then((snapshot) => {
+        if (!cancelled) {
+          setReadiness(snapshot);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setReadiness(null);
+          setReadinessError(
+            error instanceof Error
+              ? error.message
+              : "Unable to load canonical Data Center readiness."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setReadinessLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, activeFundName, fundContextReady]);
+
+  const presentLayers =
+    readiness?.layers.filter((layer) => Boolean(layer.source_batch_id)) ?? [];
+  const missingLayers =
+    readiness?.layers.filter((layer) => !layer.source_batch_id) ?? [];
+  const canonicalRecordCount =
+    readiness?.layers.reduce((total, layer) => total + layer.count, 0) ?? 0;
+  const pdfLayer = readiness?.layers.find((layer) => layer.key === "pdf") ?? null;
+
+  const nextAction = useMemo(() => {
+    if (!readiness?.intake.batchId) {
+      return {
+        href: "/migration/data-intake",
+        label: "Start canonical Data Intake",
+      };
+    }
+
+    if (
+      readiness.intake.processingStatus !== "Completed" ||
+      readiness.intake.validationErrorCount > 0
+    ) {
+      return {
+        href: "/migration/data-intake",
+        label: "Complete Data Intake",
+      };
+    }
+
+    if (readiness.issues.blocking > 0) {
+      return {
+        href: `/issues?fundName=${encodeURIComponent(readiness.fundName)}`,
+        label: `Resolve ${readiness.issues.blocking} blocking issue${
+          readiness.issues.blocking === 1 ? "" : "s"
+        }`,
+      };
+    }
+
+    if (!readiness.calculation.ready) {
+      return {
+        href: "/migration/performance-calculations",
+        label: "Run / review calculations",
+      };
+    }
+
+    if (
+      readiness.checker.totalLayers === 0 ||
+      readiness.checker.approvedLayers !== readiness.checker.totalLayers ||
+      !readiness.activation.isActive
+    ) {
+      return {
+        href: "/migration/activation",
+        label: "Complete approval and activation",
+      };
+    }
+
+    if (!readiness.launch.gateOpen) {
+      return {
+        href: "/migration/stakeholder-launch",
+        label: "Review Stakeholder Launch",
+      };
+    }
+
+    return {
+      href: "/launch-center",
+      label: "Launch VENTIQ Workspaces",
+    };
+  }, [readiness]);
 
   return (
     <main className="migration-page">
@@ -537,6 +672,136 @@ export default function MigrationPage() {
           font-size: 13px;
         }
 
+        .operational-panel {
+          border: 1px solid rgba(96, 165, 250, 0.22);
+          background: rgba(8, 19, 39, 0.82);
+          border-radius: 24px;
+          padding: 22px;
+          margin-bottom: 28px;
+        }
+
+        .operational-panel.error {
+          border-color: rgba(248, 113, 113, 0.3);
+        }
+
+        .operational-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 20px;
+          margin-bottom: 18px;
+        }
+
+        .operational-header h2 {
+          margin: 4px 0 8px;
+          font-size: clamp(24px, 3vw, 34px);
+        }
+
+        .operational-header p {
+          margin: 0;
+          color: #a9bdd9;
+          line-height: 1.55;
+        }
+
+        .operational-gate {
+          min-width: 180px;
+          padding: 14px 16px;
+          border: 1px solid rgba(96, 165, 250, 0.2);
+          border-radius: 16px;
+          background: rgba(15, 23, 42, 0.7);
+        }
+
+        .operational-gate span {
+          display: block;
+          color: #7890b2;
+          font-size: 10px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        }
+
+        .operational-gate strong {
+          display: block;
+          margin-top: 5px;
+          font-size: 20px;
+          color: #f8fbff;
+        }
+
+        .operational-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .operational-card {
+          min-height: 104px;
+          padding: 13px;
+          border: 1px solid rgba(147, 197, 253, 0.12);
+          border-radius: 14px;
+          background: rgba(2, 12, 31, 0.54);
+        }
+
+        .operational-card span {
+          display: block;
+          color: #7890b2;
+          font-size: 9px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          margin-bottom: 6px;
+        }
+
+        .operational-card strong {
+          display: block;
+          color: #f8fbff;
+          font-size: 15px;
+          line-height: 1.35;
+          margin-bottom: 5px;
+        }
+
+        .operational-card small {
+          display: block;
+          color: #9fb4d2;
+          font-size: 10px;
+          line-height: 1.45;
+        }
+
+        .operational-layers {
+          display: flex;
+          gap: 7px;
+          flex-wrap: wrap;
+          margin-top: 14px;
+        }
+
+        .operational-layer {
+          border: 1px solid rgba(147, 197, 253, 0.14);
+          border-radius: 999px;
+          padding: 6px 9px;
+          font-size: 10px;
+          color: #b9cbea;
+        }
+
+        .operational-layer.ready {
+          border-color: rgba(34, 197, 94, 0.28);
+          color: #86efac;
+        }
+
+        .operational-action {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          margin-top: 16px;
+          padding-top: 16px;
+          border-top: 1px solid rgba(147, 197, 253, 0.12);
+        }
+
+        .operational-action p {
+          margin: 0;
+          color: #9fb4d2;
+          font-size: 12px;
+        }
+
         .expansion-grid {
           display: grid;
           grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -649,10 +914,209 @@ export default function MigrationPage() {
           </a>
         </nav>
 
+        <section
+          className={`operational-panel ${readinessError ? "error" : ""}`}
+        >
+          <div className="operational-header">
+            <div>
+              <p className="migration-eyebrow">VENTIQ Data Center</p>
+              <h2>True operational readiness for the active governed fund.</h2>
+              <p>
+                This view reads the same canonical intake, Issue Center,
+                calculation, maker-checker, activation and Stakeholder Launch
+                state used by VENTIQ operations.
+              </p>
+            </div>
+
+            <div className="operational-gate">
+              <span>Active fund</span>
+              <strong>{activeFundName || "Not selected"}</strong>
+              <span style={{ marginTop: 10 }}>Launch gate</span>
+              <strong>
+                {readinessLoading
+                  ? "Loading"
+                  : readiness?.launch.gateOpen
+                    ? "Open"
+                    : "Locked"}
+              </strong>
+            </div>
+          </div>
+
+          {readinessError ? (
+            <p>
+              Canonical readiness could not be loaded: {readinessError}. No
+              synthetic readiness score has been substituted.
+            </p>
+          ) : !fundContextReady || !activeFundName ? (
+            <p>Load a governed active fund to view operational readiness.</p>
+          ) : readinessLoading && !readiness ? (
+            <p>Loading canonical operational readiness...</p>
+          ) : readiness ? (
+            <>
+              <div className="operational-grid">
+                <article className="operational-card">
+                  <span>Latest canonical intake</span>
+                  <strong>{readiness.intake.batchName || "No intake batch"}</strong>
+                  <small>
+                    {readiness.intake.processingStatus || "Not started"}
+                  </small>
+                </article>
+
+                <article className="operational-card">
+                  <span>Files processed</span>
+                  <strong>
+                    {readiness.intake.processedFiles}/{readiness.intake.totalFiles}
+                  </strong>
+                  <small>
+                    Uploaded {readiness.intake.uploadedFiles} · datasets{" "}
+                    {readiness.intake.datasetKeys.length}
+                  </small>
+                </article>
+
+                <article className="operational-card">
+                  <span>Canonical layers</span>
+                  <strong>
+                    {presentLayers.length}/{readiness.layers.length || 5} present
+                  </strong>
+                  <small>Missing {missingLayers.length}</small>
+                </article>
+
+                <article className="operational-card">
+                  <span>Canonical record counts</span>
+                  <strong>{canonicalRecordCount} records</strong>
+                  <small>
+                    Across {readiness.layers.length} governed layer(s) · intake rows{" "}
+                    {readiness.intake.totalRows} · rejected{" "}
+                    {readiness.intake.rejectedRows}
+                  </small>
+                </article>
+
+                <article className="operational-card">
+                  <span>Blocking errors</span>
+                  <strong>{readiness.issues.blocking}</strong>
+                  <small>
+                    Validation {readiness.issues.validation} · reconciliation{" "}
+                    {readiness.issues.reconciliation}
+                  </small>
+                </article>
+
+                <article className="operational-card">
+                  <span>Warnings / review</span>
+                  <strong>
+                    {Math.max(
+                      readiness.issues.review,
+                      readiness.intake.validationWarningCount
+                    )}
+                  </strong>
+                  <small>
+                    Intake warnings {readiness.intake.validationWarningCount}
+                  </small>
+                </article>
+
+                <article className="operational-card">
+                  <span>PDF review state</span>
+                  <strong>
+                    {pdfLayer
+                      ? pdfLayer.data_ready
+                        ? "Ready"
+                        : "Review required"
+                      : "No PDF layer"}
+                  </strong>
+                  <small>
+                    {pdfLayer
+                      ? `${pdfLayer.warning_count} review signal(s)`
+                      : "No governed PDF batch"}
+                  </small>
+                </article>
+
+                <article className="operational-card">
+                  <span>Metric calculation</span>
+                  <strong>
+                    {readiness.calculation.ready ? "Ready" : "Not ready"}
+                  </strong>
+                  <small>
+                    {readiness.calculation.reconciliationPassed}/
+                    {readiness.calculation.reconciliationControls} controls passed
+                  </small>
+                </article>
+
+                <article className="operational-card">
+                  <span>Checker state</span>
+                  <strong>
+                    {readiness.checker.approvedLayers}/
+                    {readiness.checker.totalLayers} approved
+                  </strong>
+                  <small>
+                    Submitted {readiness.checker.submittedLayers} · changes requested{" "}
+                    {readiness.checker.changesRequestedLayers}
+                  </small>
+                </article>
+
+                <article className="operational-card">
+                  <span>Activation state</span>
+                  <strong>{readiness.activation.status}</strong>
+                  <small>
+                    Persisted readiness {readiness.activation.readinessScore}%
+                  </small>
+                </article>
+
+                <article className="operational-card">
+                  <span>Stakeholder launch</span>
+                  <strong>
+                    {readiness.launch.operationalLayers}/
+                    {readiness.launch.totalLayers} operational
+                  </strong>
+                  <small>
+                    {readiness.launch.blockerCount} launch blocker type(s)
+                  </small>
+                </article>
+
+                <article className="operational-card">
+                  <span>Last updated</span>
+                  <strong>{formatReadinessDate(readiness.lastUpdated)}</strong>
+                  <small>
+                    Same governed lineage used by activation and launch.
+                  </small>
+                </article>
+              </div>
+
+              <div className="operational-layers">
+                {readiness.layers.map((layer) => (
+                  <span
+                    className={`operational-layer ${
+                      layer.source_batch_id ? "ready" : ""
+                    }`}
+                    key={layer.key}
+                  >
+                    {layer.title}:{" "}
+                    {layer.source_batch_id
+                      ? layer.data_ready
+                        ? "data ready"
+                        : "loaded / review"
+                      : "missing"}
+                  </span>
+                ))}
+              </div>
+
+              <div className="operational-action">
+                <p>
+                  Next action is derived from the current canonical state, not
+                  from the selected commercial adoption path.
+                </p>
+                <a className="primary-action" href={nextAction.href}>
+                  {nextAction.label} &rarr;
+                </a>
+              </div>
+            </>
+          ) : (
+            <p>No canonical readiness snapshot is available yet.</p>
+          )}
+        </section>
+
         <section className="migration-hero">
           <div>
-            <p className="migration-eyebrow">Migration and modular adoption</p>
-            <h1>Start with one dashboard. Expand into the full VENTIQ OS.</h1>
+            <p className="migration-eyebrow">Migration and modular adoption planning</p>
+            <h1>Choose the first workflow, while operational truth stays fund-wide.</h1>
             <p>
               VENTIQ helps private capital firms launch one high-impact module
               first, migrate existing fund and investor data, and expand into a
@@ -764,8 +1228,8 @@ export default function MigrationPage() {
               </div>
 
               <div className="mini-stat">
-                <span>Readiness score</span>
-                <strong>{readinessScore}%</strong>
+                <span>Inputs to provide</span>
+                <strong>{selectedModule.dataNeeded.length}</strong>
               </div>
             </div>
            {(selectedModule.workspaceHref || selectedModule.financialHref) && (

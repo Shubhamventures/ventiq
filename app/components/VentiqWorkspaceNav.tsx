@@ -2,8 +2,13 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useVentiqAuth } from "../../lib/auth/AuthProvider";
+import { useActiveFund } from "../../lib/useActiveFund";
+import {
+  WORKSPACE_GROUPS,
+  visibleWorkspacesForRole,
+} from "../../lib/auth/workspaceRegistry";
 
 const publicPaths = new Set([
   "/",
@@ -20,37 +25,6 @@ const publicPaths = new Set([
   "/auth/unauthorized",
 ]);
 
-const groups = [
-  {
-    title: "Setup",
-    links: [
-      ["Setup Control Center", "/fund-onboarding"],
-      ["Data Center", "/migration"],
-      ["Data Intake", "/migration/data-intake"],
-      ["Activation", "/migration/activation"],
-    ],
-  },
-  {
-    title: "Dashboards",
-    links: [
-      ["Managing Partner", "/managing-partner-ai"],
-      ["Finance", "/finance-head-ai"],
-      ["Investment", "/investment-team-ai"],
-      ["Compliance", "/compliance-ai"],
-      ["Investor Relations", "/investor-portal"],
-      ["Investor / LP", "/investor-portal"],
-    ],
-  },
-  {
-    title: "Workflows",
-    links: [
-      ["Debt LMS", "/debt-lms"],
-      ["Bank MIS", "/bank-reconciliation"],
-      ["Document Studio", "/document-studio"],
-      ["Data Room & DDQ", "/data-room"],
-    ],
-  },
-];
 
 function roleLabel(value: string | null | undefined) {
   if (!value) return "VENTIQ User";
@@ -74,9 +48,39 @@ export default function VentiqWorkspaceNav({
     session,
     profile,
     activeRole,
-    fundAccess,
+    availableFundAccess,
     signOut,
   } = useVentiqAuth();
+
+  const {
+    activeFundName,
+    setActiveFundName,
+    isReady: fundContextReady,
+  } = useActiveFund("");
+
+  const visibleGroups = useMemo(
+    () =>
+      WORKSPACE_GROUPS.map((group) => ({
+        title: group,
+        links: visibleWorkspacesForRole(
+          activeRole,
+          group
+        ),
+      })).filter((group) => group.links.length > 0),
+    [activeRole]
+  );
+
+  const availableFundNames = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          availableFundAccess
+            .map((access) => access.fund_name.trim())
+            .filter(Boolean)
+        )
+      ),
+    [availableFundAccess]
+  );
 
   if (publicPaths.has(pathname)) {
     return <>{children}</>;
@@ -87,12 +91,11 @@ export default function VentiqWorkspaceNav({
     session?.user?.email?.split("@")[0] ||
     "VENTIQ User";
 
-  const activeFund =
-    fundAccess.find(
-      (access) => access.status === "Active" && access.can_view
-    )?.fund_name ||
-    fundAccess[0]?.fund_name ||
-    "Select fund";
+  const activeFundLabel =
+    activeFundName ||
+    (fundContextReady
+      ? "No fund assigned"
+      : "Loading fund…");
 
   async function handleSignOut() {
     await signOut();
@@ -122,17 +125,21 @@ export default function VentiqWorkspaceNav({
           <strong aria-hidden="true">&#8962;</strong>
         </Link>
 
-        {groups.map((group) => (
+        {visibleGroups.map((group) => (
           <div className="ventiq-nav-group" key={group.title}>
             <p>{group.title}</p>
-            {group.links.map(([label, href]) => (
+            {group.links.map((workspace) => (
               <Link
-                className={pathname === href ? "active" : ""}
-                href={href}
-                key={`${group.title}-${label}`}
+                className={
+                  pathname === workspace.href
+                    ? "active"
+                    : ""
+                }
+                href={workspace.href}
+                key={workspace.key}
                 onClick={() => setMobileOpen(false)}
               >
-                <span>{label}</span>
+                <span>{workspace.label}</span>
                 <strong aria-hidden="true">&#8594;</strong>
               </Link>
             ))}
@@ -167,7 +174,23 @@ export default function VentiqWorkspaceNav({
             </button>
             <div className="ventiq-fund-context">
               <span>Active fund</span>
-              <strong>{activeFund}</strong>
+              {availableFundNames.length > 1 ? (
+                <select
+                  aria-label="Select active fund"
+                  onChange={(event) =>
+                    setActiveFundName(event.target.value)
+                  }
+                  value={activeFundName}
+                >
+                  {availableFundNames.map((fundName) => (
+                    <option key={fundName} value={fundName}>
+                      {fundName}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <strong>{activeFundLabel}</strong>
+              )}
             </div>
           </div>
 
@@ -337,6 +360,21 @@ export default function VentiqWorkspaceNav({
           color: #eef6ff;
           font-size: 13px;
           font-weight: 850;
+        }
+
+        .ventiq-fund-context select {
+          display: block;
+          margin-top: 2px;
+          max-width: min(360px, 42vw);
+          border: 1px solid rgba(126, 181, 242, 0.22);
+          border-radius: 8px;
+          background: rgba(7, 24, 49, 0.88);
+          color: #eef6ff;
+          padding: 5px 28px 5px 8px;
+          font: inherit;
+          font-size: 12px;
+          font-weight: 850;
+          cursor: pointer;
         }
 
         .ventiq-account-context {
