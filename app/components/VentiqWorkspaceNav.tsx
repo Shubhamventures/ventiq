@@ -26,15 +26,6 @@ const publicPaths = new Set([
 ]);
 
 
-function roleLabel(value: string | null | undefined) {
-  if (!value) return "VENTIQ User";
-
-  return value
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
 
 export default function VentiqWorkspaceNav({
   children,
@@ -45,8 +36,6 @@ export default function VentiqWorkspaceNav({
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const {
-    session,
-    profile,
     activeRole,
     availableFundAccess,
     signOut,
@@ -86,10 +75,6 @@ export default function VentiqWorkspaceNav({
     return <>{children}</>;
   }
 
-  const displayName =
-    profile?.full_name?.trim() ||
-    session?.user?.email?.split("@")[0] ||
-    "VENTIQ User";
 
   const activeFundLabel =
     activeFundName ||
@@ -145,11 +130,6 @@ export default function VentiqWorkspaceNav({
             ))}
           </div>
         ))}
-
-        <div className="ventiq-sidebar-account">
-          <strong>{displayName}</strong>
-          <span>{roleLabel(activeRole)}</span>
-        </div>
 
         <div className="ventiq-sidebar-security">
           Navigation never expands permissions. Fund and investor access remain
@@ -305,29 +285,6 @@ export default function VentiqWorkspaceNav({
           text-transform: uppercase;
         }
 
-        .ventiq-sidebar-account {
-          margin: 20px 6px 0;
-          padding: 12px;
-          border-radius: 12px;
-          background: rgba(8, 30, 60, 0.56);
-          border: 1px solid rgba(105, 171, 244, 0.1);
-        }
-
-        .ventiq-sidebar-account strong {
-          display: block;
-          color: #eef6ff;
-          font-size: 12px;
-          font-weight: 850;
-        }
-
-        .ventiq-sidebar-account span {
-          display: block;
-          margin-top: 3px;
-          color: #7890ae;
-          font-size: 10px;
-          font-weight: 750;
-        }
-
         .ventiq-sidebar-security {
           margin: 12px 6px 0;
           padding: 12px;
@@ -457,15 +414,6 @@ export default function VentiqWorkspaceNav({
 
           .ventiq-app-sidebar.mobile-open {
             transform: translateX(0);
-          }
-
-          /* VENTIQ mobile drawer account containment: keep identity off-canvas unless the drawer is open. */
-          .ventiq-sidebar-account {
-            display: none !important;
-          }
-
-          .ventiq-app-sidebar.mobile-open .ventiq-sidebar-account {
-            display: block !important;
           }
 
           .ventiq-mobile-backdrop {
