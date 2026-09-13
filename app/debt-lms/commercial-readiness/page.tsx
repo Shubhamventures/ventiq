@@ -101,7 +101,7 @@ const implementationSteps = [
   },
 ];
 
-const demoStories = [
+const operatingFlowItems = [
   "Create a new debt loan from manual entry or term sheet review.",
   "Generate repayment schedule for the borrower.",
   "Update receipt with principal and interest breakup.",
@@ -114,18 +114,18 @@ const demoStories = [
   "Show final Debt LMS control view to Finance Head / Managing Partner.",
 ];
 
-const qaChecklist = [
-  "Add New Loan works",
-  "Generate Repayment Schedule works",
-  "Manual Receipt Update works",
-  "Bank Reconciliation Sync works",
-  "Generate Reminder Notices works",
-  "Email Queue works",
-  "Apply Penalty / Default Review works",
-  "Upload Term Sheet review works",
-  "Add / Update Covenant works",
-  "Add / Update Security Item works",
-  "Floating access navigation works from connected modules",
+const readinessChecklist = [
+  "Loan master creation is available for the selected fund",
+  "Repayment schedule generation is available",
+  "Manual receipt updates are available",
+  "Approved Bank Reconciliation receipts can sync into Debt LMS",
+  "Reminder and repayment notice generation is available",
+  "Email dispatch queue is available for approved notices",
+  "Penalty and default-review controls are available",
+  "Term sheet review can create a governed loan draft",
+  "Covenant maintenance is available",
+  "Security, charge and trustee tracking is available",
+  "Connected VENTIQ workspaces retain governed fund context",
 ];
 
 export default function DebtLmsCommercialReadinessPage() {
@@ -432,13 +432,13 @@ export default function DebtLmsCommercialReadinessPage() {
           <div className="readiness-hero-top">
             <div>
               <p className="eyebrow">VENTIQ Debt LMS</p>
-              <h1>Commercial Readiness Pack</h1>
+              <h1>Module Operating Model</h1>
               <p className="hero-copy">
-                A sellable Debt Fund Loan Monitoring and Servicing module for
+                A governed Debt Fund Loan Monitoring and Servicing module for
                 private credit, venture debt and structured credit funds. It
                 connects loan onboarding, repayment schedules, receipts,
                 notices, covenants, security tracking, bank reconciliation sync
-                and default monitoring into one operating layer.
+                and default monitoring in one operating layer.
               </p>
             </div>
 
@@ -469,8 +469,8 @@ export default function DebtLmsCommercialReadinessPage() {
             </div>
 
             <div className="metric-card">
-              <span>Demo status</span>
-              <strong>V1 ready</strong>
+              <span>Operating status</span>
+              <strong>Ready</strong>
             </div>
           </div>
         </div>
@@ -525,16 +525,16 @@ export default function DebtLmsCommercialReadinessPage() {
           <div className="panel">
             <div className="panel-header">
               <div>
-                <h2>Demo Storyline</h2>
+                <h2>Operating Flow</h2>
                 <p>
-                  Use this walkthrough for stakeholder demos, investor feedback
-                  calls and client discovery meetings.
+                  Follow the governed servicing sequence from loan setup through
+                  receipts, notices, covenant monitoring and exception control.
                 </p>
               </div>
             </div>
 
             <ul className="check-list">
-              {demoStories.map((item) => (
+              {operatingFlowItems.map((item) => (
                 <li key={item}>→ {item}</li>
               ))}
             </ul>
@@ -546,8 +546,8 @@ export default function DebtLmsCommercialReadinessPage() {
             <div>
               <h2>Implementation Flow</h2>
               <p>
-                The module is now structured like a real implementation journey,
-                not just a dashboard.
+                The workflow moves from setup and servicing through receipt,
+                notice, covenant and default-control operations.
               </p>
             </div>
           </div>
@@ -566,10 +566,10 @@ export default function DebtLmsCommercialReadinessPage() {
         <div className="panel">
           <div className="panel-header">
             <div>
-              <h2>Commercial Packaging</h2>
+              <h2>Adoption Options</h2>
               <p>
-                Use these package labels during conversations. Do not price yet;
-                first validate buyer interest and scope.
+                Different operating scopes can be activated without changing the
+                governed fund and loan data foundation.
               </p>
             </div>
           </div>
@@ -578,10 +578,10 @@ export default function DebtLmsCommercialReadinessPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Package</th>
-                  <th>Ideal client</th>
+                  <th>Operating scope</th>
+                  <th>Typical fit</th>
                   <th>Included workflows</th>
-                  <th>Upsell path</th>
+                  <th>Expansion path</th>
                 </tr>
               </thead>
 
@@ -631,25 +631,25 @@ export default function DebtLmsCommercialReadinessPage() {
         <div className="panel">
           <div className="panel-header">
             <div>
-              <h2>Final QA Checklist</h2>
+              <h2>Operational Readiness Checklist</h2>
               <p>
-                Complete this checklist before marking Debt LMS v1 as frozen.
+                Use this checklist to confirm the module is ready for governed operation.
               </p>
             </div>
           </div>
 
           <ul className="check-list">
-            {qaChecklist.map((item) => (
+            {readinessChecklist.map((item) => (
               <li key={item}>□ {item}</li>
             ))}
           </ul>
 
           <div className="go-live-box">
-            <h2>Debt LMS v1 freeze condition</h2>
+            <h2>Debt LMS readiness condition</h2>
             <p>
-              Once all checklist items are tested successfully, Debt LMS can be
-              marked as demo-ready and commercially presentable as a standalone
-              VENTIQ module.
+              Once the checklist is confirmed, Debt LMS can operate as a
+              standalone servicing workflow or as a connected module within the
+              wider VENTIQ operating system.
             </p>
           </div>
         </div>

@@ -31,8 +31,8 @@ export default function StartPage() {
           </p>
 
           <div className="ventiq-start-actions">
-            <Link className="primary" href="/fund-onboarding">
-              Continue to VENTIQ →
+            <Link className="primary" href="/auth/login?next=/fund-onboarding">
+              Sign in to start onboarding →
             </Link>
             <Link className="secondary" href="/#contact">
               Request onboarding →
@@ -40,9 +40,9 @@ export default function StartPage() {
           </div>
 
           <div className="controlled-note">
-            <strong>Controlled onboarding</strong>
-            New Fund Admin accounts are currently provisioned through VENTIQ&apos;s
-            assisted implementation process. Each administrator receives a secure
+            <strong>Assisted onboarding</strong>
+            New Fund Admin accounts are provisioned through VENTIQ&apos;s
+            assisted onboarding process. Each administrator receives a secure
             invitation and sets their own password.
           </div>
         </section>

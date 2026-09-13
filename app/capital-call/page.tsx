@@ -271,7 +271,7 @@ const [approvingDraftId, setApprovingDraftId] = useState("");
         setSelectedFundId("");
         setErrorMessage(
           fundData.length === 0
-            ? `No capital-call fund record was found for ${activeFundName}.`
+            ? `Capital call data has not been configured for ${activeFundName} yet.`
             : `Multiple capital-call fund records matched ${activeFundName}; refusing ambiguous fund scope.`
         );
         setLoading(false);
@@ -563,7 +563,7 @@ async function handleSubmitSavedDraftForApproval(draft: SavedCapitalCall) {
 
   if (!supabase) {
     setDraftActionMessage(
-      "The secured approval workflow is temporarily unavailable. Please request a walkthrough."
+      "The secured approval workflow is temporarily unavailable. Please retry or contact your VENTIQ administrator."
     );
     return;
   }
@@ -802,9 +802,9 @@ return (
 
         {!loading && errorMessage && (
           <div className="preview-card">
-            <h2>Connection Issue</h2>
+            <h2>Workspace status</h2>
             <div className="explain-box">
-              <strong>Error:</strong> {errorMessage}
+              {errorMessage}
             </div>
           </div>
         )}

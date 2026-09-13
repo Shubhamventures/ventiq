@@ -7,7 +7,7 @@
 body {
   background: #0b1220;
   color: white;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 a {
@@ -12097,6 +12097,11 @@ button.secondary-action:disabled {
   }
 }
 
+/* VENTIQ FINAL SHELL IDENTITY FAIL-CLOSED: only the sign-out action is rendered in account context. */
+.ventiq-app-topbar .ventiq-account-context > :not(button) {
+  display: none !important;
+}
+
 /* VENTIQ UX FINAL MOBILE TOPBAR CLOSURE: deterministic compact shell aligned to the app mobile breakpoint. */
 @media (max-width: 980px) {
   .ventiq-app-topbar {
@@ -12166,5 +12171,572 @@ button.secondary-action:disabled {
     font-size: 11px !important;
     line-height: 1 !important;
     white-space: nowrap !important;
+  }
+}
+
+
+/* ========================================================================== */
+/* VENTIQ COMMERCIAL PREMIUM UI SYSTEM — 2026-09-13                          */
+/* Client-facing design-system hardening for desktop, laptop, tablet, mobile. */
+/* ========================================================================== */
+
+:root {
+  --ventiq-premium-radius-sm: 10px;
+  --ventiq-premium-radius-md: 14px;
+  --ventiq-premium-radius-lg: 20px;
+  --ventiq-premium-border: rgba(119, 160, 219, 0.18);
+  --ventiq-premium-shadow: 0 14px 34px rgba(2, 8, 23, 0.16);
+  --ventiq-premium-text: #eef5ff;
+  --ventiq-premium-muted: #9fb3ce;
+}
+
+html {
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.ventiq-app-content {
+  color: var(--ventiq-premium-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+.ventiq-app-content :where(
+  .panel,
+  .preview-card,
+  .dashboard-card,
+  .setup-card,
+  .form-card,
+  .activation-panel,
+  .activation-layer-card,
+  .portfolio-panel,
+  .portfolio-upload-card,
+  .role-card,
+  .step-card,
+  .action-card,
+  .metric-card,
+  .stat-card,
+  .summary-card,
+  .readiness-card,
+  .operational-card,
+  .queue-item,
+  .impact-card
+) {
+  min-width: 0;
+  border-color: var(--ventiq-premium-border);
+}
+
+.ventiq-app-content :where(
+  .summary-grid,
+  .metric-grid,
+  .readiness-grid,
+  .stat-grid,
+  .action-grid,
+  .step-grid,
+  .timeline-grid,
+  .form-grid,
+  .matrix-grid,
+  .control-grid,
+  .debt-summary-grid,
+  .loan-mini-grid,
+  .notice-grid,
+  .loan-form-grid,
+  .term-sheet-confidence-grid,
+  .issue-kpi-grid,
+  .issue-context-grid,
+  .issue-context-list,
+  .dashboard-grid,
+  .context-grid,
+  .workspace-grid,
+  .ipm-stat-grid,
+  .migration-stat-grid,
+  .module-grid,
+  .operational-grid,
+  .expansion-grid,
+  .setup-journey,
+  .setup-stage-detail-grid,
+  .ids-identity-grid,
+  .ids-performance-grid,
+  .ids-merge-tabs,
+  .ids-document-kit-grid,
+  .ids-publish-grid
+) > * {
+  min-width: 0;
+}
+
+.ventiq-app-content :where(
+  h1,
+  h2,
+  h3,
+  h4,
+  p,
+  label,
+  strong,
+  span,
+  button,
+  a
+) {
+  word-break: normal;
+  overflow-wrap: normal;
+  hyphens: none;
+}
+
+.ventiq-app-content :where(
+  code,
+  pre,
+  .mono,
+  .technical-value
+) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ventiq-app-content :where(
+  .eyebrow,
+  .migration-eyebrow,
+  .section-eyebrow,
+  .panel-eyebrow,
+  .card-eyebrow
+) {
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+  letter-spacing: 0.09em !important;
+}
+
+.ventiq-app-content :where(
+  .setup-step em,
+  .setup-stage-detail > span,
+  .operational-card > span,
+  .operational-gate span,
+  .card-meta small
+) {
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+  letter-spacing: 0.045em !important;
+}
+
+.ventiq-app-content :where(
+  .status-pill,
+  .mode-tag,
+  .matrix-card span,
+  .step-card span,
+  .action-card span,
+  .schedule-compact-row span,
+  .term-sheet-confidence-card span,
+  .role-card span,
+  .setup-step span,
+  .setup-stage-detail p,
+  .setup-stage-detail a,
+  .hero-next span,
+  .workflow-grid span,
+  .security-note
+) {
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+}
+
+/* Remove the oversized circular CTA failure mode on narrow layouts. */
+.ventiq-app-content :where(.primary-action, .secondary-action) {
+  min-height: 42px !important;
+  border-radius: 12px !important;
+  padding: 10px 16px !important;
+  white-space: normal !important;
+  text-align: center;
+  line-height: 1.25 !important;
+}
+
+/* Laptop: reduce dense metric walls before cards become compressed. */
+@container ventiq-workspace (max-width: 1180px) {
+  .ventiq-app-content :where(
+    .summary-grid,
+    .metric-grid,
+    .ipm-stat-grid,
+    .expansion-grid
+  ) {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .ventiq-app-content .setup-journey {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Compact laptop / tablet landscape: operational cards become readable 2-column systems. */
+@container ventiq-workspace (max-width: 980px) {
+  .ventiq-app-content :where(
+    .summary-grid,
+    .metric-grid,
+    .readiness-grid,
+    .stat-grid,
+    .action-grid,
+    .timeline-grid,
+    .form-grid,
+    .matrix-grid,
+    .control-grid,
+    .debt-summary-grid,
+    .term-sheet-confidence-grid,
+    .issue-kpi-grid,
+    .context-grid,
+    .ipm-stat-grid,
+    .migration-stat-grid,
+    .operational-grid,
+    .expansion-grid,
+    .ids-identity-grid,
+    .ids-performance-grid,
+    .ids-merge-tabs,
+    .ids-document-kit-grid
+  ) {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .ventiq-app-content :where(
+    .step-grid,
+    .loan-mini-grid,
+    .notice-grid,
+    .loan-form-grid,
+    .issue-context-grid,
+    .issue-context-list,
+    .dashboard-grid,
+    .workspace-grid,
+    .module-grid,
+    .setup-stage-detail-grid,
+    .ids-publish-grid
+  ) {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Tablet portrait / large mobile: prioritize legibility over desktop density. */
+@container ventiq-workspace (max-width: 700px) {
+  .ventiq-app-content {
+    font-size: 15px;
+  }
+
+  .ventiq-app-content :where(
+    .summary-grid,
+    .metric-grid,
+    .readiness-grid,
+    .stat-grid,
+    .action-grid,
+    .step-grid,
+    .timeline-grid,
+    .form-grid,
+    .matrix-grid,
+    .control-grid,
+    .debt-summary-grid,
+    .loan-mini-grid,
+    .notice-grid,
+    .loan-form-grid,
+    .term-sheet-confidence-grid,
+    .issue-kpi-grid,
+    .issue-context-grid,
+    .issue-context-list,
+    .dashboard-grid,
+    .context-grid,
+    .workspace-grid,
+    .ipm-stat-grid,
+    .migration-stat-grid,
+    .module-grid,
+    .operational-grid,
+    .expansion-grid,
+    .ids-identity-grid,
+    .ids-performance-grid,
+    .ids-merge-tabs,
+    .ids-document-kit-grid,
+    .ids-publish-grid
+  ) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  /* Six-step journeys remain glanceable without squeezing operational data. */
+  .ventiq-app-content .setup-journey {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  .ventiq-app-content .setup-stage-detail-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .ventiq-app-content :where(
+    .primary-action,
+    .secondary-action
+  ) {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .ventiq-app-content :where(
+    .hero,
+    .panel,
+    .preview-card,
+    .dashboard-card,
+    .setup-card,
+    .form-card,
+    .activation-panel,
+    .portfolio-panel
+  ) {
+    border-radius: 16px !important;
+  }
+}
+
+/* Phone: compact headings, generous readable cards, no forced mid-word wrapping. */
+@container ventiq-workspace (max-width: 520px) {
+  .ventiq-app-content .app-page,
+  .ventiq-app-content :where(
+    .onboarding-page,
+    .migration-page,
+    .workflow-page,
+    .readiness-page,
+    .protection-page,
+    .role-access-page
+  ) {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  .ventiq-app-content .setup-journey {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .ventiq-app-content :where(
+    .eyebrow,
+    .migration-eyebrow,
+    .section-eyebrow,
+    .panel-eyebrow
+  ) {
+    font-size: 11px !important;
+    letter-spacing: 0.07em !important;
+  }
+
+  .ventiq-app-content :where(
+    .action-row,
+    .actions,
+    .button-row,
+    .migration-actions
+  ) {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .ventiq-app-content :where(
+    .action-row,
+    .actions,
+    .button-row,
+    .migration-actions
+  ) > :where(a, button) {
+    width: 100%;
+    min-height: 42px;
+    justify-content: center;
+  }
+}
+
+/* Wide tabular surfaces remain contained and intentional on every viewport. */
+.ventiq-app-content :where(
+  table,
+  .table-wrap,
+  .review-table-wrap,
+  .ipm-table-wrap,
+  .investment-calculation-table-wrap,
+  .ids-table-wrap,
+  .ids-table-shell,
+  .ids-generated-preview-table-wrap
+) {
+  max-width: 100%;
+}
+
+.ventiq-app-content :where(
+  .table-wrap,
+  .review-table-wrap,
+  .ipm-table-wrap,
+  .investment-calculation-table-wrap,
+  .ids-table-wrap,
+  .ids-table-shell,
+  .ids-generated-preview-table-wrap
+) {
+  border-radius: 12px;
+}
+
+/* Public legal/product pages: premium reading width and modern typography. */
+.legal-page {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.legal-hero,
+.legal-content-card,
+.legal-card-grid {
+  width: min(100%, 1120px);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (max-width: 720px) {
+  .legal-page {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .legal-hero h1 {
+    font-size: clamp(34px, 10vw, 44px) !important;
+    line-height: 1.06 !important;
+    letter-spacing: -0.04em !important;
+  }
+}
+
+
+/* ========================================================================== */
+/* VENTIQ FINAL COMMERCIAL PIXEL POLISH — residual evidence closure           */
+/* ========================================================================== */
+
+/* Activity and knowledge records may contain long governed values. Keep the
+   information readable without allowing the page viewport to widen. */
+.ventiq-app-content :where(
+  .audit-timeline,
+  .audit-item,
+  .journal-preview,
+  .journal-row
+) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ventiq-app-content :where(
+  .audit-item,
+  .audit-item span,
+  .audit-item strong,
+  .journal-row > *
+) {
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+}
+
+@container ventiq-workspace (max-width: 700px) {
+  .ventiq-app-content .journal-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 6px !important;
+  }
+
+  .ventiq-app-content .audit-timeline {
+    padding-left: 14px !important;
+  }
+}
+
+/* The public guided product experience lives outside the authenticated
+   container, so it requires its own responsive contract. */
+.ventiq-demo-page {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.ventiq-demo-page .app-shell,
+.ventiq-demo-page .preview-card,
+.ventiq-demo-page .ai-side-panel,
+.ventiq-demo-page .queue-item,
+.ventiq-demo-page .impact-card,
+.ventiq-demo-page .journal-preview,
+.ventiq-demo-page .journal-row {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 900px) {
+  .ventiq-demo-page {
+    padding: 24px 18px;
+  }
+
+  .ventiq-demo-page .app-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .ventiq-demo-page .app-header h1 {
+    font-size: clamp(34px, 8.5vw, 46px);
+    line-height: 1.05;
+    letter-spacing: -0.04em;
+    overflow-wrap: normal;
+  }
+
+  .ventiq-demo-page .back-link {
+    justify-self: start;
+  }
+
+  .ventiq-demo-page :where(
+    .form-grid,
+    .output-grid,
+    .workspace-three,
+    .approval-flow,
+    .queue-grid,
+    .validation-grid,
+    .impact-grid,
+    .knowledge-grid,
+    .action-button-grid,
+    .recommendation-summary,
+    .progress-steps,
+    .three-users
+  ) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .ventiq-demo-page :where(.preview-card, .ai-side-panel) {
+    padding: 22px;
+    border-radius: 18px;
+  }
+
+  .ventiq-demo-page .action-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .ventiq-demo-page .action-row > :where(a, button) {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .ventiq-demo-page .journal-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .ventiq-demo-page :where(p, strong, span, a, button, h1, h2, h3) {
+    word-break: normal;
+    overflow-wrap: normal;
+    hyphens: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .ventiq-demo-page {
+    padding: 20px 14px;
+  }
+
+  .ventiq-demo-page .app-header h1 {
+    font-size: clamp(32px, 10vw, 40px);
+  }
+
+  .ventiq-demo-page :where(.preview-card, .ai-side-panel) {
+    padding: 18px;
+    border-radius: 16px;
+  }
+
+  .ventiq-demo-page .eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.07em;
   }
 }

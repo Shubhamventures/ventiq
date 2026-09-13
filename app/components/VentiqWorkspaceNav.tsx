@@ -101,6 +101,37 @@ export default function VentiqWorkspaceNav({
           <span>Private Capital OS</span>
         </div>
 
+        <div className="ventiq-mobile-drawer-context">
+          <div className="ventiq-mobile-drawer-fund">
+            <span>Active fund</span>
+            {availableFundNames.length > 1 ? (
+              <select
+                aria-label="Select active fund in navigation"
+                onChange={(event) =>
+                  setActiveFundName(event.target.value)
+                }
+                value={activeFundName}
+              >
+                {availableFundNames.map((fundName) => (
+                  <option key={fundName} value={fundName}>
+                    {fundName}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <strong>{activeFundLabel}</strong>
+            )}
+          </div>
+
+          <button
+            className="ventiq-mobile-drawer-signout"
+            onClick={() => void handleSignOut()}
+            type="button"
+          >
+            Sign out
+          </button>
+        </div>
+
         <Link
           className={pathname === "/launch-center" ? "ventiq-home-link active" : "ventiq-home-link"}
           href="/launch-center"
@@ -161,6 +192,7 @@ export default function VentiqWorkspaceNav({
               <span>Active fund</span>
               {availableFundNames.length > 1 ? (
                 <select
+                  className="ventiq-desktop-fund-control"
                   aria-label="Select active fund"
                   onChange={(event) =>
                     setActiveFundName(event.target.value)
@@ -174,8 +206,13 @@ export default function VentiqWorkspaceNav({
                   ))}
                 </select>
               ) : (
-                <strong>{activeFundLabel}</strong>
+                <strong className="ventiq-desktop-fund-control">
+                  {activeFundLabel}
+                </strong>
               )}
+              <strong className="ventiq-mobile-fund-label">
+                {activeFundLabel}
+              </strong>
             </div>
           </div>
 
@@ -240,6 +277,14 @@ export default function VentiqWorkspaceNav({
           font-weight: 750;
         }
 
+        .ventiq-mobile-drawer-context {
+          display: none;
+        }
+
+        .ventiq-mobile-fund-label {
+          display: none !important;
+        }
+
         .ventiq-home-link,
         .ventiq-nav-group a {
           display: flex;
@@ -278,10 +323,10 @@ export default function VentiqWorkspaceNav({
 
         .ventiq-nav-group p {
           margin: 0 8px 6px;
-          color: #617a99;
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 0.12em;
+          color: #7891b0;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.1em;
           text-transform: uppercase;
         }
 
@@ -291,8 +336,8 @@ export default function VentiqWorkspaceNav({
           border-radius: 12px;
           background: rgba(8, 30, 60, 0.56);
           border: 1px solid rgba(105, 171, 244, 0.1);
-          color: #7f95b0;
-          font-size: 10px;
+          color: #91a6c0;
+          font-size: 11px;
           line-height: 1.5;
         }
 
@@ -328,7 +373,7 @@ export default function VentiqWorkspaceNav({
         .ventiq-account-context span {
           display: block;
           color: #7189a8;
-          font-size: 10px;
+          font-size: 11px;
           font-weight: 850;
           text-transform: uppercase;
           letter-spacing: 0.08em;
@@ -360,6 +405,11 @@ export default function VentiqWorkspaceNav({
 
         .ventiq-account-context {
           text-align: right;
+        }
+
+        /* Fail closed against any stale/legacy identity markup in the compact shell. */
+        .ventiq-account-context > :not(button) {
+          display: none !important;
         }
 
         .ventiq-account-context button {
@@ -484,7 +534,7 @@ export default function VentiqWorkspaceNav({
             gap: 0;
           }
 
-          .ventiq-account-context > div {
+          .ventiq-account-context > :not(button) {
             display: none !important;
           }
 
@@ -492,6 +542,96 @@ export default function VentiqWorkspaceNav({
             padding: 7px 9px;
             font-size: 11px;
             white-space: nowrap;
+          }
+
+          .ventiq-mobile-drawer-context {
+            display: grid;
+            gap: 10px;
+            margin: 0 8px 14px;
+            padding: 12px;
+            border: 1px solid rgba(105, 171, 244, 0.14);
+            border-radius: 12px;
+            background: rgba(8, 30, 60, 0.5);
+          }
+
+          .ventiq-mobile-drawer-fund span {
+            display: block;
+            margin-bottom: 6px;
+            color: #7891b0;
+            font-size: 10px;
+            font-weight: 900;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+          }
+
+          .ventiq-mobile-drawer-fund select,
+          .ventiq-mobile-drawer-fund strong {
+            display: block;
+            width: 100%;
+            min-width: 0;
+            max-width: 100%;
+          }
+
+          .ventiq-mobile-drawer-fund select {
+            border: 1px solid rgba(126, 181, 242, 0.22);
+            border-radius: 8px;
+            background: rgba(7, 24, 49, 0.88);
+            color: #eef6ff;
+            padding: 8px 28px 8px 9px;
+            font: inherit;
+            font-size: 12px;
+            font-weight: 850;
+          }
+
+          .ventiq-mobile-drawer-fund strong {
+            color: #eef6ff;
+            font-size: 13px;
+            font-weight: 850;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          .ventiq-mobile-drawer-signout {
+            width: 100%;
+            border: 1px solid rgba(126, 181, 242, 0.2);
+            border-radius: 10px;
+            background: rgba(11, 31, 61, 0.72);
+            color: #eaf4ff;
+            padding: 9px 11px;
+            font: inherit;
+            font-size: 12px;
+            font-weight: 850;
+            text-align: center;
+            cursor: pointer;
+          }
+
+          .ventiq-app-frame .ventiq-app-topbar {
+            grid-template-columns: minmax(0, 1fr) !important;
+          }
+
+          .ventiq-app-frame .ventiq-app-topbar .ventiq-account-context {
+            display: none !important;
+          }
+
+          .ventiq-app-frame
+            .ventiq-app-topbar
+            .ventiq-fund-context
+            .ventiq-desktop-fund-control {
+            display: none !important;
+          }
+
+          .ventiq-app-frame .ventiq-app-topbar .ventiq-mobile-fund-label {
+            display: block !important;
+            width: 100% !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+            font-size: 12px !important;
+            line-height: 1.2 !important;
           }
         }
       `}</style>

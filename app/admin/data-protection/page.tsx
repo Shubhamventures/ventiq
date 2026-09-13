@@ -929,10 +929,9 @@ export default function DataProtectionPage() {
               <p className="eyebrow">VENTIQ Trust Layer</p>
               <h1>Data Protection & Access Governance</h1>
               <p className="hero-copy">
-                A client-facing control console for data protection readiness,
+                A governed control console for data protection readiness,
                 role-based access governance, sensitive field mapping, retention,
-                incidents and audit evidence. This is the trust layer required
-                before moving from demo to pilot onboarding.
+                incidents and audit evidence across the active fund context.
               </p>
             </div>
 
@@ -979,7 +978,7 @@ export default function DataProtectionPage() {
 
         <div className="ribbon">
           {loading ? "Loading data protection workspace..." : dataMessage} ·
-          SEBI-aligned controls → DPDP-ready workflows → audit evidence → pilot
+          Access governance → sensitive-data controls → audit evidence →
           onboarding readiness
         </div>
 
@@ -1317,21 +1316,20 @@ export default function DataProtectionPage() {
         <div className="panel">
           <div className="panel-header">
             <div>
-              <h2>Commercial Readiness Positioning</h2>
+              <h2>Governance Readiness Summary</h2>
               <p>
-                Use this language in client conversations until legal/security
-                review is complete.
+                Current control scope and assurance language for governed client
+                onboarding and security review.
               </p>
             </div>
           </div>
 
           <div className="go-live-box">
-            <strong>Correct positioning</strong>
-            VENTIQ is building SEBI-aligned and DPDP-ready controls for access
-            governance, role-based dashboards, audit logs, incident tracking,
-            retention visibility and secure stakeholder onboarding. Do not call
-            the product “SEBI compliant” until reviewed by a qualified legal and
-            cybersecurity professional.
+            <strong>Assurance position</strong>
+            VENTIQ provides governed access, role-based workspaces, audit trails,
+            incident tracking, retention visibility and secure stakeholder
+            onboarding. Regulatory or certification claims should only be made
+            where formally reviewed and supported by current assurance evidence.
           </div>
         </div>
       </section>

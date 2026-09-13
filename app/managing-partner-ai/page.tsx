@@ -2458,7 +2458,7 @@ function getSectionChart(sectionTitle: string): DeckChart | null {
    const editedNarrativeCount = Object.keys(editedDeckNarratives).length;
 
 setDeckMessage(
-  `Presentation brief prepared for ${targetFund} with ${selectedMetricCount} selected sections and ${editedNarrativeCount} edited slide narratives. Actual PPT generation will be connected in Phase 5.3.`
+  `Presentation brief prepared for ${targetFund} with ${selectedMetricCount} selected sections and ${editedNarrativeCount} edited slide narratives. Review the brief, then generate the PowerPoint when ready.`
 );
   }
   function handleEditSlideNarrative() {
@@ -2651,7 +2651,7 @@ async function handleGeneratePowerPoint() {
 
         {!loading && errorMessage && (
           <div className="preview-card">
-            <h2>Connection Issue</h2>
+            <h2>Workspace status</h2>
             <div className="explain-box">{errorMessage}</div>
           </div>
         )}
@@ -3704,12 +3704,12 @@ async function handleGeneratePowerPoint() {
   )}
 </div>
             <div className="preview-card">
-              <h2>Exit Offer Impact Simulator</h2>
+              <h2>Exit Impact Context</h2>
 
               <div className="explain-box">
-                Future module: enter a potential exit offer and VENTIQ will
-                update fund-level IRR, DPI, TVPI, carry, distributable proceeds
-                and LP impact using Portfolio Intelligence data.
+                Current Portfolio Intelligence and fund metrics provide the
+                baseline for evaluating potential exit outcomes across IRR, DPI,
+                TVPI, carry, distributable proceeds and LP impact.
               </div>
 
               <div className="impact-grid">

@@ -1103,7 +1103,7 @@ export default function MigrationPage() {
               <div className="operational-action">
                 <p>
                   Next action is derived from the current canonical state, not
-                  from the selected commercial adoption path.
+                  from the selected adoption path.
                 </p>
                 <a className="primary-action" href={nextAction.href}>
                   {nextAction.label} &rarr;
@@ -1127,7 +1127,7 @@ export default function MigrationPage() {
           </div>
 
           <div className="migration-hero-card">
-  <p className="migration-eyebrow">Commercial pilot model</p>
+  <p className="migration-eyebrow">Modular adoption</p>
   <h2>No full replacement on day one.</h2>
   <p>
     Land with Investor Portal, Data Room, Finance Workspace,
@@ -1476,19 +1476,18 @@ export default function MigrationPage() {
   </div>
 </div>
         <section className="migration-section">
-          <p className="migration-eyebrow">Commercial pilot message</p>
-          <h2>How VENTIQ should be sold initially</h2>
+          <p className="migration-eyebrow">Connected operating model</p>
+          <h2>Start with the highest-value workflow. Keep the fund record unified.</h2>
           <p>
-            Position VENTIQ as a limited guided pilot for private capital firms
-            that want to modernize fund operations without replacing every
-            system on day one.
+            VENTIQ supports modular adoption without creating another data silo.
+            Teams can activate the workflow they need first while historical fund,
+            investor, portfolio, compliance and document context stays connected.
           </p>
 
           <div className="pilot-box">
-            <strong>Suggested pitch:</strong> We help private capital firms
-            launch one high-impact dashboard first using their existing
-            historical data. Once the first workflow is live, VENTIQ expands
-            into the full fund operating system.
+            <strong>Expansion path:</strong> Activate one governed workflow, resolve
+            its data exceptions, then extend the same approved fund context into
+            additional stakeholder workspaces and operating processes.
           </div>
 
           <div className="migration-actions">

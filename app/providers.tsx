@@ -3,7 +3,6 @@
 import type { ReactNode } from "react";
 
 import { AuthProvider } from "../lib/auth/AuthProvider";
-import AuthenticatedAccountControl from "../components/auth/AuthenticatedAccountControl";
 
 export default function Providers({
   children,
@@ -12,7 +11,6 @@ export default function Providers({
 }) {
   return (
     <AuthProvider>
-      <AuthenticatedAccountControl />
       {children}
     </AuthProvider>
   );

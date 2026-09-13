@@ -3,7 +3,7 @@ import Link from "next/link";
 export const metadata = {
   title: "Privacy Policy | VENTIQ",
   description:
-    "Privacy policy for VENTIQ, including how walkthrough requests and product interactions may be handled.",
+    "Privacy policy for VENTIQ, including how website enquiries and product interactions may be handled.",
 };
 
 export default function PrivacyPage() {
@@ -16,11 +16,11 @@ export default function PrivacyPage() {
 
         <p className="legal-kicker">Privacy Policy</p>
 
-        <h1>Privacy principles for VENTIQ visitors and walkthrough requests.</h1>
+        <h1>Privacy principles for VENTIQ website visitors and product enquiries.</h1>
 
         <p>
           This page explains how VENTIQ may handle information submitted through
-          the website, walkthrough requests and product preview interactions.
+          the website, product enquiries and product experience interactions.
         </p>
       </section>
 
@@ -57,12 +57,12 @@ export default function PrivacyPage() {
       </section>
 
       <section className="legal-content-card">
-        <h2>Product preview data</h2>
+        <h2>Public product data</h2>
 
         <p>
-          Public product pages may contain sample or illustrative fund,
-          portfolio, investor, compliance and workflow data. Public demo data
-          should not be treated as client data unless explicitly stated.
+          Public product pages may contain representative demonstration fund,
+          portfolio, investor, compliance and workflow data. Demonstration data
+          is not client data unless explicitly stated.
         </p>
       </section>
 

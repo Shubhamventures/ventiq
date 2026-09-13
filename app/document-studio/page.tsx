@@ -4133,9 +4133,8 @@ function renderPreview() {
         {workspaceTab === "builder" && (
           <div className="ids-studio-frame">
             <div className="ids-title-bar">
-              <div className="ids-undo-group">
-                <button onClick={() => setStatusMessage("Undo will be connected to version history later.")} type="button">↶</button>
-                <button onClick={() => setStatusMessage("Redo will be connected to version history later.")} type="button">↷</button>
+              <div className="ids-version-state" aria-label="Template editing status">
+                Draft workspace
               </div>
 
               <input value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
@@ -4329,7 +4328,7 @@ function renderPreview() {
           background: transparent;
           padding: 9px 14px;
           border-radius: 10px;
-          color: #475569;
+          color: #334155;
           font-weight: 800;
           cursor: pointer;
           white-space: nowrap;
@@ -4344,7 +4343,7 @@ function renderPreview() {
         .ids-library-layout,
         .ids-workflow-page,
         .ids-preview-layout {
-          border: 1px solid #e0d4bd;
+          border: 1px solid #d6c8ac;
           background: #fffdf8;
           border-radius: 20px;
           padding: 24px;
@@ -4362,7 +4361,7 @@ function renderPreview() {
         .ids-start-hero p,
         .ids-library-hero p,
         .ids-preview-toolbar p {
-          color: #64748b;
+          color: #334155;
           line-height: 1.55;
           max-width: 860px;
         }
@@ -4379,7 +4378,7 @@ function renderPreview() {
         .ids-template-card,
         .ids-empty-card {
           text-align: left;
-          border: 1px solid #e4dac9;
+          border: 1px solid #d8ccb7;
           background: #fffaf1;
           border-radius: 18px;
           padding: 20px;
@@ -4411,7 +4410,7 @@ function renderPreview() {
         .ids-start-card p,
         .ids-template-card p,
         .ids-empty-card p {
-          color: #64748b;
+          color: #334155;
           line-height: 1.5;
         }
 
@@ -4449,7 +4448,7 @@ function renderPreview() {
           height: calc(100vh - 74px);
           display: flex;
           flex-direction: column;
-          border: 1px solid #e0d4bd;
+          border: 1px solid #d6c8ac;
           background: #fffaf3;
           border-radius: 18px;
           overflow: hidden;
@@ -4534,7 +4533,7 @@ function renderPreview() {
           padding: 9px 13px;
           border-radius: 10px 10px 0 0;
           font-weight: 900;
-          color: #64748b;
+          color: #475569;
           cursor: pointer;
           white-space: nowrap;
         }
@@ -4655,7 +4654,7 @@ function renderPreview() {
           display: grid;
           gap: 4px;
           font-size: 11px;
-          color: #64748b;
+          color: #475569;
           font-weight: 800;
         }
 
@@ -4736,7 +4735,7 @@ function renderPreview() {
           border-radius: 14px;
           padding: 24px;
           text-align: center;
-          color: #64748b;
+          color: #475569;
         }
 
         .ids-doc-block {
@@ -4795,7 +4794,7 @@ function renderPreview() {
         .ids-identity-grid span,
         .ids-performance-grid span {
           display: block;
-          color: #64748b;
+          color: #475569;
           margin-top: 4px;
         }
 
@@ -4976,7 +4975,7 @@ function renderPreview() {
 
         .ids-panel-header span {
           display: block;
-          color: #64748b;
+          color: #475569;
           margin-top: 4px;
         }
 
@@ -4994,7 +4993,7 @@ function renderPreview() {
         .ids-selected-context p,
         .ids-muted {
           margin: 0 0 6px;
-          color: #64748b;
+          color: #475569;
           font-size: 12px;
           font-weight: 800;
         }
@@ -5005,7 +5004,7 @@ function renderPreview() {
 
         .ids-selected-context span {
           display: block;
-          color: #64748b;
+          color: #475569;
           margin-top: 4px;
           font-size: 12px;
         }
@@ -5045,7 +5044,7 @@ function renderPreview() {
         .ids-merge-tabs button {
           border: 0;
           background: transparent;
-          color: #64748b;
+          color: #475569;
           border-radius: 9px;
           padding: 8px 4px;
           font-size: 11px;
@@ -5063,12 +5062,12 @@ function renderPreview() {
         .ids-batch-history-bar { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin: 0 0 16px; padding: 14px 16px; border: 1px solid rgba(168, 119, 0, 0.28); border-radius: 16px; background: rgba(255,255,255,0.52); }
         .ids-batch-history-bar > div { display: grid; gap: 3px; }
         .ids-batch-history-bar strong { color: #0b2148; }
-        .ids-batch-history-bar span { color: #62708a; font-size: 0.84rem; }
+        .ids-batch-history-bar span { color: #4b5b72; font-size: 0.84rem; }
         .ids-batch-history-bar select { min-width: 360px; max-width: 56%; padding: 10px 12px; border: 1px solid #d7c49a; border-radius: 12px; background: #fffdf8; color: #0b2148; font-weight: 700; }
         @container ventiq-workspace (max-width: 900px) { .ids-batch-history-bar { align-items: stretch; flex-direction: column; } .ids-batch-history-bar select { min-width: 0; max-width: none; width: 100%; } }
         .ids-batch-exceptions {
           margin-top: 18px;
-          border: 1px solid #e0d4bd;
+          border: 1px solid #d6c8ac;
           border-radius: 16px;
           background: #fffaf1;
           padding: 16px;
@@ -5088,7 +5087,7 @@ function renderPreview() {
         }
 
         .ids-batch-exceptions-head span {
-          color: #64748b;
+          color: #475569;
           margin-top: 4px;
           font-size: 12px;
           line-height: 1.45;
@@ -5129,7 +5128,7 @@ function renderPreview() {
         .ids-batch-exception-card span,
         .ids-batch-exception-card p,
         .ids-batch-exception-card small {
-          color: #64748b;
+          color: #475569;
           font-size: 12px;
         }
 
@@ -5159,7 +5158,7 @@ function renderPreview() {
           border-radius: 10px;
           padding: 9px;
           font-size: 12px;
-          color: #475569;
+          color: #334155;
         }
 
         .ids-column-config-list,
@@ -5220,7 +5219,7 @@ function renderPreview() {
         .ids-field-list code,
         .ids-field-list em {
           display: block;
-          color: #64748b;
+          color: #475569;
           font-size: 11px;
           margin-top: 3px;
           font-style: normal;
@@ -5234,7 +5233,7 @@ function renderPreview() {
           border-radius: 12px;
           padding: 12px;
           margin: 10px 0;
-          color: #475569;
+          color: #334155;
           line-height: 1.45;
         }
 
@@ -5262,7 +5261,7 @@ function renderPreview() {
           padding: 8px 12px;
           border-top: 1px solid #e6dcc9;
           background: #fbf7ef;
-          color: #64748b;
+          color: #475569;
           font-size: 12px;
         }
 
@@ -5299,7 +5298,7 @@ function renderPreview() {
         .ids-publish-card p,
         .ids-publish-card em {
           margin: 0;
-          color: #64748b;
+          color: #3f5068;
           font-style: normal;
         }
 
@@ -5365,6 +5364,20 @@ function renderPreview() {
 
 .ids-undo-group {
   gap: 5px !important;
+}
+
+.ids-version-state {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #d8ccb7;
+  border-radius: 10px;
+  background: #fffaf1;
+  color: #3f5068;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .ids-undo-group button {
@@ -5629,7 +5642,7 @@ function renderPreview() {
 }
 
 .ids-document-kit-section p {
-  color: #64748b;
+  color: #475569;
   max-width: 880px;
 }
 
@@ -5642,7 +5655,7 @@ function renderPreview() {
 
 .ids-document-kit-card {
   text-align: left;
-  border: 1px solid #e4dac9;
+  border: 1px solid #d8ccb7;
   background: #fffdf8;
   border-radius: 16px;
   padding: 14px;
@@ -5676,7 +5689,7 @@ function renderPreview() {
   margin: 8px 0 0;
   font-size: 12px;
   line-height: 1.45;
-  color: #64748b;
+  color: #334155;
 }
 
 .ids-document-kit-card em {
@@ -5706,6 +5719,23 @@ function renderPreview() {
 }
 
 @container ventiq-workspace (max-width: 700px) {
+  .ids-workspace-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
+    gap: 6px;
+  }
+
+  .ids-workspace-tabs button {
+    min-width: 0;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.2;
+    padding: 9px 8px;
+  }
+
   .ids-start-options,
   .ids-template-grid,
   .ids-document-kit-grid {

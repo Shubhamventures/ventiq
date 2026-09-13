@@ -1201,8 +1201,8 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
             </div>
 
             <p>
-              Working flows, connected foundations and expansion engines —
-              separated clearly so product readiness is never ambiguous.
+              Core workflows, control layers and operating capabilities stay
+              connected through the same governed fund context.
             </p>
           </div>
 
@@ -1245,16 +1245,16 @@ const [demoSubmitError, setDemoSubmitError] = useState("");
               <div className="w1f2-platform-status">
                 <i />
                 <div>
-                  <span>EXPANSION ENGINES</span>
-                  <strong>Planned extensions of the operating layer</strong>
+                  <span>CONNECTED CAPABILITIES</span>
+                  <strong>Additional operating workflows on the same fund context</strong>
                 </div>
               </div>
 
               <div className="w1f2-platform-items">
-                <div><strong>Knowledge Hub</strong><span>Regulations · policies · institutional knowledge</span><em>Expansion</em></div>
-                <div><strong>Bank Reconciliation</strong><span>Matching · exceptions · accounting prep</span><em>Expansion</em></div>
-                <div><strong>Finance Mission Control</strong><span>Priorities · approvals · operating risk</span><em>Expansion</em></div>
-                <div><strong>Fee & Carry Engine</strong><span>Fees · carry accruals · fund economics</span><em>Planned</em></div>
+                <a href="/demo#capabilities"><strong>Knowledge Hub</strong><span>Regulations · policies · institutional knowledge</span><i>↗</i></a>
+                <a href="/demo#capabilities"><strong>Bank Reconciliation</strong><span>Matching · exceptions · accounting preparation</span><i>↗</i></a>
+                <a href="/demo#stakeholders"><strong>Finance Mission Control</strong><span>Priorities · approvals · operating risk</span><i>↗</i></a>
+                <a href="/demo#capabilities"><strong>Data Room & DDQ</strong><span>Diligence · private sharing · investor engagement</span><i>↗</i></a>
               </div>
             </div>
           </div>

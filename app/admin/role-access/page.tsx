@@ -1270,10 +1270,10 @@ export default function RoleAccessPage() {
 
         <div className="panel">
           <div className="control-box">
-            <strong>Next technical step</strong>
-            This page defines the route permission rules. The next step is to
-            wire these rules into the app guard so unauthorised users are
-            redirected away from pages they cannot access.
+            <strong>Access governance note</strong>
+            Route permissions are governed by assigned stakeholder roles and the
+            authenticated application guard. Users outside an authorised route
+            scope are redirected away from protected workspaces.
           </div>
         </div>
       </section>

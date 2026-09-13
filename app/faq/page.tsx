@@ -25,7 +25,7 @@ const faqs = [
   {
     question: "Is the product live?",
     answer:
-      "VENTIQ is deployed in a controlled production environment and is available for guided evaluation and controlled pilot onboarding. Authenticated operating workspaces remain restricted, and public product views may use sample or illustrative data.",
+      "VENTIQ is deployed in production and supports guided product evaluation and governed client onboarding. Authenticated operating workspaces are restricted to approved users, while public product views use representative demonstration data where required.",
   },
   {
     question: "Does VENTIQ use AI?",
@@ -40,7 +40,7 @@ const faqs = [
   {
     question: "Is public demo data real client data?",
     answer:
-      "No. Public product preview pages should be treated as sample or illustrative data unless explicitly stated otherwise. The purpose is to show workflow design and operating logic.",
+      "No. Public product views use representative demonstration data unless explicitly stated otherwise. The purpose is to show workflow design, operating logic and the connected VENTIQ experience without exposing client information.",
   },
   {
     question: "How does VENTIQ handle sensitive fund data?",
@@ -68,7 +68,7 @@ export default function FAQPage() {
 
         <p>
           A quick overview of what VENTIQ is, who it is built for, how the
-          product should be understood and how walkthroughs work.
+          product works and how to evaluate the right VENTIQ workflow for your team.
         </p>
       </section>
 

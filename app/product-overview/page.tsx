@@ -148,9 +148,9 @@ export default function ProductOverviewPage() {
         </p>
 
         <p>
-          Public product screens may show sample or illustrative data. The
-          purpose is to demonstrate workflow design, operating logic and the
-          connected workspace experience.
+          Public product screens may show representative demonstration data.
+          They are designed to demonstrate workflow logic, governance and the
+          connected workspace experience without exposing client information.
         </p>
       </section>
     </main>

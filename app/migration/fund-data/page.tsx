@@ -189,7 +189,7 @@ function FundDataMigrationWorkspace({
     if (!fileList || fileList.length === 0) return;
 
     setMessage(
-      `${fileList.length} fund data file staged. CSV/XLSX parsing will be connected in the next step. You can publish current staged records to Supabase now.`
+      `${fileList.length} fund data file selected. Use Canonical Data Intake for governed file parsing and validation; this workspace publishes the currently staged fund records.`
     );
   }
 

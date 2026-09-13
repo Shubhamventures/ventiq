@@ -101,7 +101,7 @@ const implementationSteps = [
   },
 ];
 
-const demoStories = [
+const operatingFlowItems = [
   "Select Bank Account Access mode and run daily Bank MIS.",
   "Switch to Daily Statement Upload mode and upload a statement file.",
   "Show transactions imported and auto-mapped.",
@@ -114,19 +114,19 @@ const demoStories = [
   "Show daily Finance Head summary of mapped, pending and review items.",
 ];
 
-const qaChecklist = [
-  "Bank Account Access mode selector works",
-  "Daily Statement Upload mode selector works",
-  "Run Daily Bank MIS works",
-  "File upload interaction works",
-  "Transaction mapping table is visible",
-  "Approved / Sync button works for debt repayment rows",
-  "bank_reconciliation_debt_receipts receives rows",
-  "Debt LMS sync receives approved bank receipt rows",
-  "Guide AI modal / action works",
-  "AI Learning Rules update after guidance",
-  "Journal entry preview is visible",
-  "Commercial readiness page opens correctly",
+const readinessChecklist = [
+  "Bank Account Access mode is available for connected accounts",
+  "Daily Statement Upload mode is available for controlled file intake",
+  "Daily Bank MIS can be generated for the selected fund",
+  "Statement upload and transaction import are available",
+  "Transaction mapping and exception review are visible",
+  "Approved debt-repayment rows can sync to connected workflows",
+  "Approved bank receipts are recorded in the governed reconciliation layer",
+  "Debt LMS receives approved bank receipt rows",
+  "AI guidance is available for unmatched transactions",
+  "AI learning rules update after Finance Head guidance",
+  "Journal entry preview is available for approved transactions",
+  "Operating model controls are available to authorised users",
 ];
 
 const packages = [
@@ -135,21 +135,21 @@ const packages = [
     idealClient: "Small fund or finance team doing daily manual bank checks",
     included:
       "Daily statement upload, transaction import, basic auto-mapping, exception queue and finance review.",
-    upsell: "Bank account access and Debt LMS sync.",
+    expansion: "Bank account access and Debt LMS sync.",
   },
   {
     name: "Bank MIS Plus",
     idealClient: "AIF / private credit / VC fund with regular receipts and payments",
     included:
       "Starter plus AI learning rules, journal entry preview, receipt classification and downstream workflow sync.",
-    upsell: "Finance Head dashboard and full accounting workflow.",
+    expansion: "Finance Head dashboard and full accounting workflow.",
   },
   {
     name: "Bank MIS OS",
     idealClient: "Multi-fund platform with daily cash movement across funds",
     included:
       "Connected bank feeds, daily MIS, AI mapping, exception workflow, learning rules, Debt LMS sync and finance control view.",
-    upsell: "Full VENTIQ Finance OS, Investor Portal and Document Studio.",
+    expansion: "Full VENTIQ Finance OS, Investor Portal and Document Studio.",
   },
 ];
 
@@ -457,12 +457,12 @@ export default function BankMisCommercialReadinessPage() {
           <div className="readiness-hero-top">
             <div>
               <p className="eyebrow">VENTIQ Bank MIS</p>
-              <h1>Commercial Readiness Pack</h1>
+              <h1>Module Operating Model</h1>
               <p className="hero-copy">
-                A sellable Bank MIS and AI reconciliation module for fund
-                finance teams. It connects daily bank activity, AI transaction
-                mapping, exception review, AI learning, journal preparation and
-                downstream sync into one operating layer.
+                A governed Bank MIS and AI reconciliation module for fund finance
+                teams. It connects daily bank activity, transaction mapping,
+                exception review, guided AI learning, journal preparation and
+                downstream sync in one operating layer.
               </p>
             </div>
 
@@ -493,8 +493,8 @@ export default function BankMisCommercialReadinessPage() {
             </div>
 
             <div className="metric-card">
-              <span>Demo status</span>
-              <strong>V1 ready</strong>
+              <span>Operating status</span>
+              <strong>Ready</strong>
             </div>
           </div>
         </div>
@@ -549,16 +549,16 @@ export default function BankMisCommercialReadinessPage() {
           <div className="panel">
             <div className="panel-header">
               <div>
-                <h2>Demo Storyline</h2>
+                <h2>Operating Flow</h2>
                 <p>
-                  Use this walkthrough for CFO, Finance Head and fund operations
-                  demos.
+                  Follow the daily cash-control sequence from bank access or
+                  statement upload through mapping, exceptions, guidance and sync.
                 </p>
               </div>
             </div>
 
             <ul className="check-list">
-              {demoStories.map((item) => (
+              {operatingFlowItems.map((item) => (
                 <li key={item}>→ {item}</li>
               ))}
             </ul>
@@ -590,10 +590,10 @@ export default function BankMisCommercialReadinessPage() {
         <div className="panel">
           <div className="panel-header">
             <div>
-              <h2>Commercial Packaging</h2>
+              <h2>Adoption Options</h2>
               <p>
-                Use these package labels during client conversations. Validate
-                workflow pain first before final pricing.
+                Different operating scopes can be activated as the finance
+                workflow expands, without creating a separate data foundation.
               </p>
             </div>
           </div>
@@ -602,10 +602,10 @@ export default function BankMisCommercialReadinessPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Package</th>
-                  <th>Ideal client</th>
+                  <th>Operating scope</th>
+                  <th>Typical fit</th>
                   <th>Included workflows</th>
-                  <th>Upsell path</th>
+                  <th>Expansion path</th>
                 </tr>
               </thead>
 
@@ -617,7 +617,7 @@ export default function BankMisCommercialReadinessPage() {
                     </td>
                     <td>{item.idealClient}</td>
                     <td>{item.included}</td>
-                    <td>{item.upsell}</td>
+                    <td>{item.expansion}</td>
                   </tr>
                 ))}
               </tbody>
@@ -628,24 +628,23 @@ export default function BankMisCommercialReadinessPage() {
         <div className="panel">
           <div className="panel-header">
             <div>
-              <h2>Final QA Checklist</h2>
-              <p>Complete this checklist before marking Bank MIS v1 as frozen.</p>
+              <h2>Operational Readiness Checklist</h2>
+              <p>Use this checklist to confirm the module is ready for governed operation.</p>
             </div>
           </div>
 
           <ul className="check-list">
-            {qaChecklist.map((item) => (
+            {readinessChecklist.map((item) => (
               <li key={item}>□ {item}</li>
             ))}
           </ul>
 
           <div className="go-live-box">
-            <h2>Bank MIS v1 freeze condition</h2>
+            <h2>Bank MIS readiness condition</h2>
             <p>
-              Once the checklist passes, Bank MIS can be marked as demo-ready
-              and commercially presentable as a standalone VENTIQ module and as
-              a connected workflow feeding Debt LMS, finance dashboards and
-              accounting.
+              Once the checklist is confirmed, Bank MIS can operate as a
+              standalone cash-control workflow or as a connected source for Debt
+              LMS, finance dashboards and accounting preparation.
             </p>
           </div>
         </div>

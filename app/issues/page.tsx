@@ -200,8 +200,6 @@ export default function IssueCenterPage() {
   const { session } = useVentiqAuth();
   const {
     activeFundName,
-    availableFundNames,
-    setActiveFundName,
     isReady: fundContextReady,
   } = useActiveFund("");
 
@@ -358,29 +356,6 @@ export default function IssueCenterPage() {
   return (
     <main className="issue-page">
       <section className="issue-shell">
-        <div className="issue-topbar">
-          <Link className="issue-brand" href="/launch-center">
-            VENTIQ
-          </Link>
-
-          <div className="issue-fund-context">
-            <span>Governed fund</span>
-            <select
-              aria-label="Select governed fund"
-              disabled={!fundContextReady}
-              onChange={(event) => setActiveFundName(event.target.value)}
-              value={activeFundName}
-            >
-              {!activeFundName && <option value="">Select fund</option>}
-              {availableFundNames.map((fundName) => (
-                <option key={fundName} value={fundName}>
-                  {fundName}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
         <div className="issue-hero">
           <div>
             <p className="issue-eyebrow">Governed exception control</p>
@@ -586,7 +561,7 @@ export default function IssueCenterPage() {
           min-height: 100vh;
           background:
             radial-gradient(circle at top right, rgba(191, 149, 63, 0.08), transparent 32%),
-            #f5f7fb;
+            #eef2f7;
           color: #102044;
           padding: 28px;
         }
@@ -596,7 +571,6 @@ export default function IssueCenterPage() {
           margin: 0 auto;
         }
 
-        .issue-topbar,
         .issue-hero,
         .issue-panel-heading,
         .issue-card-head {
@@ -606,40 +580,15 @@ export default function IssueCenterPage() {
           gap: 20px;
         }
 
-        .issue-brand {
-          color: #0b2148;
-          font-size: 1.05rem;
-          font-weight: 900;
-          letter-spacing: 0.14em;
-          text-decoration: none;
-        }
-
-        .issue-fund-context {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          color: #62708a;
-          font-size: 0.82rem;
-          font-weight: 700;
-        }
-
-        select {
-          border: 1px solid #d5ddeb;
-          border-radius: 10px;
-          background: #ffffff;
-          color: #102044;
-          padding: 9px 11px;
-          font: inherit;
-        }
 
         .issue-hero {
           align-items: flex-end;
           margin-top: 28px;
           padding: 30px;
-          border: 1px solid #dce3ef;
+          border: 1px solid #cfd8e6;
           border-radius: 20px;
           background: #ffffff;
-          box-shadow: 0 16px 50px rgba(20, 38, 76, 0.06);
+          box-shadow: 0 18px 48px rgba(20, 38, 76, 0.09);
         }
 
         .issue-hero h1,
@@ -657,7 +606,7 @@ export default function IssueCenterPage() {
         .issue-panel-heading p,
         .issue-card p,
         .issue-empty span {
-          color: #62708a;
+          color: #2f405a;
           line-height: 1.6;
         }
 
@@ -702,8 +651,8 @@ export default function IssueCenterPage() {
         }
 
         .issue-secondary-button {
-          border: 1px solid #d5ddeb;
-          background: #ffffff;
+          border: 1px solid #bac6d8;
+          background: #f8fafc;
           color: #0b2148;
         }
 
@@ -736,7 +685,7 @@ export default function IssueCenterPage() {
         .issue-context-card,
         .issue-panel,
         .issue-governance-note {
-          border: 1px solid #dce3ef;
+          border: 1px solid #cfd8e6;
           border-radius: 16px;
           background: #ffffff;
         }
@@ -753,7 +702,7 @@ export default function IssueCenterPage() {
 
         .issue-kpi-card p {
           margin: 12px 0 4px;
-          color: #62708a;
+          color: #2f405a;
         }
 
         .issue-kpi-card h3 {
@@ -780,7 +729,7 @@ export default function IssueCenterPage() {
 
         .issue-context-card span,
         .issue-context-card small {
-          color: #6e7b91;
+          color: #3f5068;
         }
 
         .issue-context-card strong {
@@ -808,6 +757,17 @@ export default function IssueCenterPage() {
           gap: 8px;
         }
 
+        .issue-filters select {
+          min-height: 42px;
+          border: 1px solid #bac6d8;
+          border-radius: 10px;
+          background: #f8fafc;
+          color: #0b2148;
+          padding: 9px 34px 9px 12px;
+          font: inherit;
+          font-weight: 700;
+        }
+
         .issue-list {
           display: grid;
           gap: 12px;
@@ -815,7 +775,7 @@ export default function IssueCenterPage() {
         }
 
         .issue-card {
-          border: 1px solid #dce3ef;
+          border: 1px solid #cfd8e6;
           border-left-width: 4px;
           border-radius: 14px;
           padding: 18px;
@@ -842,7 +802,7 @@ export default function IssueCenterPage() {
 
         .issue-card code {
           max-width: 32%;
-          color: #68758a;
+          color: #4b5b72;
           font-size: 0.75rem;
           overflow-wrap: anywhere;
           text-align: right;
@@ -855,10 +815,10 @@ export default function IssueCenterPage() {
         }
 
         .issue-badges span {
-          border: 1px solid #dce3ef;
+          border: 1px solid #cfd8e6;
           border-radius: 999px;
           background: #ffffff;
-          color: #4e5d75;
+          color: #34445c;
           padding: 4px 8px;
           font-size: 0.72rem;
           font-weight: 800;
@@ -880,7 +840,7 @@ export default function IssueCenterPage() {
         }
 
         .issue-context-list dt {
-          color: #7a8698;
+          color: #46566f;
           font-size: 0.7rem;
           text-transform: uppercase;
         }
@@ -915,7 +875,7 @@ export default function IssueCenterPage() {
           gap: 18px;
           margin-top: 16px;
           padding: 14px 16px;
-          color: #65738a;
+          color: #3d4d65;
           font-size: 0.82rem;
         }
 
@@ -928,7 +888,6 @@ export default function IssueCenterPage() {
             padding: 16px;
           }
 
-          .issue-topbar,
           .issue-hero,
           .issue-panel-heading,
           .issue-governance-note {

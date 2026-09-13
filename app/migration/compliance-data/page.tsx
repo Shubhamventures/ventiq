@@ -254,7 +254,7 @@ function ComplianceDataMigrationWorkspace({
     if (!fileList || fileList.length === 0) return;
 
     setMessage(
-      `${fileList.length} compliance/evidence file(s) staged. CSV/XLSX parsing and evidence storage will be connected in the next step. You can publish current staged records to Supabase now.`
+      `${fileList.length} compliance/evidence file(s) selected. Use Canonical Data Intake for governed parsing and evidence validation; this workspace publishes the currently staged compliance records.`
     );
   }
 

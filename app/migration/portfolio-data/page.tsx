@@ -230,7 +230,7 @@ function PortfolioDataMigrationWorkspace({
     if (!fileList || fileList.length === 0) return;
 
     setMessage(
-      `${fileList.length} portfolio file staged. CSV/XLSX parsing will be connected in the next step. You can publish current staged records to Supabase now.`
+      `${fileList.length} portfolio file selected. Use Canonical Data Intake for governed file parsing and validation; this workspace publishes the currently staged portfolio records.`
     );
   }
 

@@ -191,7 +191,7 @@ confidence: match.confidence,
   });
 }
 
-function generateDemoDocumentDump(investors: Investor[]) {
+function generateRepresentativeDocumentSet(investors: Investor[]) {
   const selectedInvestors = investors.slice(0, 150);
   const fileNames: string[] = [];
 
@@ -312,13 +312,13 @@ function InvestorPortalMigrationWorkspace({
     setIsLoading(false);
   }
 
-  function handleGenerateDemoDump() {
+  function handleGenerateRepresentativeSet() {
     if (investors.length === 0) {
       setMessage("Load latest investor batch first.");
       return;
     }
 
-    const fileNames = generateDemoDocumentDump(investors);
+    const fileNames = generateRepresentativeDocumentSet(investors);
     const mappedDocuments = buildDocumentsFromFileNames(fileNames, investors);
 
     setDocuments(mappedDocuments);
@@ -787,12 +787,12 @@ function InvestorPortalMigrationWorkspace({
           </div>
 
           <div className="ipm-card">
-            <p className="ipm-eyebrow">Commercial promise</p>
+            <p className="ipm-eyebrow">Migration outcome</p>
             <h2>From old folders to investor login.</h2>
             <p>
-              The fund should not manually rebuild every investor folder. VENTIQ
-              should read the old data room, classify documents, match investor
-              records and show only exceptions for review.
+              VENTIQ reduces manual rebuilding by classifying historical documents,
+              matching them to investor records and surfacing exceptions for review
+              before approved information is released to the portal.
             </p>
           </div>
         </section>
@@ -831,11 +831,11 @@ function InvestorPortalMigrationWorkspace({
 
         <section className="ipm-card">
           <p className="ipm-eyebrow">Migration controls</p>
-          <h2>Load investors and classify document dump</h2>
+          <h2>Load investors and classify historical documents</h2>
           <p>
-            Start by loading the latest investor import batch. Then generate a
-            demo historical PDF dump or upload your own PDF filenames for
-            classification and investor matching.
+            Start by loading the latest investor import batch. Then create a
+            representative historical document set or upload PDF filenames for
+            classification, investor matching and governed review.
           </p>
 
           <div className="ipm-button-row">
@@ -847,8 +847,8 @@ function InvestorPortalMigrationWorkspace({
               {isLoading ? "Loading..." : "Load Latest Investor Batch"}
             </button>
 
-            <button className="ipm-secondary" onClick={handleGenerateDemoDump}>
-              Generate Demo PDF Dump
+            <button className="ipm-secondary" onClick={handleGenerateRepresentativeSet}>
+              Create Representative Document Set
             </button>
 
             <label className="ipm-file-label">
@@ -877,8 +877,9 @@ function InvestorPortalMigrationWorkspace({
 
           {published && (
             <div className="ipm-published">
-              Publishing preview complete. Next version will store these files in
-              Supabase Storage and attach them to investor portal accounts.
+              Publication review is complete. The classified files remain staged
+              in this migration workspace until they are confirmed for governed
+              investor-portal publication.
             </div>
           )}
         </section>
@@ -930,9 +931,9 @@ function InvestorPortalMigrationWorkspace({
           <p className="ipm-eyebrow">Migration review</p>
           <h2>First 30 classified investor documents</h2>
           <p>
-            This review table is the key commercial control. Auto-matched
-            documents can be published. Review items need manual confirmation
-            before going into investor accounts.
+            This review table is the publication control. Auto-matched
+            documents can move forward after review. Exception items require
+            manual confirmation before they are released to investor accounts.
           </p>
 
           <div className="ipm-table-wrap">
@@ -973,8 +974,8 @@ function InvestorPortalMigrationWorkspace({
                 {documents.length === 0 && (
                   <tr>
                     <td colSpan={6}>
-                      No documents classified yet. Load investors, then generate
-                      a demo dump or upload PDF filenames.
+                      No documents classified yet. Load investors, then create
+                      a representative document set or upload PDF filenames.
                     </td>
                   </tr>
                 )}

@@ -1055,7 +1055,7 @@ export default function InvestmentTeamAIPage() {
 
         {!loading && errorMessage && (
           <div className="preview-card">
-            <h2>Connection Issue</h2>
+            <h2>Workspace status</h2>
             <div className="explain-box">{errorMessage}</div>
           </div>
         )}

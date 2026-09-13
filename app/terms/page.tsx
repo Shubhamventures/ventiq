@@ -3,7 +3,7 @@ import Link from "next/link";
 export const metadata = {
   title: "Terms of Use | VENTIQ",
   description:
-    "Terms of use for the VENTIQ website, product previews and walkthrough requests.",
+    "Terms of use for the VENTIQ website, public product experience and product enquiries.",
 };
 
 export default function TermsPage() {
@@ -16,27 +16,28 @@ export default function TermsPage() {
 
         <p className="legal-kicker">Terms of Use</p>
 
-        <h1>Terms for using the VENTIQ website and product previews.</h1>
+        <h1>Terms for using the VENTIQ website and public product experience.</h1>
 
         <p>
           These terms apply to use of the VENTIQ website, public product
-          previews, walkthrough request forms and related informational content.
+          experience, product enquiry forms and related informational content.
         </p>
       </section>
 
       <section className="legal-content-card">
-        <h2>Website and product previews</h2>
+        <h2>Website and public product experience</h2>
 
         <p>
-          VENTIQ product screens shown on the website may include sample,
-          illustrative or demonstration data. Public previews are intended to
-          explain VENTIQ workflows, operating concepts and product capabilities for private capital teams.
+          VENTIQ product screens shown on the website may include representative
+          demonstration data. They are intended to explain VENTIQ workflows,
+          operating concepts and product capabilities for private capital teams.
         </p>
 
         <p>
-          Public preview pages should not be treated as a final production
-          environment, client implementation or investment, accounting, tax,
-          legal or compliance advice.
+          Public product screens are not a client workspace and do not constitute
+          investment, accounting, tax, legal or compliance advice. Authenticated
+          client workspaces are governed separately under the applicable
+          implementation and access scope.
         </p>
       </section>
 
@@ -67,7 +68,7 @@ export default function TermsPage() {
         <h2>Product availability</h2>
 
         <p>
-          VENTIQ may be made available through guided evaluation, controlled pilot onboarding or an authenticated production workspace depending on the agreed scope. Availability and permitted use may vary by client, workflow and access rights.
+          VENTIQ may be made available through guided evaluation, governed client onboarding or an authenticated production workspace depending on the agreed scope. Availability and permitted use may vary by client, workflow and access rights.
         </p>
       </section>
 
@@ -75,7 +76,7 @@ export default function TermsPage() {
         <h2>Updates</h2>
 
         <p>
-          These terms may be updated as VENTIQ’s product, pilot programme and broader production usage evolve.
+          These terms may be updated as VENTIQ&apos;s product, operating model and client usage evolve.
         </p>
       </section>
     </main>

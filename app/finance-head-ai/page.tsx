@@ -1793,7 +1793,7 @@ const [
 
         {!loading && errorMessage && (
           <div className="preview-card">
-            <h2>Connection Issue</h2>
+            <h2>Workspace status</h2>
             <div className="explain-box">{errorMessage}</div>
           </div>
         )}
@@ -1981,8 +1981,8 @@ const [
 
       <div className="explain-box">
         This Finance Head dashboard uses verified Calculation Engine outputs
-        and batch-scoped canonical records for {activeFundName}. Legacy and prior
-        pilot batches are excluded from the finance metrics shown above.
+        and batch-scoped canonical records for {activeFundName}. Legacy and
+        superseded batches are excluded from the finance metrics shown above.
       </div>
     </div>
 

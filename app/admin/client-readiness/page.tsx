@@ -98,8 +98,8 @@ const defaultChecklistTemplates = [
   },
   {
     readinessArea: "Legal / Commercial",
-    checklistItem: "Pilot scope agreed with modules, users and data mode",
-    ownerRole: "Founder",
+    checklistItem: "Implementation scope agreed with modules, users and data mode",
+    ownerRole: "VENTIQ Admin / Compliance",
     priority: "High",
   },
     {
@@ -128,14 +128,14 @@ const defaultChecklistTemplates = [
   },
   {
     readinessArea: "Access",
-    checklistItem: "Secure invite flow tested with one internal user",
+    checklistItem: "Secure invite flow validated with an authorised user",
     ownerRole: "VENTIQ Admin",
     priority: "High",
   },
   {
     readinessArea: "Security",
-    checklistItem: "Demo / sample / limited real data mode confirmed",
-    ownerRole: "Founder",
+    checklistItem: "Approved data mode confirmed for onboarding",
+    ownerRole: "VENTIQ Admin / Compliance",
     priority: "High",
   },
   {
@@ -146,13 +146,13 @@ const defaultChecklistTemplates = [
   },
   {
     readinessArea: "Product",
-    checklistItem: "Debt LMS demo flow tested end-to-end",
+    checklistItem: "Debt LMS operating flow validated end-to-end",
     ownerRole: "Product",
     priority: "High",
   },
   {
     readinessArea: "Product",
-    checklistItem: "Bank MIS demo flow tested end-to-end",
+    checklistItem: "Bank MIS operating flow validated end-to-end",
     ownerRole: "Product",
     priority: "High",
   },
@@ -164,8 +164,8 @@ const defaultChecklistTemplates = [
   },
   {
     readinessArea: "Controls",
-    checklistItem: "Data protection console reviewed before pilot",
-    ownerRole: "Compliance / Founder",
+    checklistItem: "Data protection console reviewed before onboarding",
+    ownerRole: "Compliance / VENTIQ Admin",
     priority: "Medium",
   },
 ];
@@ -285,10 +285,25 @@ function getReadinessScore(items: ReadinessItem[]) {
 }
 
 function getPilotDecision(score: number, blockers: number) {
-  if (blockers > 0) return "Not ready for real data";
-  if (score >= 85) return "Ready for controlled pilot";
-  if (score >= 65) return "Ready for guided demo";
-  return "Discovery / setup pending";
+  if (blockers > 0) return "Not ready for live data";
+  if (score >= 85) return "Ready for controlled onboarding";
+  if (score >= 65) return "Ready for guided evaluation";
+  return "Readiness assessment in progress";
+}
+
+function displayImplementationStage(value: string) {
+  if (value === "Discovery") return "Readiness Assessment";
+  if (value === "Guided Demo") return "Guided Evaluation";
+  if (value === "Controlled Pilot") return "Controlled Onboarding";
+  if (value === "Paid Pilot") return "Implementation";
+  return value;
+}
+
+function displayDataMode(value: string) {
+  if (value === "Demo Data") return "Demonstration Data";
+  if (value === "Sample Client Data") return "Sample Data";
+  if (value === "Limited Real Data") return "Limited Live Data";
+  return value;
 }
 
 export default function ClientReadinessPage() {
@@ -358,7 +373,7 @@ export default function ClientReadinessPage() {
         setDataMessage(
           nextClients.length > 0
             ? "Connected to governed Supabase client readiness records."
-            : "No pilot client exists yet. Create Client 001 to begin governed readiness tracking."
+            : "No client readiness record exists yet. Create a client workspace to begin governed readiness tracking."
         );
       } catch (error) {
         setDataMessage(
@@ -513,12 +528,12 @@ export default function ClientReadinessPage() {
       setClients((currentClients) => [savedClient, ...currentClients]);
       setSelectedClientId(savedClient.id);
       setClientForm(emptyClientForm);
-      setClientMessage("Pilot client created. Default readiness checklist added.");
+      setClientMessage("Client workspace created. Default readiness checklist added.");
 
       await createDefaultChecklist(savedClient.id);
     } catch (error) {
       setClientMessage(
-        error instanceof Error ? error.message : "Unable to create pilot client."
+        error instanceof Error ? error.message : "Unable to create client workspace."
       );
     } finally {
       setSavingClient(false);
@@ -530,7 +545,7 @@ export default function ClientReadinessPage() {
     setItemMessage("");
 
     if (!selectedClient) {
-      setItemMessage("Create or select a governed pilot client before adding readiness items.");
+      setItemMessage("Create or select a governed client workspace before adding readiness items.");
       return;
     }
 
@@ -1030,14 +1045,13 @@ export default function ClientReadinessPage() {
         <div className="hero">
           <div className="hero-top">
             <div>
-              <p className="eyebrow">VENTIQ Commercial Layer</p>
-              <h1>Client Onboarding & Pilot Readiness Center</h1>
+              <p className="eyebrow">VENTIQ Client Readiness</p>
+              <h1>Client Onboarding & Implementation Readiness</h1>
               <p className="hero-copy">
-                Decide whether a fund is ready for a demo, controlled pilot,
-                limited real-data pilot or production onboarding. This center
-                connects legal readiness, client data, stakeholder access,
-                product activation, data protection and approval workflow into
-                one go-live view.
+                Assess whether a fund is ready for governed onboarding and
+                production use. This center connects legal readiness, client
+                data, stakeholder access, product activation, data protection
+                and approval workflow into one go-live view.
               </p>
             </div>
 
@@ -1087,7 +1101,7 @@ export default function ClientReadinessPage() {
 
         <div className="ribbon">
           {loading ? "Loading client readiness center..." : dataMessage} · Governed
-          readiness → controlled pilot → limited real data → paid pilot
+          readiness → controlled onboarding → approved data → production use
         </div>
 
         <div className="panel">
@@ -1095,8 +1109,8 @@ export default function ClientReadinessPage() {
             <div>
               <h2>Selected Client</h2>
               <p>
-                Select a pilot client and review whether VENTIQ can safely
-                onboard them.
+                Select a client workspace and review whether VENTIQ is ready for
+                governed onboarding.
               </p>
             </div>
           </div>
@@ -1120,7 +1134,7 @@ export default function ClientReadinessPage() {
                     selectedClient.pilotStage
                   )}`}
                 >
-                  {selectedClient.pilotStage}
+                  {displayImplementationStage(selectedClient.pilotStage)}
                 </span>
 
                 <span
@@ -1128,7 +1142,7 @@ export default function ClientReadinessPage() {
                     selectedClient.dataMode
                   )}`}
                 >
-                  {selectedClient.dataMode}
+                  {displayDataMode(selectedClient.dataMode)}
                 </span>
               </div>
 
@@ -1156,9 +1170,9 @@ export default function ClientReadinessPage() {
               <span>VENTIQ Readiness Decision</span>
               <strong>No governed client selected</strong>
               <p>
-                No pilot-client record is available in the governed data layer.
-                Create Client 001 below before recording readiness evidence or
-                making a pilot decision.
+                No client readiness record is available in the governed data
+                layer. Create a client workspace below before recording readiness
+                evidence or making an onboarding decision.
               </p>
             </div>
           )}
@@ -1195,8 +1209,8 @@ export default function ClientReadinessPage() {
               <span>Step 2</span>
               <h3>Upload Source Files</h3>
               <p>
-                Client uploads files or marks data sets as not applicable for
-                demo, sample-data pilot or limited real-data pilot.
+                Client uploads source files or marks data sets as not applicable
+                for the agreed onboarding scope.
               </p>
             </div>
 
@@ -1221,7 +1235,7 @@ export default function ClientReadinessPage() {
         </div>
         <div className="main-grid">
           <form className="form-card" onSubmit={submitClient}>
-            <h2>Add Pilot Client</h2>
+            <h2>Add Client Workspace</h2>
             <p>
               Create a client readiness workspace. Default checklist will be
               added automatically.
@@ -1273,18 +1287,18 @@ export default function ClientReadinessPage() {
               </div>
 
               <div className="field">
-                <label>Pilot Stage</label>
+                <label>Implementation Stage</label>
                 <select
                   value={clientForm.pilotStage}
                   onChange={(event) =>
                     updateClientForm("pilotStage", event.target.value)
                   }
                 >
-                  <option>Discovery</option>
-                  <option>Guided Demo</option>
-                  <option>Controlled Pilot</option>
-                  <option>Paid Pilot</option>
-                  <option>Production Onboarding</option>
+                  <option value="Discovery">Readiness Assessment</option>
+                  <option value="Guided Demo">Guided Evaluation</option>
+                  <option value="Controlled Pilot">Controlled Onboarding</option>
+                  <option value="Paid Pilot">Implementation</option>
+                  <option value="Production Onboarding">Production Onboarding</option>
                 </select>
               </div>
 
@@ -1296,10 +1310,10 @@ export default function ClientReadinessPage() {
                     updateClientForm("dataMode", event.target.value)
                   }
                 >
-                  <option>Demo Data</option>
-                  <option>Sample Client Data</option>
-                  <option>Limited Real Data</option>
-                  <option>Production Data</option>
+                  <option value="Demo Data">Demonstration Data</option>
+                  <option value="Sample Client Data">Sample Data</option>
+                  <option value="Limited Real Data">Limited Live Data</option>
+                  <option value="Production Data">Production Data</option>
                 </select>
               </div>
 
@@ -1368,7 +1382,7 @@ export default function ClientReadinessPage() {
             <h2>Add Readiness Item</h2>
             <p>
               Add any missing legal, product, data, access or security item
-              before pilot onboarding.
+              before governed onboarding.
             </p>
 
             <div className="form-grid">
@@ -1482,8 +1496,8 @@ export default function ClientReadinessPage() {
             <div>
               <h2>Client Readiness Checklist</h2>
               <p>
-                This is the practical go-live checklist before taking a fund
-                from demo to pilot.
+                This is the practical go-live checklist for moving a fund from
+                readiness assessment into governed operation.
               </p>
             </div>
           </div>
@@ -1572,10 +1586,10 @@ export default function ClientReadinessPage() {
         <div className="panel">
           <div className="panel-header">
             <div>
-              <h2>First Client Timeline</h2>
+              <h2>Implementation Path</h2>
               <p>
-                Use this timeline to plan your first onboarding conversation and
-                pilot milestone.
+                Use this sequence to plan readiness, onboarding, approved data use
+                and production operating scope.
               </p>
             </div>
           </div>
@@ -1583,28 +1597,28 @@ export default function ClientReadinessPage() {
           <div className="timeline-grid">
             <div className="timeline-card">
               <span>7–10 days</span>
-              <h3>Friendly demo client</h3>
+              <h3>Readiness assessment</h3>
               <p>
-                Show guided demo using dummy data. Objective is feedback, pain
-                validation and workflow confirmation.
+                Confirm operating priorities, stakeholder roles, workflow scope
+                and the data required for the initial implementation.
               </p>
             </div>
 
             <div className="timeline-card">
               <span>2–3 weeks</span>
-              <h3>Controlled sample-data pilot</h3>
+              <h3>Controlled onboarding</h3>
               <p>
-                Onboard one fund workspace with sample bank, debt and stakeholder
-                records. No sensitive investor data.
+                Configure one governed fund workspace, validate access and load
+                the agreed sample or approved onboarding data.
               </p>
             </div>
 
             <div className="timeline-card">
               <span>4–6 weeks</span>
-              <h3>Limited paid pilot</h3>
+              <h3>Limited live-data rollout</h3>
               <p>
-                Needs auth, role access, audit logs, data policy, NDA and pilot
-                agreement before using limited real data.
+                Use approved live data only after role access, audit evidence,
+                data policy and the agreed implementation terms are in place.
               </p>
             </div>
 
@@ -1612,8 +1626,8 @@ export default function ClientReadinessPage() {
               <span>8–12 weeks</span>
               <h3>Production onboarding</h3>
               <p>
-                Needs full tenant isolation, RLS, security review, backup plan,
-                incident process and legal review.
+                Confirm tenant isolation, RLS, security review, backup controls,
+                incident process and the agreed production operating scope.
               </p>
             </div>
           </div>

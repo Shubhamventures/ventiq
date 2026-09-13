@@ -103,7 +103,7 @@ const capabilityGroups = [
 
 export default function DemoPage() {
   return (
-    <main className="app-page">
+    <main className="app-page ventiq-demo-page">
       <section className="app-shell">
         <div className="app-header">
           <div>
@@ -214,11 +214,11 @@ export default function DemoPage() {
           </div>
 
           <div className="ai-side-panel">
-            <p className="eyebrow">GUIDED PILOT</p>
-            <h2>Start focused. Expand after the workflow is proven.</h2>
-            <div className="chat-message">Begin with one agreed fund and a clearly defined operating use case.</div>
+            <p className="eyebrow">IMPLEMENTATION PATH</p>
+            <h2>Start with the highest-value workflow. Expand from one governed foundation.</h2>
+            <div className="chat-message">Begin with one agreed fund and a clearly defined operating priority.</div>
             <div className="chat-message">Migrate the data required for that workflow and resolve exceptions before activation.</div>
-            <div className="chat-message">Add stakeholder and investor experiences only within the approved scope.</div>
+            <div className="chat-message">Add stakeholder and investor experiences as the operating scope expands.</div>
             <div className="chat-message">Expand into additional workflows as the operating model proves useful.</div>
           </div>
         </div>
@@ -238,7 +238,7 @@ export default function DemoPage() {
             <Link className="monitor-btn monitor-btn-secondary" href="/security">Security & controls</Link>
           </div>
           <p style={{ marginTop: "20px", opacity: 0.72 }}>
-            Public product views use sample or illustrative information and do
+            Public product views use representative demonstration information and do
             not expose private client workspaces.
           </p>
         </div>

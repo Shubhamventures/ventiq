@@ -1359,9 +1359,9 @@ const selectedCapitalCall = capitalCalls.find(
 
         {!loading && errorMessage && (
           <div className="preview-card">
-            <h2>Connection Issue</h2>
+            <h2>Workspace status</h2>
             <div className="explain-box">
-              <strong>Error:</strong> {errorMessage}
+              {errorMessage}
             </div>
           </div>
         )}
@@ -1396,8 +1396,8 @@ const selectedCapitalCall = capitalCalls.find(
               <div className="explain-box">
                 VENTIQ only generates investor reporting documents from approved
                 workflows inside the governed active fund. Once generated, each
-                investor document is linked to the investor, fund, workflow and
-                future portal/email status.
+                investor document remains linked to the investor, fund, workflow
+                and governed portal or email delivery status.
               </div>
 
               {message && <div className="logic-note">{message}</div>}
@@ -2140,48 +2140,24 @@ const selectedCapitalCall = capitalCalls.find(
 </div>
 
     <div className="explain-box">
-      This is now a PDF-style preview. In Phase 3.4, we will convert this
-      template into an actual downloadable PDF and later store the PDF link in
-      the document vault.
+      Preview generated from the approved workflow. Use Document Studio for
+      governed PDF generation, storage, investor publishing and dispatch control.
     </div>
   </div>
 )}
 
             <div className="preview-card">
-              <h2>Next Step After Phase 3.3</h2>
+              <h2>Document delivery status</h2>
 
               <div className="queue-grid">
-                <div className="queue-item">
-                  🟢 Approved workflow selected
-                </div>
-
-                <div className="queue-item">
-                  🟢 Investor document records generated
-                </div>
-
-                <div className="queue-item">
-                  🟢 Duplicate prevention added
-                </div>
-
-                <div className="queue-item">
-                  🟢 Document preview placeholder added
-                </div>
-
-                <div className="queue-item">
-                  🟢 PDF-style preview template added
-                </div>
-
-                <div className="queue-item">
-                  🟡 Document vault file link pending
-                </div>
-
-                <div className="queue-item">
-                  🟡 Investor portal document view pending
-                </div>
-
-                <div className="queue-item">
-                  🟡 Email dispatch pending
-                </div>
+                <div className="queue-item">🟢 Approved workflow selected</div>
+                <div className="queue-item">🟢 Investor document records generated</div>
+                <div className="queue-item">🟢 Duplicate prevention active</div>
+                <div className="queue-item">🟢 Document preview available</div>
+                <div className="queue-item">🟢 PDF-style template available</div>
+                <div className="queue-item">→ Governed PDF generation: Document Studio</div>
+                <div className="queue-item">→ Investor release: Document Studio publishing</div>
+                <div className="queue-item">→ Dispatch control: Document Studio queue</div>
               </div>
             </div>
           </>

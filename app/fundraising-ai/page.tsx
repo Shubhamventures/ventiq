@@ -1131,7 +1131,7 @@ export default function FundraisingAIPage() {
 
         {!loading && errorMessage && (
           <div className="preview-card">
-            <h2>Connection Issue</h2>
+            <h2>Workspace status</h2>
             <div className="explain-box">{errorMessage}</div>
           </div>
         )}
@@ -1394,8 +1394,8 @@ export default function FundraisingAIPage() {
 
             <div className="explain-box" style={{ marginBottom: 18 }}>
               Investor Relations metrics on this page are restricted to the latest
-              completed canonical batch. Legacy investor imports, PDF batches, data
-              room records and prior pilot records are excluded from active-fund
+              completed canonical batch. Legacy investor imports, superseded PDF
+              batches and inactive data-room records are excluded from active-fund
               control totals.
             </div>
 

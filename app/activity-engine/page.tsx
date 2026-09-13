@@ -528,9 +528,9 @@ export default function ActivityEnginePage() {
 
         {!loading && errorMessage && (
           <div className="preview-card">
-            <h2>Connection Issue</h2>
+            <h2>Workspace status</h2>
             <div className="explain-box">
-              <strong>Error:</strong> {errorMessage}
+              {errorMessage}
             </div>
           </div>
         )}

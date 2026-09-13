@@ -229,7 +229,7 @@ const [distributionActionMessage, setDistributionActionMessage] = useState("");
         setSelectedFundId("");
         setErrorMessage(
           fundData.length === 0
-            ? `No distribution fund record was found for ${activeFundName}.`
+            ? `Distribution data has not been configured for ${activeFundName} yet.`
             : `Multiple distribution fund records matched ${activeFundName}; refusing ambiguous fund scope.`
         );
         setLoading(false);
@@ -717,9 +717,9 @@ async function handleApproveSavedDistribution(distribution: SavedDistribution) {
 
         {!loading && errorMessage && (
           <div className="preview-card">
-            <h2>Connection Issue</h2>
+            <h2>Workspace status</h2>
             <div className="explain-box">
-              <strong>Error:</strong> {errorMessage}
+              {errorMessage}
             </div>
           </div>
         )}

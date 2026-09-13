@@ -29,14 +29,6 @@ const securityPrinciples = [
   },
 ];
 
-const roadmapItems = [
-  "Formal VAPT review",
-  "SOC 2 readiness planning",
-  "Granular permission model",
-  "Data retention controls",
-  "Advanced audit logs",
-  "Enterprise security documentation",
-];
 
 export default function SecurityPage() {
   return (
@@ -70,23 +62,14 @@ export default function SecurityPage() {
         <h2>Current security position</h2>
 
         <p>
-          VENTIQ is deployed for controlled production pilots with governed access, workflow controls and production monitoring. The platform is not represented as SOC 2, ISO 27001 or VAPT certified unless those reviews and certifications are formally completed.
+          VENTIQ is deployed in production with governed access, workflow controls and operational monitoring. VENTIQ does not represent itself as SOC 2, ISO 27001 or VAPT certified unless those reviews and certifications have been formally completed.
         </p>
 
         <p>
-          Public product pages use sample or illustrative data unless explicitly stated otherwise. Client and pilot workspaces are available only through authenticated, governed access under the agreed scope.
+          Public product pages use representative demonstration data unless explicitly stated otherwise. Client workspaces are available only through authenticated, governed access under the agreed implementation scope.
         </p>
       </section>
 
-      <section className="legal-content-card">
-        <h2>Security roadmap</h2>
-
-        <div className="legal-pill-grid">
-          {roadmapItems.map((item) => (
-            <span key={item}>{item}</span>
-          ))}
-        </div>
-      </section>
 
       <section className="legal-content-card">
         <h2>Data handling approach</h2>
@@ -99,9 +82,10 @@ export default function SecurityPage() {
         </p>
 
         <p>
-          Enterprise security documentation, data processing terms and formal
-          controls will continue to evolve as the product moves from walkthrough
-          stage to production deployments.
+          Security documentation, data-processing terms and control evidence
+          are maintained as part of VENTIQ&apos;s client security review and
+          onboarding process. Current assurance materials can be reviewed within
+          the scope of an evaluation or implementation.
         </p>
       </section>
     </main>

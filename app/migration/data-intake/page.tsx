@@ -2650,32 +2650,35 @@ export default function DataIntakeCommandCenterPage() {
         </div>
 
         <div className="preview-card">
-          <h2>Test Sequence</h2>
+          <h2>Recommended ingestion sequence</h2>
 
           <div className="queue-grid">
             <div className="queue-item">
-              <strong>1. Canonical workbook pilot</strong>
+              <strong>1. Canonical structured data</strong>
               <br />
-              50 investors, 50 portfolio companies and all connected transaction
-              and valuation sheets.
+              Load the fund, investor, transaction, portfolio and valuation records
+              required for the selected operating workflows.
             </div>
 
             <div className="queue-item">
-              <strong>2. PDF pilot</strong>
+              <strong>2. Historical documents</strong>
               <br />
-              Start with 25–50 small PDFs and verify investor/document matching.
+              Add SOAs, notices, reports and supporting PDFs to the same governed
+              fund context.
             </div>
 
             <div className="queue-item">
-              <strong>3. Medium load</strong>
+              <strong>3. Resolve readiness exceptions</strong>
               <br />
-              250 investors, 250 portfolio companies and 500 PDFs.
+              Review validation, reconciliation and document-matching exceptions
+              before activation.
             </div>
 
             <div className="queue-item">
-              <strong>4. Full load</strong>
+              <strong>4. Approve and activate</strong>
               <br />
-              500 investors, 500 portfolio companies and 1,000 PDFs.
+              Complete maker-checker review and release approved data into the
+              relevant stakeholder workspaces.
             </div>
           </div>
         </div>
