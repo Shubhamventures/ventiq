@@ -459,6 +459,15 @@ export default function VentiqWorkspaceNav({
             transform: translateX(0);
           }
 
+          /* VENTIQ mobile drawer account containment: keep identity off-canvas unless the drawer is open. */
+          .ventiq-sidebar-account {
+            display: none !important;
+          }
+
+          .ventiq-app-sidebar.mobile-open .ventiq-sidebar-account {
+            display: block !important;
+          }
+
           .ventiq-mobile-backdrop {
             display: block;
             position: fixed;
