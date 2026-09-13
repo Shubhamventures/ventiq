@@ -496,7 +496,7 @@ function CapitalCallAllocationWorkspace({
 
         .hero {
           display: grid;
-          grid-template-columns: 1.1fr 0.9fr;
+          grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
           gap: 24px;
           margin-bottom: 24px;
         }
@@ -529,6 +529,7 @@ function CapitalCallAllocationWorkspace({
         }
 
         .card {
+          min-width: 0;
           border: 1px solid rgba(147, 197, 253, 0.18);
           background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(8, 13, 26, 0.92));
           border-radius: 28px;
@@ -565,7 +566,7 @@ function CapitalCallAllocationWorkspace({
 
         .control-grid {
           display: grid;
-          grid-template-columns: 1fr 1fr 1fr;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 16px;
           margin-top: 18px;
         }
@@ -635,9 +636,10 @@ function CapitalCallAllocationWorkspace({
 
         .split-grid {
           display: grid;
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
           gap: 20px;
           margin-top: 24px;
+          align-items: start;
         }
 
         .list {
@@ -661,6 +663,8 @@ function CapitalCallAllocationWorkspace({
         }
 
         .table-wrap {
+          min-width: 0;
+          max-width: 100%;
           margin-top: 20px;
           overflow-x: auto;
           border: 1px solid rgba(147, 197, 253, 0.14);
@@ -703,7 +707,7 @@ function CapitalCallAllocationWorkspace({
           font-weight: 900;
         }
 
-        @media (max-width: 980px) {
+        @container ventiq-workspace (max-width: 980px) {
           .allocation-page {
             padding: 20px;
           }
@@ -732,7 +736,7 @@ function CapitalCallAllocationWorkspace({
           <div className="nav-links">
             <a href="/investor-import">Investor Import</a>
             <a href="/finance-head-ai">Finance Workspace</a>
-            <a href="/">Home</a>
+            <a href="/launch-center">Launch Center</a>
           </div>
         </nav>
 

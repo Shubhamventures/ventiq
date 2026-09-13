@@ -1,5 +1,7 @@
 ﻿"use client";
 
+import Link from "next/link";
+
 import { useEffect, useMemo, useState } from "react";
 
 import { useVentiqAuth } from "../../lib/auth/AuthProvider";
@@ -399,7 +401,7 @@ export default function MigrationPage() {
 
         .migration-hero {
           display: grid;
-          grid-template-columns: 1.15fr 0.85fr;
+          grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
           gap: 32px;
           align-items: stretch;
           margin-bottom: 28px;
@@ -574,7 +576,7 @@ export default function MigrationPage() {
 
         .migration-detail-grid {
           display: grid;
-          grid-template-columns: 0.9fr 1.1fr;
+          grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
           gap: 20px;
           margin-top: 24px;
         }
@@ -878,7 +880,7 @@ export default function MigrationPage() {
           background: rgba(15, 23, 42, 0.72);
         }
 
-        @media (max-width: 980px) {
+        @container ventiq-workspace (max-width: 980px) {
           .migration-page {
             padding: 20px;
           }
@@ -909,9 +911,9 @@ export default function MigrationPage() {
             <span>Private Capital Operating System</span>
           </div>
 
-          <a className="migration-home" href="/">
-            Back to Home
-          </a>
+          <Link className="migration-home" href="/launch-center">
+            Back to Launch Center
+          </Link>
         </nav>
 
         <section

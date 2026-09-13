@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
@@ -2566,9 +2568,9 @@ async function handleGeneratePowerPoint() {
             </p>
           </div>
 
-          <a className="back-link" href="/">
-            Back to Home
-          </a>
+          <Link className="back-link" href="/launch-center">
+            Back to Launch Center
+          </Link>
         </div>
 
         <div
@@ -2622,12 +2624,12 @@ async function handleGeneratePowerPoint() {
                 </select>
               </label>
 
-              <a
+              <Link
                 className="monitor-btn monitor-btn-secondary"
                 href="/migration/activation"
               >
                 Open Fund Activation
-              </a>
+              </Link>
             </div>
           </div>
         </div>
@@ -2668,18 +2670,18 @@ async function handleGeneratePowerPoint() {
                 the migrated operating data.
               </div>
               <div className="action-row">
-                <a
+                <Link
                   className="monitor-btn monitor-btn-primary"
                   href="/migration/activation"
                 >
                   Complete Fund Activation
-                </a>
-                <a
+                </Link>
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/data-intake"
                 >
                   Open Data Intake
-                </a>
+                </Link>
               </div>
             </div>
           )}
@@ -2747,34 +2749,34 @@ async function handleGeneratePowerPoint() {
               </div>
 
               <div className="action-row">
-                <a className="monitor-btn monitor-btn-primary" href="/portfolio-intelligence">
+                <Link className="monitor-btn monitor-btn-primary" href="/portfolio-intelligence">
                   Open Portfolio Intelligence
-                </a>
-                <a className="monitor-btn monitor-btn-secondary" href="/knowledge-hub">
+                </Link>
+                <Link className="monitor-btn monitor-btn-secondary" href="/knowledge-hub">
                   Review Regulatory Alerts
-                </a>
-                <a className="monitor-btn monitor-btn-secondary" href="/document-engine">
+                </Link>
+                <Link className="monitor-btn monitor-btn-secondary" href="/document-engine">
                   Review Investor Documents
-                </a>
-                                <a className="monitor-btn monitor-btn-secondary" href="/data-room">
+                </Link>
+                                <Link className="monitor-btn monitor-btn-secondary" href="/data-room">
                   Review Data Room
-                </a>
-                <a className="monitor-btn monitor-btn-secondary" href="/repayment-notice">
+                </Link>
+                <Link className="monitor-btn monitor-btn-secondary" href="/repayment-notice">
   Generate Repayment Notice
-</a>
-                <a
+</Link>
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/activation"
                 >
                   View Migration Readiness
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/stakeholder-launch"
                 >
                   Launch Stakeholder Dashboards
-                </a>
+                </Link>
               </div>
             </div>
 
@@ -2900,12 +2902,12 @@ async function handleGeneratePowerPoint() {
                   </p>
                 </div>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-primary"
                   href="/activity-engine"
                 >
                   Open Activity Engine
-                </a>
+                </Link>
               </div>
 
               <div className="impact-grid">
@@ -3030,23 +3032,23 @@ async function handleGeneratePowerPoint() {
               </div>
 
               <div className="action-row">
-                <a className="monitor-btn monitor-btn-primary" href="/data-room">
+                <Link className="monitor-btn monitor-btn-primary" href="/data-room">
                   Open Data Room
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/fundraising-ai"
                 >
                   Open IR Workspace
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/activity-engine"
                 >
                   View Activity Trail
-                </a>
+                </Link>
               </div>
             </div>
                        <div className="preview-card">
@@ -3213,12 +3215,12 @@ async function handleGeneratePowerPoint() {
     )}
 
     <div className="action-row">
-      <a
+      <Link
         className="monitor-btn monitor-btn-secondary"
         href="/portfolio-intelligence"
       >
         View Repayment Schedule
-      </a>
+      </Link>
     </div>
   </div>
 
@@ -3271,12 +3273,12 @@ async function handleGeneratePowerPoint() {
                   </a>
                 )}
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/portfolio-intelligence"
                 >
                   View Portfolio
-                </a>
+                </Link>
               </div>
             </div>
           );

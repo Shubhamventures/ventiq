@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
@@ -504,9 +506,9 @@ export default function ActivityEnginePage() {
             </p>
           </div>
 
-          <a className="back-link" href="/">
-            Back to Home
-          </a>
+          <Link className="back-link" href="/launch-center">
+            Back to Launch Center
+          </Link>
         </div>
 
         <div className="sample-data-ribbon">

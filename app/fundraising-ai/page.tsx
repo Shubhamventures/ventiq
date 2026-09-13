@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
@@ -1045,9 +1047,9 @@ export default function FundraisingAIPage() {
             </p>
           </div>
 
-          <a className="back-link" href="/">
-            Back to Home
-          </a>
+          <Link className="back-link" href="/launch-center">
+            Back to Launch Center
+          </Link>
         </div>
 
         <div
@@ -1101,12 +1103,12 @@ export default function FundraisingAIPage() {
                 </select>
               </label>
 
-              <a
+              <Link
                 className="monitor-btn monitor-btn-secondary"
                 href="/migration/activation"
               >
                 Open Fund Activation
-              </a>
+              </Link>
             </div>
           </div>
         </div>
@@ -1148,18 +1150,18 @@ export default function FundraisingAIPage() {
                 publish documents or respond to LP diligence from operational data.
               </div>
               <div className="action-row">
-                <a
+                <Link
                   className="monitor-btn monitor-btn-primary"
                   href="/migration/activation"
                 >
                   Complete Fund Activation
-                </a>
-                <a
+                </Link>
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/data-intake"
                 >
                   Open Data Intake
-                </a>
+                </Link>
               </div>
             </div>
           )}
@@ -1175,12 +1177,12 @@ export default function FundraisingAIPage() {
                   <h2>Calculation Engine outputs for {activeFundName}</h2>
                 </div>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/performance-calculations"
                 >
                   Open Calculation Engine
-                </a>
+                </Link>
               </div>
 
               {calculationLoadMessage && (
@@ -1310,37 +1312,37 @@ export default function FundraisingAIPage() {
               </div>
 
               <div className="action-row">
-                <a className="monitor-btn monitor-btn-primary" href="/data-room">
+                <Link className="monitor-btn monitor-btn-primary" href="/data-room">
                   Open Investor Data Room
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/investor-portal"
                 >
                   Open Investor Portal
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/pdf-intelligence"
                 >
                   Review PDF Intelligence
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/compliance-data"
                 >
                   Review Compliance Evidence
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/activation"
                 >
                   View Migration Readiness
-                </a>
+                </Link>
               </div>
             </div>
 

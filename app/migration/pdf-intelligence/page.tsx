@@ -1634,14 +1634,7 @@ export default function PdfIntelligencePage() {
             </span>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(240px, 1fr) minmax(240px, 2fr)",
-              gap: 16,
-              alignItems: "end",
-            }}
-          >
+          <div className="pdf-fund-context-grid">
             <label>
               Active fund
               <select

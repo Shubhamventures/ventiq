@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
@@ -994,9 +996,9 @@ export default function InvestmentTeamAIPage() {
             </p>
           </div>
 
-          <a className="back-link" href="/">
-            Back to Home
-          </a>
+          <Link className="back-link" href="/launch-center">
+            Back to Launch Center
+          </Link>
         </div>
 
         <div className="preview-card investment-fund-context">
@@ -1029,9 +1031,9 @@ export default function InvestmentTeamAIPage() {
                   </option>
                 ))}
               </select>
-              <a className="monitor-btn monitor-btn-secondary" href="/migration/activation">
+              <Link className="monitor-btn monitor-btn-secondary" href="/migration/activation">
                 Open Fund Activation
-              </a>
+              </Link>
             </div>
           </div>
         </div>
@@ -1069,12 +1071,12 @@ export default function InvestmentTeamAIPage() {
               review until the fund is activated.
             </div>
             <div className="action-row">
-              <a className="monitor-btn monitor-btn-primary" href="/migration/activation">
+              <Link className="monitor-btn monitor-btn-primary" href="/migration/activation">
                 Complete Fund Activation
-              </a>
-              <a className="monitor-btn monitor-btn-secondary" href="/migration/data-intake">
+              </Link>
+              <Link className="monitor-btn monitor-btn-secondary" href="/migration/data-intake">
                 Open Data Intake
-              </a>
+              </Link>
             </div>
           </div>
         )}
@@ -1097,40 +1099,40 @@ export default function InvestmentTeamAIPage() {
               </div>
 
               <div className="action-row">
-                <a
+                <Link
                   className="monitor-btn monitor-btn-primary"
                   href="/migration/portfolio-data"
                 >
                   Review Portfolio Data
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/repayment-notice"
                 >
                   Generate Repayment Notice
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/pdf-intelligence"
                 >
                   Review PDF Evidence
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/compliance-data"
                 >
                   Review Compliance Evidence
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/activation"
                 >
                   View Migration Readiness
-                </a>
+                </Link>
               </div>
             </div>
 
@@ -1203,12 +1205,12 @@ export default function InvestmentTeamAIPage() {
                   <p className="eyebrow">Verified performance layer</p>
                   <h2>Deal-Level IRR & MOIC</h2>
                 </div>
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/performance-calculations"
                 >
                   Open Calculation Engine
-                </a>
+                </Link>
               </div>
 
               {calculatedPortfolioMetrics.length === 0 && (
@@ -1652,7 +1654,7 @@ export default function InvestmentTeamAIPage() {
           overflow-wrap: anywhere;
         }
 
-        @media (max-width: 860px) {
+        @container ventiq-workspace (max-width: 860px) {
           .investment-fund-context {
             grid-template-columns: 1fr;
           }

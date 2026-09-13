@@ -191,7 +191,7 @@ export default function InvestorImportPage() {
 
         .hero {
           display: grid;
-          grid-template-columns: 1.2fr 0.8fr;
+          grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
           gap: 24px;
           margin-bottom: 24px;
         }
@@ -224,6 +224,7 @@ export default function InvestorImportPage() {
         }
 
         .card {
+          min-width: 0;
           border: 1px solid rgba(147, 197, 253, 0.18);
           background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(8, 13, 26, 0.92));
           border-radius: 28px;
@@ -303,9 +304,10 @@ export default function InvestorImportPage() {
 
         .grid-two {
           display: grid;
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
           gap: 20px;
           margin-top: 24px;
+          align-items: start;
         }
 
         .check-list {
@@ -329,6 +331,8 @@ export default function InvestorImportPage() {
         }
 
         .table-wrap {
+          min-width: 0;
+          max-width: 100%;
           margin-top: 20px;
           overflow-x: auto;
           border: 1px solid rgba(147, 197, 253, 0.14);
@@ -371,7 +375,7 @@ export default function InvestorImportPage() {
           font-weight: 900;
         }
 
-        @media (max-width: 980px) {
+        @container ventiq-workspace (max-width: 980px) {
           .investor-import-page {
             padding: 20px;
           }
@@ -399,7 +403,7 @@ export default function InvestorImportPage() {
           <div className="nav-links">
             <a href="/migration">Migration</a>
             <a href="/capital-call">Capital Call</a>
-            <a href="/">Home</a>
+            <a href="/launch-center">Launch Center</a>
           </div>
         </nav>
 

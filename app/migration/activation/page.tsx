@@ -1128,7 +1128,7 @@ export default function DataActivationDashboardPage() {
     <main className="activation-page">
       <section className="activation-shell">
         <div className="activation-topbar">
-          <Link className="activation-brand" href="/">
+          <Link className="activation-brand" href="/launch-center">
             VENTIQ
           </Link>
           <div className="activation-fund-context">

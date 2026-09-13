@@ -620,6 +620,7 @@ export default function RoleAccessPage() {
 
         .form-card,
         .panel {
+          min-width: 0;
           padding: 24px;
           margin-bottom: 18px;
         }
@@ -716,6 +717,8 @@ export default function RoleAccessPage() {
         }
 
         .table-wrap {
+          min-width: 0;
+          max-width: 100%;
           overflow-x: auto;
           border: 1px solid rgba(147, 197, 253, 0.14);
           border-radius: 20px;
@@ -852,7 +855,7 @@ export default function RoleAccessPage() {
           font-size: 18px;
         }
 
-               @media (max-width: 1100px) {
+               @container ventiq-workspace (max-width: 1100px) {
           .summary-grid,
           .main-grid,
           .matrix-grid,

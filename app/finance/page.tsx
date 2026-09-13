@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function FinancePage() {
   return (
     <main className="app-page">
@@ -14,9 +16,9 @@ investor reporting, valuation and cash intelligence.
 </p>
           </div>
 
-          <a className="back-link" href="/">
-            Back to Home
-          </a>
+          <Link className="back-link" href="/launch-center">
+            Back to Launch Center
+          </Link>
         </div>
 
         <div className="preview-card">

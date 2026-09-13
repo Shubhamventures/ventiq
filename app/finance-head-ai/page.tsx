@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
@@ -1707,9 +1709,9 @@ const [
             </p>
           </div>
 
-          <a className="back-link" href="/">
-            Back to Home
-          </a>
+          <Link className="back-link" href="/launch-center">
+            Back to Launch Center
+          </Link>
         </div>
 
         <div
@@ -1763,12 +1765,12 @@ const [
                 </select>
               </label>
 
-              <a
+              <Link
                 className="monitor-btn monitor-btn-secondary"
                 href="/migration/activation"
               >
                 Open Fund Activation
-              </a>
+              </Link>
             </div>
           </div>
         </div>
@@ -1809,18 +1811,18 @@ const [
                 activate the fund before operational dashboards consume the data.
               </div>
               <div className="action-row">
-                <a
+                <Link
                   className="monitor-btn monitor-btn-primary"
                   href="/migration/activation"
                 >
                   Complete Fund Activation
-                </a>
-                <a
+                </Link>
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/data-intake"
                 >
                   Open Data Intake
-                </a>
+                </Link>
               </div>
             </div>
           )}
@@ -1836,12 +1838,12 @@ const [
           <h2>Calculation Engine outputs for {activeFundName}</h2>
         </div>
 
-        <a
+        <Link
           className="monitor-btn monitor-btn-secondary"
           href="/migration/performance-calculations"
         >
           Open Calculation Engine
-        </a>
+        </Link>
       </div>
 
       {calculatedFundMetric ? (
@@ -1998,57 +2000,57 @@ const [
               </div>
 
               <div className="action-row">
-                <a className="monitor-btn monitor-btn-primary" href="/capital-call">
+                <Link className="monitor-btn monitor-btn-primary" href="/capital-call">
                   Open Capital Calls
-                </a>
-                <a
+                </Link>
+                <Link
   className="monitor-btn monitor-btn-primary"
   href="/document-studio"
 >
   Generate Investor Documents
-</a>
+</Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/capital-call-allocation"
                 >
                   Review Allocation Draft
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/document-engine"
                 >
                   Review Documents
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/activation"
                 >
                   View Migration Readiness
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/fund-data"
                 >
                   Review Fund Data
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/compliance-data"
                 >
                   Review Compliance Data
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/activity-engine"
                 >
                   Open Activity Engine
-                </a>
+                </Link>
               </div>
             </div>
 
@@ -2146,33 +2148,33 @@ const [
               </div>
 
               <div className="action-row">
-                <a
+                <Link
                   className="monitor-btn monitor-btn-primary"
                   href="/migration/data-intake"
                 >
                   Open Data Intake
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/fund-data"
                 >
                   Review Fund Data
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/compliance-data"
                 >
                   Review Compliance Data
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/portfolio-data"
                 >
                   Review Portfolio Data
-                </a>
+                </Link>
               </div>
             </div>
 
@@ -2315,23 +2317,23 @@ const [
               </div>
 
               <div className="action-row">
-                <a className="monitor-btn monitor-btn-primary" href="/data-room">
+                <Link className="monitor-btn monitor-btn-primary" href="/data-room">
                   Open Data Room
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/document-engine"
                 >
                   Open Document Engine
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/activity-engine"
                 >
                   View Activity Trail
-                </a>
+                </Link>
               </div>
             </div>
 
@@ -2371,26 +2373,26 @@ const [
               </div>
 
               <div className="action-row">
-                <a
+                <Link
                   className="monitor-btn monitor-btn-primary"
                   href="/document-engine"
                 >
                   Open Document Engine
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/investor-portal"
                 >
                   Open Investor Portal
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/pdf-intelligence"
                 >
                   Open PDF Intelligence
-                </a>
+                </Link>
               </div>
             </div>
 
@@ -2450,23 +2452,23 @@ const [
               </div>
 
               <div className="action-row">
-                <a
+                <Link
                   className="monitor-btn monitor-btn-primary"
                   href="/capital-call-allocation"
                 >
                   Review Allocation Draft
-                </a>
+                </Link>
 
-                <a className="monitor-btn monitor-btn-secondary" href="/capital-call">
+                <Link className="monitor-btn monitor-btn-secondary" href="/capital-call">
                   Review Capital Calls
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/distribution-waterfall"
                 >
                   Review Distributions
-                </a>
+                </Link>
               </div>
             </div>
 

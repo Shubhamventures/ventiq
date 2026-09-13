@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 // A7.7-7B2: current-baseline governed Fund → Investor → FY → Quarter → Nature archive.
 
 import { useEffect, useMemo, useState } from "react";
@@ -2182,9 +2184,9 @@ const displayedManagementFee = financialPosition
             </p>
           </div>
 
-          <a className="back-link" href="/">
-            Back to Home
-          </a>
+          <Link className="back-link" href="/launch-center">
+            Back to Launch Center
+          </Link>
         </div>
 
         <div
@@ -2345,12 +2347,12 @@ const displayedManagementFee = financialPosition
                   </h2>
                 </div>
                 {!isInvestorRole && (
-                  <a
+                  <Link
                     className="monitor-btn monitor-btn-secondary"
                     href="/migration/performance-calculations"
                   >
                     Open Calculation Engine
-                  </a>
+                  </Link>
                 )}
               </div>
 
@@ -2463,9 +2465,9 @@ const displayedManagementFee = financialPosition
                   View Cashflows
                 </a>
 
-                <a className="monitor-btn monitor-btn-secondary" href="/data-room">
+                <Link className="monitor-btn monitor-btn-secondary" href="/data-room">
                   Open Data Room
-                </a>
+                </Link>
 
               </div>
             </div>
@@ -3428,9 +3430,9 @@ const displayedManagementFee = financialPosition
                   )}
 
                   <div className="action-row">
-                    <a className="monitor-btn monitor-btn-primary" href="/data-room">
+                    <Link className="monitor-btn monitor-btn-primary" href="/data-room">
                       Open Investor Data Room
-                    </a>
+                    </Link>
 
                   </div>
                 </div>
@@ -3564,9 +3566,9 @@ const displayedManagementFee = financialPosition
                       📊 Performance Reports
                     </a>
 
-                    <a className="queue-item" href="/data-room">
+                    <Link className="queue-item" href="/data-room">
                       🗂️ Open Data Room
-                    </a>
+                    </Link>
 
                     <a className="queue-item" href="#ddq">
                       ❓ View DDQ Updates

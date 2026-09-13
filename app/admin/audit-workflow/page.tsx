@@ -628,13 +628,14 @@ export default function AuditWorkflowPage() {
 
         .main-grid {
           display: grid;
-          grid-template-columns: 0.9fr 1.4fr;
+          grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr);
           gap: 18px;
           margin-bottom: 18px;
         }
 
         .form-card,
         .panel {
+          min-width: 0;
           padding: 24px;
           margin-bottom: 18px;
         }
@@ -697,6 +698,8 @@ export default function AuditWorkflowPage() {
         }
 
         .table-wrap {
+          min-width: 0;
+          max-width: 100%;
           overflow-x: auto;
           border: 1px solid rgba(147, 197, 253, 0.14);
           border-radius: 20px;
@@ -970,7 +973,7 @@ export default function AuditWorkflowPage() {
           justify-content: center;
         }
 
-        @media (max-width: 900px) {
+        @container ventiq-workspace (max-width: 900px) {
           .workflow-page .form-grid {
             grid-template-columns: 1fr;
           }
@@ -981,7 +984,7 @@ export default function AuditWorkflowPage() {
             grid-column: auto;
           }
         }
-        @media (max-width: 1100px) {
+        @container ventiq-workspace (max-width: 1100px) {
           .summary-grid,
           .main-grid,
           .step-grid,

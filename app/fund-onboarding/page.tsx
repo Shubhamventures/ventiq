@@ -1842,13 +1842,14 @@ export default function FundOnboardingPage() {
 
         .main-grid {
           display: grid;
-          grid-template-columns: 1fr 1fr 1fr;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 18px;
           margin-bottom: 18px;
         }
 
         .setup-card,
         .panel {
+          min-width: 0;
           padding: 24px;
         }
 
@@ -1969,6 +1970,8 @@ export default function FundOnboardingPage() {
         }
 
         .table-wrap {
+          min-width: 0;
+          max-width: 100%;
           overflow-x: auto;
           border: 1px solid rgba(147, 197, 253, 0.14);
           border-radius: 20px;
@@ -2073,8 +2076,9 @@ export default function FundOnboardingPage() {
 
         .two-col {
           display: grid;
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
           gap: 18px;
+          align-items: start;
         }
 
         .audit-list {
@@ -2288,7 +2292,7 @@ export default function FundOnboardingPage() {
           line-height: 1.5;
         }
 
-        @media (max-width: 1100px) {
+        @container ventiq-workspace (max-width: 1100px) {
           .summary-grid,
           .main-grid,
           .selected-fund-card,
@@ -2321,7 +2325,7 @@ export default function FundOnboardingPage() {
           }
         }
 
-        @media (max-width: 640px) {
+        @container ventiq-workspace (max-width: 640px) {
           .onboarding-page {
             padding: 18px 14px 44px;
           }

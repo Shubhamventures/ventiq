@@ -766,13 +766,14 @@ export default function ClientReadinessPage() {
 
         .main-grid {
           display: grid;
-          grid-template-columns: 0.95fr 1.35fr;
+          grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.35fr);
           gap: 18px;
           margin-bottom: 18px;
         }
 
         .form-card,
         .panel {
+          min-width: 0;
           padding: 24px;
           margin-bottom: 18px;
         }
@@ -899,6 +900,8 @@ export default function ClientReadinessPage() {
         }
 
         .table-wrap {
+          min-width: 0;
+          max-width: 100%;
           overflow-x: auto;
           border: 1px solid rgba(147, 197, 253, 0.14);
           border-radius: 20px;
@@ -1005,7 +1008,7 @@ export default function ClientReadinessPage() {
           font-size: 13px;
         }
 
-        @media (max-width: 1100px) {
+        @container ventiq-workspace (max-width: 1100px) {
           .summary-grid,
           .main-grid,
           .timeline-grid {

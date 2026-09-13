@@ -12,6 +12,15 @@ import {
 export default function LaunchCenterPage() {
   const { activeRole, activeFundName } = useVentiqAuth();
 
+  const setupControlCenter = WORKSPACE_REGISTRY.find(
+    (workspace) => workspace.href === "/fund-onboarding"
+  );
+
+  const canOpenSetupControlCenter = Boolean(
+    setupControlCenter &&
+      canRoleUseWorkspace(activeRole, setupControlCenter)
+  );
+
   const dashboards = useMemo(
     () =>
       WORKSPACE_REGISTRY.filter(
@@ -47,13 +56,17 @@ export default function LaunchCenterPage() {
             <p>
               {activeFundName
                 ? `Working in ${activeFundName}. Open the role-native view or workflow you need.`
-                : "No active fund is assigned yet. Start in Setup Control Center to create or select the governed fund."}
+                : canOpenSetupControlCenter
+                  ? "No active fund is assigned yet. Start in Setup Control Center to create or select the governed fund."
+                  : "No active fund is assigned to this account yet. Ask your Fund Administrator to grant governed fund access."}
             </p>
           </div>
 
-          <Link className="setup-link" href="/fund-onboarding">
-            Setup Control Center →
-          </Link>
+          {canOpenSetupControlCenter ? (
+            <Link className="setup-link" href="/fund-onboarding">
+              Setup Control Center →
+            </Link>
+          ) : null}
         </header>
 
         <section>
@@ -324,13 +337,13 @@ export default function LaunchCenterPage() {
           margin-right: 7px;
         }
 
-        @media (max-width: 1000px) {
+        @container ventiq-workspace (max-width: 1000px) {
           .dashboard-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
         }
 
-        @media (max-width: 720px) {
+        @container ventiq-workspace (max-width: 720px) {
           .launch-page {
             padding: 22px 16px 48px;
           }

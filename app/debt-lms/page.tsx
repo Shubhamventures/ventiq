@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
@@ -4033,7 +4035,7 @@ function DebtLMSWorkspace({
           font-weight: 800;
           line-height: 1.5;
         }
-        @media (max-width: 980px) {
+        @container ventiq-workspace (max-width: 980px) {
           .debt-header,
           .panel-header {
             flex-direction: column;
@@ -4089,13 +4091,13 @@ function DebtLMSWorkspace({
               Upload Term Sheet
             </button>
 
-            <a className="debt-secondary" href="/document-studio">
+            <Link className="debt-secondary" href="/document-studio">
               Open Document Studio
-            </a>
+            </Link>
 
-            <a className="debt-secondary" href="/bank-reconciliation">
+            <Link className="debt-secondary" href="/bank-reconciliation">
               Bank Reconciliation
-            </a>
+            </Link>
           </div>
         </div>
 
@@ -5631,9 +5633,9 @@ function DebtLMSWorkspace({
                   {isSyncingBankRecon ? "Syncing..." : "Sync from Bank Reconciliation"}
                 </button>
 
-                <a className="debt-secondary" href="/bank-reconciliation">
+                <Link className="debt-secondary" href="/bank-reconciliation">
                   Open Bank Recon
-                </a>
+                </Link>
               </div>
             </div>
 
@@ -5981,9 +5983,9 @@ function DebtLMSWorkspace({
             </div>
 
             <div className="debt-header-actions">
-              <a className="debt-secondary" href="/document-studio">
+              <Link className="debt-secondary" href="/document-studio">
                 Build Notice Template
-              </a>
+              </Link>
 
               <button
   className="debt-primary"
@@ -6014,9 +6016,9 @@ function DebtLMSWorkspace({
                 <p>Attachment: {notice.linkedDocument}</p>
 
                 <div className="notice-actions">
-                  <a className="small-action" href="/document-studio">
+                  <Link className="small-action" href="/document-studio">
                     Preview PDF
-                  </a>
+                  </Link>
 
                   <button className="small-action" type="button">
                     Queue Email

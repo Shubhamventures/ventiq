@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useRef, useState } from "react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
@@ -1338,9 +1340,9 @@ const selectedCapitalCall = capitalCalls.find(
             </p>
           </div>
 
-          <a className="back-link" href="/">
-            Back to Home
-          </a>
+          <Link className="back-link" href="/launch-center">
+            Back to Launch Center
+          </Link>
         </div>
         <div className="sample-data-ribbon">
           Governed Active Fund: {activeFundName || "Unavailable"} | Live document workflow

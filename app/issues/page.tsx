@@ -359,7 +359,7 @@ export default function IssueCenterPage() {
     <main className="issue-page">
       <section className="issue-shell">
         <div className="issue-topbar">
-          <Link className="issue-brand" href="/">
+          <Link className="issue-brand" href="/launch-center">
             VENTIQ
           </Link>
 
@@ -923,7 +923,7 @@ export default function IssueCenterPage() {
           color: #102044;
         }
 
-        @media (max-width: 900px) {
+        @container ventiq-workspace (max-width: 900px) {
           .issue-page {
             padding: 16px;
           }

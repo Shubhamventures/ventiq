@@ -11613,3 +11613,558 @@ button.secondary-action:disabled {
   font-style: normal;
   font-weight: 800;
 }
+
+/* VENTIQ UX VISUAL CLOSEOUT: PRIVATE WORKSPACE RESPONSIVE BASELINE */
+@media (max-width: 900px) {
+  .ventiq-app-content .app-page {
+    padding: 28px 18px 48px;
+  }
+
+  .ventiq-app-content .app-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .ventiq-app-content .app-header h1 {
+    font-size: clamp(34px, 9vw, 46px);
+    line-height: 1.04;
+  }
+
+  .ventiq-app-content .back-link {
+    align-self: flex-start;
+  }
+
+  .ventiq-app-content .form-grid,
+  .ventiq-app-content .output-grid,
+  .ventiq-app-content .workspace-three,
+  .ventiq-app-content .approval-flow,
+  .ventiq-app-content .queue-grid,
+  .ventiq-app-content .validation-grid,
+  .ventiq-app-content .impact-grid,
+  .ventiq-app-content .knowledge-grid,
+  .ventiq-app-content .action-button-grid,
+  .ventiq-app-content .recommendation-summary,
+  .ventiq-app-content .progress-steps,
+  .ventiq-app-content .three-users {
+    grid-template-columns: 1fr !important;
+  }
+
+  .ventiq-app-content .workspace-header,
+  .ventiq-app-content .recommended-action-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .ventiq-app-content .form-card,
+  .ventiq-app-content .preview-card {
+    padding: 22px;
+  }
+}
+
+@media (max-width: 640px) {
+  .ventiq-app-content .app-page {
+    padding: 20px 14px 40px;
+  }
+
+  .ventiq-app-content .app-header h1 {
+    font-size: clamp(30px, 10vw, 38px);
+  }
+
+  .ventiq-app-content .form-card,
+  .ventiq-app-content .preview-card {
+    padding: 18px;
+    border-radius: 16px;
+  }
+
+  .ventiq-app-content .queue-item,
+  .ventiq-app-content .impact-card {
+    min-width: 0;
+  }
+}
+
+
+/* VENTIQ UX VISUAL LAYOUT HARDENING: AUTHENTICATED CONTENT WIDTH */
+.ventiq-app-content > main,
+.ventiq-app-content > section,
+.ventiq-app-content > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ventiq-app-content .table-wrap,
+.ventiq-app-content .ipm-table-wrap,
+.ventiq-app-content .investment-calculation-table-wrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* VENTIQ UX PREMIUM VISUAL CLOSEOUT: EVIDENCE-DRIVEN PRIVATE WORKSPACE SYSTEM */
+.ventiq-app-content {
+  --ventiq-ui-border: rgba(121, 176, 239, 0.16);
+  --ventiq-ui-border-strong: rgba(121, 176, 239, 0.26);
+  --ventiq-ui-surface: rgba(10, 23, 43, 0.78);
+  --ventiq-ui-surface-soft: rgba(7, 18, 35, 0.58);
+  --ventiq-ui-text-muted: #9cb0ca;
+  --ventiq-ui-blue: #69aefc;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.ventiq-app-content > main,
+.ventiq-app-content > section,
+.ventiq-app-content > div,
+.ventiq-app-content .app-page,
+.ventiq-app-content .app-shell,
+.ventiq-app-content .workspace-shell {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ventiq-app-content *,
+.ventiq-app-content *::before,
+.ventiq-app-content *::after {
+  box-sizing: border-box;
+}
+
+/* Premium typography: strong hierarchy without presentation-deck-scale headings. */
+.ventiq-app-content h1,
+.ventiq-app-content h2 {
+  text-wrap: balance;
+}
+
+.ventiq-app-content p {
+  text-wrap: pretty;
+}
+
+.ventiq-app-content :is(
+  .hero,
+  .readiness-hero,
+  .bank-header,
+  .debt-header,
+  .migration-hero,
+  .ipm-hero,
+  .activation-hero,
+  .portfolio-hero,
+  .app-header
+) h1,
+.ventiq-app-content .workspace-shell > header h1 {
+  max-width: 980px;
+  font-size: clamp(40px, 4.15cqw, 56px) !important;
+  line-height: 1.04 !important;
+  letter-spacing: -0.045em !important;
+  overflow-wrap: normal;
+}
+
+.ventiq-app-content :is(
+  .hero-copy,
+  .app-header > div > p:not(.eyebrow),
+  .workspace-shell > header p:not(.eyebrow),
+  .portfolio-hero-copy
+) {
+  max-width: 900px;
+}
+
+/* Canonical fund/data context strip: replaces loose implementation-looking text. */
+.ventiq-app-content .sample-data-ribbon {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  max-width: 100%;
+  margin: 14px 0 24px;
+  padding: 10px 14px;
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(13, 29, 54, 0.72), rgba(8, 21, 40, 0.7));
+  color: #b8cae2;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.55;
+  letter-spacing: 0.002em;
+  overflow-wrap: anywhere;
+}
+
+.ventiq-app-content .sample-data-ribbon::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: var(--ventiq-ui-blue);
+  box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.09);
+}
+
+/* Intrinsic-size containment: cards must never widen the authenticated workspace. */
+.ventiq-app-content :where(
+  .panel,
+  .setup-card,
+  .form-card,
+  .preview-card,
+  .dashboard-card,
+  .workflow-progress,
+  .ai-side-panel,
+  .logic-note,
+  .explain-box,
+  .audit-timeline,
+  .audit-item,
+  .queue-item,
+  .impact-card,
+  .validation-item,
+  .activation-layer-card,
+  .activation-panel,
+  .portfolio-panel,
+  .portfolio-upload-card,
+  .portfolio-record-card,
+  .stakeholder-card,
+  .card,
+  .field
+) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ventiq-app-content :where(
+  p,
+  strong,
+  span,
+  label,
+  h3,
+  h4
+) {
+  overflow-wrap: break-word;
+}
+
+/* Wide data belongs inside a bounded scroll region, never in the page viewport. */
+.ventiq-app-content :where(
+  .table-wrap,
+  .review-table-wrap,
+  .ipm-table-wrap,
+  .investment-calculation-table-wrap,
+  .ids-table-wrap,
+  .ids-table-shell,
+  .ids-generated-preview-table-wrap
+) {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* PDF Intelligence previously used a fixed 240px + 240px inline grid. */
+.ventiq-app-content .pdf-fund-context-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 16px;
+  align-items: end;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Buttons and status controls retain shape without forcing mobile overflow. */
+.ventiq-app-content :where(
+  .action-row,
+  .actions,
+  .button-row,
+  .activation-actions,
+  .activation-card-statuses,
+  .portfolio-tags,
+  .portfolio-persistence-actions
+) {
+  flex-wrap: wrap;
+}
+
+.ventiq-app-content :where(input, select, textarea, button) {
+  max-width: 100%;
+}
+
+/* Use actual post-sidebar workspace width rather than browser viewport width. */
+@container ventiq-workspace (max-width: 1100px) {
+  .ventiq-app-content :where(
+    .main-grid,
+    .two-col,
+    .grid-two,
+    .ipm-grid-two,
+    .learning-grid
+  ) {
+    grid-template-columns: minmax(0, 1fr) !important;
+    align-items: start;
+  }
+}
+
+@container ventiq-workspace (max-width: 900px) {
+  .ventiq-app-content :where(
+    .form-grid,
+    .output-grid,
+    .workspace-three,
+    .approval-flow,
+    .queue-grid,
+    .validation-grid,
+    .impact-grid,
+    .knowledge-grid,
+    .dashboard-grid,
+    .action-button-grid,
+    .recommendation-summary,
+    .progress-steps,
+    .three-users,
+    .activation-hero,
+    .activation-kpi-grid,
+    .activation-layer-grid,
+    .activation-flow-grid,
+    .portfolio-upload-grid,
+    .portfolio-kpi-grid,
+    .portfolio-flow-grid,
+    .stakeholder-layer-strip,
+    .stakeholder-grid
+  ) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .ventiq-app-content :where(
+    .workspace-header,
+    .recommended-action-card,
+    .activation-layer-top,
+    .portfolio-section-header,
+    .panel-header
+  ) {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .ventiq-app-content .pdf-fund-context-grid {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+}
+
+@container ventiq-workspace (max-width: 700px) {
+  .ventiq-app-content .app-page {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+
+  .ventiq-app-content :is(
+    .hero,
+    .readiness-hero,
+    .bank-header,
+    .debt-header,
+    .migration-hero,
+    .ipm-hero,
+    .activation-hero,
+    .portfolio-hero,
+    .app-header
+  ) h1,
+  .ventiq-app-content .workspace-shell > header h1 {
+    font-size: clamp(30px, 9cqw, 36px) !important;
+    line-height: 1.08 !important;
+    letter-spacing: -0.035em !important;
+  }
+
+  .ventiq-app-content .sample-data-ribbon {
+    margin: 12px 0 20px;
+    padding: 9px 11px;
+    font-size: 11px;
+    border-radius: 10px;
+  }
+
+  .ventiq-app-content :where(
+    .activation-status-pill,
+    .portfolio-status-pill,
+    .status-pill,
+    .small-pill
+  ) {
+    max-width: 100%;
+    white-space: normal !important;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+
+  .ventiq-app-content .activation-count-row,
+  .ventiq-app-content .activation-metric-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .ventiq-app-content :where(
+    .form-card,
+    .preview-card,
+    .dashboard-card,
+    .panel,
+    .activation-layer-card,
+    .activation-panel,
+    .portfolio-panel,
+    .portfolio-upload-card
+  ) {
+    padding-left: min(18px, 4.5cqw);
+    padding-right: min(18px, 4.5cqw);
+  }
+
+  .ventiq-app-content :where(
+    .action-row,
+    .actions,
+    .button-row
+  ) > * {
+    min-width: 0;
+  }
+}
+
+
+/* VENTIQ UX FINAL VISUAL REVIEW: PRIVATE HERO ISOLATION + MOBILE POLISH */
+/* Public homepage uses generic .hero rules. These overrides keep those rules from
+   leaking into authenticated product pages that also use a local .hero class. */
+.ventiq-app-content .hero {
+  max-width: 100% !important;
+  padding-top: 32px !important;
+}
+
+.ventiq-app-content .hero h1,
+.ventiq-app-content .hero p,
+.ventiq-app-content .hero .hero-eyebrow,
+.ventiq-app-content .hero .eyebrow {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+/* Admin trust/control surfaces should read like product workspaces, not homepage posters. */
+.ventiq-app-content :is(
+  .workflow-shell,
+  .readiness-shell,
+  .protection-shell,
+  .role-access-shell
+) > .hero {
+  text-align: left !important;
+  padding-top: 30px !important;
+}
+
+.ventiq-app-content :is(
+  .workflow-shell,
+  .readiness-shell,
+  .protection-shell,
+  .role-access-shell
+) > .hero .hero-top {
+  align-items: flex-start !important;
+}
+
+@container ventiq-workspace (max-width: 700px) {
+  .ventiq-app-content .hero {
+    padding-top: 22px !important;
+  }
+
+  .ventiq-app-content :is(
+    .workflow-shell,
+    .readiness-shell,
+    .protection-shell,
+    .role-access-shell
+  ) > .hero {
+    padding: 22px 18px !important;
+    border-radius: 20px !important;
+  }
+
+  .ventiq-app-content :is(
+    .workflow-shell,
+    .readiness-shell,
+    .protection-shell,
+    .role-access-shell
+  ) > .hero h1 {
+    font-size: clamp(28px, 8.2cqw, 32px) !important;
+    line-height: 1.08 !important;
+    text-align: left !important;
+  }
+
+  .ventiq-app-content :is(
+    .workflow-shell,
+    .readiness-shell,
+    .protection-shell,
+    .role-access-shell
+  ) > .hero .hero-copy {
+    margin-top: 12px !important;
+    font-size: 15px !important;
+    line-height: 1.55 !important;
+    text-align: left !important;
+  }
+
+  .ventiq-app-content :is(
+    .workflow-shell,
+    .readiness-shell,
+    .protection-shell,
+    .role-access-shell
+  ) > .hero .actions {
+    justify-content: flex-start !important;
+  }
+}
+
+/* VENTIQ UX FINAL MOBILE TOPBAR CLOSURE: deterministic compact shell aligned to the app mobile breakpoint. */
+@media (max-width: 980px) {
+  .ventiq-app-topbar {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    align-items: center !important;
+    column-gap: 8px !important;
+    min-height: 56px !important;
+    padding: 8px 10px !important;
+  }
+
+  .ventiq-app-topbar .ventiq-topbar-left {
+    display: grid !important;
+    grid-template-columns: 34px minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: 8px !important;
+    min-width: 0 !important;
+  }
+
+  .ventiq-app-topbar .ventiq-mobile-menu {
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    max-width: 34px !important;
+  }
+
+  .ventiq-app-topbar .ventiq-fund-context {
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+
+  .ventiq-app-topbar .ventiq-fund-context > span,
+  .ventiq-app-topbar .ventiq-account-context > div {
+    display: none !important;
+  }
+
+  .ventiq-app-topbar .ventiq-fund-context select,
+  .ventiq-app-topbar .ventiq-fund-context strong {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .ventiq-app-topbar .ventiq-fund-context select {
+    padding: 7px 24px 7px 9px !important;
+    font-size: 11px !important;
+  }
+
+  .ventiq-app-topbar .ventiq-account-context {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
+  }
+
+  .ventiq-app-topbar .ventiq-account-context button {
+    min-width: 0 !important;
+    padding: 8px 10px !important;
+    font-size: 11px !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+}

@@ -870,12 +870,12 @@ function BankReconciliationWorkspace({
         }
 
         .two-col {
-          grid-template-columns: 1.15fr 0.85fr;
+          grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
           margin-bottom: 18px;
         }
 
         .learning-grid {
-          grid-template-columns: 0.9fr 1.1fr;
+          grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
         }
 
         .panel,
@@ -892,6 +892,7 @@ function BankReconciliationWorkspace({
         .metric-card,
         .transaction-card,
         .panel {
+          min-width: 0;
           padding: 20px;
         }
 
@@ -953,6 +954,8 @@ function BankReconciliationWorkspace({
         }
 
         .table-wrap {
+          min-width: 0;
+          max-width: 100%;
           overflow-x: auto;
           border: 1px solid rgba(147, 197, 253, 0.12);
           border-radius: 18px;
@@ -1094,7 +1097,7 @@ function BankReconciliationWorkspace({
           margin: 10px 0;
         }
 
-        @media (max-width: 980px) {
+        @container ventiq-workspace (max-width: 980px) {
           .bank-header,
           .panel-header {
             flex-direction: column;
@@ -1137,8 +1140,8 @@ function BankReconciliationWorkspace({
           </div>
 
           <div className="bank-actions">
-            <Link className="back-link" href="/finance">
-              Back to Finance
+            <Link className="back-link" href="/finance-head-ai">
+              Back to Finance Workspace
             </Link>
             <Link className="secondary-button" href="/debt-lms">
               Open Debt LMS

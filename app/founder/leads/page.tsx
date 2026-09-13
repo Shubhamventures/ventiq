@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { type FormEvent, useMemo, useState } from "react";
 
 type Lead = {
@@ -167,9 +169,9 @@ export default function FounderLeadsPage() {
             </p>
           </div>
 
-          <a className="back-link" href="/">
-            Back to Home
-          </a>
+          <Link className="back-link" href="/launch-center">
+            Back to Launch Center
+          </Link>
         </div>
 
         <div className="sample-data-ribbon">

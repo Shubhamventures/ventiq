@@ -4306,7 +4306,7 @@ function renderPreview() {
           font-weight: 700;
         }
 
-        @media (max-width: 820px) {
+        @container ventiq-workspace (max-width: 820px) {
           .ids-fund-context {
             grid-template-columns: 1fr;
           }
@@ -4811,7 +4811,7 @@ function renderPreview() {
         .ids-identity-grid,
         .ids-performance-grid {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 10px;
         }
 
@@ -5034,7 +5034,7 @@ function renderPreview() {
 
         .ids-merge-tabs {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 4px;
           margin: 12px;
           background: #f8f2e7;
@@ -5065,7 +5065,7 @@ function renderPreview() {
         .ids-batch-history-bar strong { color: #0b2148; }
         .ids-batch-history-bar span { color: #62708a; font-size: 0.84rem; }
         .ids-batch-history-bar select { min-width: 360px; max-width: 56%; padding: 10px 12px; border: 1px solid #d7c49a; border-radius: 12px; background: #fffdf8; color: #0b2148; font-weight: 700; }
-        @media (max-width: 900px) { .ids-batch-history-bar { align-items: stretch; flex-direction: column; } .ids-batch-history-bar select { min-width: 0; max-width: none; width: 100%; } }
+        @container ventiq-workspace (max-width: 900px) { .ids-batch-history-bar { align-items: stretch; flex-direction: column; } .ids-batch-history-bar select { min-width: 0; max-width: none; width: 100%; } }
         .ids-batch-exceptions {
           margin-top: 18px;
           border: 1px solid #e0d4bd;
@@ -5146,7 +5146,7 @@ function renderPreview() {
 
         .ids-batch-grid {
           display: grid;
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 8px;
           margin: 12px 0;
         }
@@ -5189,7 +5189,7 @@ function renderPreview() {
         }
 
         .ids-column-config-grid {
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
           margin-top: 8px;
         }
 
@@ -5303,7 +5303,7 @@ function renderPreview() {
           font-style: normal;
         }
 
-        @media (max-width: 1180px) {
+        @container ventiq-workspace (max-width: 1180px) {
           .ids-builder-shell {
             grid-template-columns: 76px minmax(500px, 1fr) 340px;
           }
@@ -5688,9 +5688,35 @@ function renderPreview() {
   font-weight: 900;
 }
 
-@media (max-width: 1300px) {
+@container ventiq-workspace (max-width: 1300px) {
   .ids-document-kit-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container ventiq-workspace (max-width: 900px) {
+  .ids-start-options,
+  .ids-template-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ids-document-kit-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container ventiq-workspace (max-width: 700px) {
+  .ids-start-options,
+  .ids-template-grid,
+  .ids-document-kit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ids-start-card,
+  .ids-template-card,
+  .ids-document-kit-card {
+    min-width: 0;
+    min-height: 0;
   }
 }
       `}</style>

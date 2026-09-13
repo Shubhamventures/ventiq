@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured } from "../../lib/supabaseClient";
 import { useActiveFund } from "../../lib/useActiveFund";
@@ -1080,9 +1082,9 @@ export default function ComplianceAIPage() {
             </p>
           </div>
 
-          <a className="back-link" href="/">
-            Back to Home
-          </a>
+          <Link className="back-link" href="/launch-center">
+            Back to Launch Center
+          </Link>
         </div>
 
         <div className="preview-card compliance-fund-context">
@@ -1115,9 +1117,9 @@ export default function ComplianceAIPage() {
                   </option>
                 ))}
               </select>
-              <a className="monitor-btn monitor-btn-secondary" href="/migration/activation">
+              <Link className="monitor-btn monitor-btn-secondary" href="/migration/activation">
                 Open Fund Activation
-              </a>
+              </Link>
             </div>
           </div>
         </div>
@@ -1157,12 +1159,12 @@ export default function ComplianceAIPage() {
               review, but operational dashboards cannot rely on them yet.
             </div>
             <div className="action-row">
-              <a className="monitor-btn monitor-btn-primary" href="/migration/activation">
+              <Link className="monitor-btn monitor-btn-primary" href="/migration/activation">
                 Complete Fund Activation
-              </a>
-              <a className="monitor-btn monitor-btn-secondary" href="/migration/data-intake">
+              </Link>
+              <Link className="monitor-btn monitor-btn-secondary" href="/migration/data-intake">
                 Open Data Intake
-              </a>
+              </Link>
             </div>
           </div>
         )}
@@ -1175,12 +1177,12 @@ export default function ComplianceAIPage() {
                   <p className="eyebrow">Verified Compliance Layer</p>
                   <h2>Canonical controls for {activeFundName}</h2>
                 </div>
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/performance-calculations"
                 >
                   Open Calculation Engine
-                </a>
+                </Link>
               </div>
 
               <div className="logic-note">
@@ -1416,12 +1418,12 @@ export default function ComplianceAIPage() {
                               ? "Submitting..."
                               : "Ready for Approval"}
                           </button>
-                          <a
+                          <Link
                             className="monitor-btn monitor-btn-secondary"
                             href="/admin/audit-workflow"
                           >
                             Open Approval Queue
-                          </a>
+                          </Link>
                         </div>
 
                         {!workflowCapabilities.canAct && (
@@ -1454,40 +1456,40 @@ export default function ComplianceAIPage() {
               </div>
 
               <div className="action-row">
-                <a
+                <Link
                   className="monitor-btn monitor-btn-primary"
                   href="/migration/compliance-data"
                 >
                   Review Compliance Data
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/pdf-intelligence"
                 >
                   Review PDF Evidence
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/knowledge-hub"
                 >
                   Review Regulatory Items
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/fund-data"
                 >
                   Review Fund Data
-                </a>
+                </Link>
 
-                <a
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/activation"
                 >
                   View Migration Readiness
-                </a>
+                </Link>
               </div>
             </div>
 
@@ -1955,7 +1957,7 @@ export default function ComplianceAIPage() {
           min-height: 96px;
         }
 
-        @media (max-width: 860px) {
+        @container ventiq-workspace (max-width: 860px) {
           .compliance-fund-context {
             grid-template-columns: 1fr;
           }

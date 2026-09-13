@@ -536,7 +536,7 @@ function InvestorPortalMigrationWorkspace({
 
         .ipm-hero {
           display: grid;
-          grid-template-columns: 1.12fr 0.88fr;
+          grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
           gap: 24px;
           margin-bottom: 24px;
         }
@@ -607,9 +607,10 @@ function InvestorPortalMigrationWorkspace({
 
         .ipm-grid-two {
           display: grid;
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
           gap: 20px;
           margin-top: 24px;
+          align-items: start;
         }
 
         .ipm-button-row {
@@ -681,6 +682,8 @@ function InvestorPortalMigrationWorkspace({
         }
 
         .ipm-table-wrap {
+          min-width: 0;
+          max-width: 100%;
           margin-top: 20px;
           overflow-x: auto;
           border: 1px solid rgba(147, 197, 253, 0.14);
@@ -738,7 +741,7 @@ function InvestorPortalMigrationWorkspace({
           cursor: not-allowed;
         }
 
-        @media (max-width: 980px) {
+        @container ventiq-workspace (max-width: 980px) {
           .ipm-page {
             padding: 20px;
           }
@@ -767,7 +770,7 @@ function InvestorPortalMigrationWorkspace({
             <a href="/migration">Migration</a>
             <a href="/investor-import">Investor Import</a>
             <a href="/investor-portal">Investor Portal</a>
-            <a href="/">Home</a>
+            <a href="/launch-center">Launch Center</a>
           </div>
         </nav>
 

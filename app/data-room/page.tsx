@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 // A7.7-7B2: current-baseline governed Fund → Investor → FY → Quarter → Nature archive.
 
 import { useEffect, useMemo, useState } from "react";import { useActiveFund } from "../../lib/useActiveFund";
@@ -1261,9 +1263,9 @@ export default function DataRoomPage() {
               </p>
             </div>
 
-            <a className="back-link" href="/investor-portal">
+            <Link className="back-link" href="/investor-portal">
               Back to Investor Portal
-            </a>
+            </Link>
           </div>
 
           <div
@@ -1719,9 +1721,9 @@ export default function DataRoomPage() {
             </p>
           </div>
 
-          <a className="back-link" href="/">
-            Back to Home
-          </a>
+          <Link className="back-link" href="/launch-center">
+            Back to Launch Center
+          </Link>
         </div>
 
         <div
@@ -1797,24 +1799,24 @@ export default function DataRoomPage() {
               </div>
 
               <div className="action-row">
-                <a
+                <Link
                   className="monitor-btn monitor-btn-primary"
                   href="/investor-portal"
                 >
                   Open Investor Portal
-                </a>
-                <a
+                </Link>
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/fundraising-ai"
                 >
                   Open Investor Relations
-                </a>
-                <a
+                </Link>
+                <Link
                   className="monitor-btn monitor-btn-secondary"
                   href="/migration/activation"
                 >
                   Open Fund Activation
-                </a>
+                </Link>
               </div>
             </div>
 

@@ -356,7 +356,8 @@ export default function BankMisCommercialReadinessPage() {
 
         .two-col {
           display: grid;
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          align-items: start;
           gap: 18px;
         }
 
@@ -432,7 +433,7 @@ export default function BankMisCommercialReadinessPage() {
           line-height: 1.6;
         }
 
-        @media (max-width: 980px) {
+        @container ventiq-workspace (max-width: 980px) {
           .readiness-hero-top,
           .panel-header {
             flex-direction: column;

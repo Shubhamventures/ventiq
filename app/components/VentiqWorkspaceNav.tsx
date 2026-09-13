@@ -146,6 +146,11 @@ export default function VentiqWorkspaceNav({
           </div>
         ))}
 
+        <div className="ventiq-sidebar-account">
+          <strong>{displayName}</strong>
+          <span>{roleLabel(activeRole)}</span>
+        </div>
+
         <div className="ventiq-sidebar-security">
           Navigation never expands permissions. Fund and investor access remain
           governed by the signed-in account.
@@ -195,10 +200,6 @@ export default function VentiqWorkspaceNav({
           </div>
 
           <div className="ventiq-account-context">
-            <div>
-              <strong>{displayName}</strong>
-              <span>{roleLabel(activeRole)}</span>
-            </div>
             <button onClick={() => void handleSignOut()} type="button">
               Sign out
             </button>
@@ -304,8 +305,31 @@ export default function VentiqWorkspaceNav({
           text-transform: uppercase;
         }
 
-        .ventiq-sidebar-security {
+        .ventiq-sidebar-account {
           margin: 20px 6px 0;
+          padding: 12px;
+          border-radius: 12px;
+          background: rgba(8, 30, 60, 0.56);
+          border: 1px solid rgba(105, 171, 244, 0.1);
+        }
+
+        .ventiq-sidebar-account strong {
+          display: block;
+          color: #eef6ff;
+          font-size: 12px;
+          font-weight: 850;
+        }
+
+        .ventiq-sidebar-account span {
+          display: block;
+          margin-top: 3px;
+          color: #7890ae;
+          font-size: 10px;
+          font-weight: 750;
+        }
+
+        .ventiq-sidebar-security {
+          margin: 12px 6px 0;
           padding: 12px;
           border-radius: 12px;
           background: rgba(8, 30, 60, 0.56);
@@ -410,6 +434,10 @@ export default function VentiqWorkspaceNav({
 
         .ventiq-app-content {
           min-width: 0;
+          width: 100%;
+          max-width: 100%;
+          container-type: inline-size;
+          container-name: ventiq-workspace;
         }
 
         @media (max-width: 980px) {
@@ -450,15 +478,62 @@ export default function VentiqWorkspaceNav({
           }
         }
 
-        @media (max-width: 640px) {
-          .ventiq-account-context > div {
+        @media (max-width: 980px) {
+          .ventiq-app-topbar {
+            min-height: 56px;
+            gap: 8px;
+            padding: 8px 10px;
+          }
+
+          .ventiq-topbar-left {
+            min-width: 0;
+            flex: 1 1 auto;
+            gap: 8px;
+          }
+
+          .ventiq-mobile-menu {
+            flex: 0 0 34px;
+            width: 34px;
+            height: 34px;
+          }
+
+          .ventiq-fund-context {
+            min-width: 0;
+            flex: 1 1 auto;
+          }
+
+          .ventiq-fund-context > span {
             display: none;
           }
 
+          .ventiq-fund-context select {
+            width: 100%;
+            min-width: 0;
+            max-width: none;
+            margin-top: 0;
+            padding: 6px 24px 6px 8px;
+            font-size: 11px;
+          }
+
           .ventiq-fund-context strong {
-            max-width: 190px;
+            max-width: min(52vw, 190px);
             overflow: hidden;
             text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          .ventiq-account-context {
+            flex: 0 0 auto;
+            gap: 0;
+          }
+
+          .ventiq-account-context > div {
+            display: none !important;
+          }
+
+          .ventiq-account-context button {
+            padding: 7px 9px;
+            font-size: 11px;
             white-space: nowrap;
           }
         }

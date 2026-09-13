@@ -224,7 +224,7 @@ export default function WorkspacePage() {
             margin-top: auto;
           }
 
-          @media (max-width: 900px) {
+          @container ventiq-workspace (max-width: 900px) {
             .context-grid,
             .workspace-grid {
               grid-template-columns: 1fr;
