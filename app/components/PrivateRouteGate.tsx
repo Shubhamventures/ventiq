@@ -21,6 +21,7 @@ const PUBLIC_PATHS = new Set([
   "/terms",
   "/product-overview",
   "/auth/login",
+  "/auth/mfa",
   "/auth/set-password",
   "/auth/welcome",
   "/auth/unauthorized",
@@ -56,6 +57,7 @@ export default function PrivateRouteGate({
 
   const [perimeterReady, setPerimeterReady] = useState(false);
   const lastUserIdRef = useRef("");
+  const lastAccessTokenRef = useRef("");
 
   const publicRoute = useMemo(
     () => isPublicPath(pathname || "/"),
@@ -102,6 +104,7 @@ export default function PrivateRouteGate({
     if (!session?.access_token) {
       setPerimeterReady(false);
       lastUserIdRef.current = "";
+      lastAccessTokenRef.current = "";
 
       void fetch("/api/auth/perimeter", {
         method: "DELETE",
@@ -117,7 +120,8 @@ export default function PrivateRouteGate({
 
     if (
       perimeterReady &&
-      lastUserIdRef.current === session.user.id
+      lastUserIdRef.current === session.user.id &&
+      lastAccessTokenRef.current === session.access_token
     ) {
       if (needsFundSetup) {
         router.replace("/fund-onboarding");
@@ -152,6 +156,13 @@ export default function PrivateRouteGate({
 
         if (cancelled) return;
 
+        if (response.status === 428) {
+          router.replace(
+            `/auth/mfa?next=${encodeURIComponent(destination)}`
+          );
+          return;
+        }
+
         if (response.status === 403) {
           router.replace("/auth/unauthorized");
           return;
@@ -165,6 +176,7 @@ export default function PrivateRouteGate({
         }
 
         lastUserIdRef.current = session.user.id;
+        lastAccessTokenRef.current = session.access_token;
         setPerimeterReady(true);
       } catch {
         if (!cancelled) {

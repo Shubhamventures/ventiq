@@ -701,63 +701,18 @@ export function AuthProvider({
         };
       }
 
-      const accessToken =
-        data.session?.access_token ?? "";
-
-      if (!accessToken) {
+      if (!data.session?.access_token) {
         await client.auth.signOut();
 
         return {
           error:
-            "VENTIQ signed you in, but no secure application session was issued. Please sign in again.",
+            "VENTIQ signed you in, but no secure authentication session was issued. Please sign in again.",
         };
       }
 
-      try {
-        const perimeterResponse =
-          await fetch("/api/auth/perimeter", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          });
-
-        let perimeterPayload: {
-          ok?: boolean;
-          error?: string;
-        } = {};
-
-        try {
-          perimeterPayload =
-            (await perimeterResponse.json()) as {
-              ok?: boolean;
-              error?: string;
-            };
-        } catch {
-          // The HTTP status is still authoritative below.
-        }
-
-        if (
-          !perimeterResponse.ok ||
-          !perimeterPayload.ok
-        ) {
-          await client.auth.signOut();
-
-          return {
-            error:
-              perimeterPayload.error ||
-              "VENTIQ could not establish the governed application session.",
-          };
-        }
-      } catch {
-        await client.auth.signOut();
-
-        return {
-          error:
-            "VENTIQ could not establish the governed application session.",
-        };
-      }
-
+      // The login page establishes the governed application perimeter only
+      // after the first-factor Supabase session exists. That perimeter now
+      // decides whether the active VENTIQ role must enroll or challenge MFA.
       return {
         error: null,
       };

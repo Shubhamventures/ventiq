@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const APP_ACCESS_COOKIE = "ventiq_app_access";
+const APP_ACCESS_COOKIE_VERSION = "v2";
 
-// W1G5: public marketing/demo/auth surfaces only.
-// Everything not explicitly public is private by default.
 const PUBLIC_EXACT_PATHS = new Set([
   "/",
   "/demo",
@@ -14,6 +13,7 @@ const PUBLIC_EXACT_PATHS = new Set([
   "/terms",
   "/product-overview",
   "/auth/login",
+  "/auth/mfa",
   "/auth/set-password",
   "/auth/welcome",
   "/auth/unauthorized",
@@ -50,8 +50,6 @@ function privateResponse(response: NextResponse) {
 }
 
 function getAppAccessSecret() {
-  // W1G5: the authenticated application perimeter uses its own
-  // dedicated signing secret with no legacy password-gate fallback.
   return process.env.VENTIQ_APP_ACCESS_SECRET || "";
 }
 
@@ -94,21 +92,25 @@ async function hasValidAppAccess(request: NextRequest) {
   if (!secret || !cookie) return false;
 
   const parts = cookie.split(".");
-  if (parts.length !== 3) return false;
+  if (parts.length !== 5) return false;
 
-  const [userId, expiresAtRaw, suppliedSignature] = parts;
+  const [version, userId, expiresAtRaw, assurance, suppliedSignature] =
+    parts;
+
   const expiresAt = Number(expiresAtRaw);
 
   if (
+    version !== APP_ACCESS_COOKIE_VERSION ||
     !userId ||
     !Number.isFinite(expiresAt) ||
     expiresAt <= Math.floor(Date.now() / 1000) ||
+    !["aal1", "aal2"].includes(assurance) ||
     !suppliedSignature
   ) {
     return false;
   }
 
-  const payload = `${userId}.${expiresAtRaw}`;
+  const payload = [version, userId, expiresAtRaw, assurance].join(".");
   const expectedSignature = await signPayload(secret, payload);
 
   return equalSignature(suppliedSignature, expectedSignature);

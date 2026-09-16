@@ -33,6 +33,7 @@ function sanitizeNextRoute(value: string) {
     if (
       url.pathname.startsWith("/api") ||
       url.pathname === "/auth/login" ||
+      url.pathname === "/auth/mfa" ||
       url.pathname === "/site-lock"
     ) {
       return "";
@@ -101,6 +102,15 @@ export default function LoginPage() {
         });
 
         if (cancelled) return;
+
+        if (response.status === 428) {
+          router.replace(
+            `/auth/mfa?next=${encodeURIComponent(
+              nextRoute || getDefaultRoute()
+            )}`
+          );
+          return;
+        }
 
         if (response.status === 403) {
           router.replace("/auth/unauthorized");
