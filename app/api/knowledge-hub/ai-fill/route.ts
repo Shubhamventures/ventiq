@@ -1,8 +1,14 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { authorizeInternalRoute } from "../../../../lib/auth/serverRouteAuthorization";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+const ALLOWED_INTERNAL_ROLES = [
+  "fund_admin",
+  "compliance_team",
+] as const;
 
 type AiCircularResult = {
   authority: string;
@@ -100,6 +106,18 @@ function normalizeResult(rawResult: Record<string, unknown>): AiCircularResult {
 }
 
 export async function POST(request: Request) {
+  const authorization = await authorizeInternalRoute(
+    request,
+    ALLOWED_INTERNAL_ROLES
+  );
+
+  if (!authorization.ok) {
+    return NextResponse.json(
+      { error: authorization.error },
+      { status: authorization.status }
+    );
+  }
+
   try {
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authorizeInternalRoute } from "../../../../lib/auth/serverRouteAuthorization";
 import {
   PDFDocument,
   StandardFonts,
@@ -8,6 +9,14 @@ import {
 } from "pdf-lib";
 
 export const runtime = "nodejs";
+
+const ALLOWED_INTERNAL_ROLES = [
+  "fund_admin",
+  "finance_head",
+  "investment_team",
+  "maker",
+  "checker",
+] as const;
 
 type NoticePayload = {
   title?: string;
@@ -219,6 +228,18 @@ function drawNotice(
 }
 
 export async function POST(request: Request) {
+  const authorization = await authorizeInternalRoute(
+    request,
+    ALLOWED_INTERNAL_ROLES
+  );
+
+  if (!authorization.ok) {
+    return NextResponse.json(
+      { error: authorization.error },
+      { status: authorization.status }
+    );
+  }
+
   try {
     const body = (await request.json()) as PdfRequestBody;
 

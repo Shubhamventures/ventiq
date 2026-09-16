@@ -1,7 +1,13 @@
 import pptxgen from "pptxgenjs";
 import { NextResponse } from "next/server";
+import { authorizeInternalRoute } from "../../../../lib/auth/serverRouteAuthorization";
 
 export const runtime = "nodejs";
+
+const ALLOWED_INTERNAL_ROLES = [
+  "fund_admin",
+  "managing_partner",
+] as const;
 
 type DeckChartItem = {
   label: string;
@@ -770,6 +776,18 @@ function addSectionSlide(
 }
 
 export async function POST(request: Request) {
+  const authorization = await authorizeInternalRoute(
+    request,
+    ALLOWED_INTERNAL_ROLES
+  );
+
+  if (!authorization.ok) {
+    return NextResponse.json(
+      { error: authorization.error },
+      { status: authorization.status }
+    );
+  }
+
   try {
     const body = (await request.json()) as DeckRequestBody;
 

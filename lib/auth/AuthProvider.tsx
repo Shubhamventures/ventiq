@@ -484,31 +484,6 @@ export function AuthProvider({
     loadUserAccess,
   ]);
 
-  const activeRole =
-    useMemo<VentiqRole | null>(() => {
-      const profileRole =
-        normalizeVentiqRole(
-          profile?.default_role
-        );
-
-      if (profileRole) {
-        return profileRole;
-      }
-
-      const primaryMembership =
-        memberships.find(
-          (membership) =>
-            membership.is_primary
-        ) ?? memberships[0];
-
-      return normalizeVentiqRole(
-        primaryMembership?.role
-      );
-    }, [
-      memberships,
-      profile?.default_role,
-    ]);
-
   const activeOrganisationId = useMemo(() => {
     if (profile?.active_organisation_id) {
       return profile.active_organisation_id;
@@ -528,6 +503,27 @@ export function AuthProvider({
     memberships,
     profile?.active_organisation_id,
   ]);
+
+  const activeRole =
+    useMemo<VentiqRole | null>(() => {
+      if (!activeOrganisationId) {
+        return null;
+      }
+
+      const activeMembership =
+        memberships.find(
+          (membership) =>
+            membership.organisation_id ===
+            activeOrganisationId
+        );
+
+      return normalizeVentiqRole(
+        activeMembership?.role
+      );
+    }, [
+      activeOrganisationId,
+      memberships,
+    ]);
 
   const availableFundAccess = useMemo(() => {
     const activeViewableAccess = fundAccess.filter(

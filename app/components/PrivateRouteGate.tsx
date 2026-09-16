@@ -9,6 +9,7 @@ import {
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useVentiqAuth } from "../../lib/auth/AuthProvider";
+import { getPrivateRoutePolicy } from "../../lib/auth/privateRoutePolicy";
 
 const PUBLIC_PATHS = new Set([
   "/",
@@ -42,7 +43,16 @@ export default function PrivateRouteGate({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { loading, session } = useVentiqAuth();
+  const {
+    loading,
+    session,
+    profile,
+    activeRole,
+    activeFundName,
+    accessError,
+    canUseRole,
+    canAccessFund,
+  } = useVentiqAuth();
 
   const [perimeterReady, setPerimeterReady] = useState(false);
   const lastUserIdRef = useRef("");
@@ -50,6 +60,30 @@ export default function PrivateRouteGate({
   const publicRoute = useMemo(
     () => isPublicPath(pathname || "/"),
     [pathname]
+  );
+
+  const routePolicy = useMemo(
+    () =>
+      publicRoute
+        ? null
+        : getPrivateRoutePolicy(pathname || "/"),
+    [pathname, publicRoute]
+  );
+
+  const profileIsActive = profile?.status === "Active";
+  const roleAllowed = Boolean(
+    routePolicy && canUseRole(routePolicy.allowedRoles)
+  );
+  const fundAllowed = Boolean(
+    routePolicy &&
+      (!routePolicy.requireFundAccess ||
+        (Boolean(activeFundName) &&
+          canAccessFund(activeFundName)))
+  );
+  const needsFundSetup = Boolean(
+    routePolicy?.requireFundAccess &&
+      activeRole === "fund_admin" &&
+      !activeFundName
   );
 
   useEffect(() => {
@@ -85,6 +119,21 @@ export default function PrivateRouteGate({
       perimeterReady &&
       lastUserIdRef.current === session.user.id
     ) {
+      if (needsFundSetup) {
+        router.replace("/fund-onboarding");
+        return;
+      }
+
+      if (
+        accessError ||
+        !profileIsActive ||
+        !routePolicy ||
+        !roleAllowed ||
+        !fundAllowed
+      ) {
+        router.replace("/auth/unauthorized");
+      }
+
       return;
     }
 
@@ -130,10 +179,16 @@ export default function PrivateRouteGate({
       cancelled = true;
     };
   }, [
+    accessError,
+    fundAllowed,
     loading,
+    needsFundSetup,
     pathname,
     perimeterReady,
+    profileIsActive,
     publicRoute,
+    roleAllowed,
+    routePolicy,
     router,
     session?.access_token,
   ]);
@@ -142,7 +197,16 @@ export default function PrivateRouteGate({
     return <>{children}</>;
   }
 
-  if (loading || !session || !perimeterReady) {
+  if (
+    loading ||
+    !session ||
+    !perimeterReady ||
+    accessError ||
+    !profileIsActive ||
+    !routePolicy ||
+    !roleAllowed ||
+    !fundAllowed
+  ) {
     return (
       <main className="ventiq-access-gate" aria-live="polite">
         <div>
