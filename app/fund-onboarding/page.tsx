@@ -2483,6 +2483,9 @@ export default function FundOnboardingPage() {
             </div>
 
             <div className="actions">
+              <Link className="secondary-button" href="/fund-onboarding/institutional">
+                Institutional Batch Staging
+              </Link>
               <button
                 className="primary-button"
                 disabled={isSendingInvites}

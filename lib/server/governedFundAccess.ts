@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "../supabaseAdmin";
 
@@ -14,6 +15,8 @@ export type GovernedFundActor = {
   email: string;
   fullName: string;
   organisationId: string;
+  role: string;
+  assuranceLevel: string;
 };
 
 function normalizeText(value: unknown, maxLength = 500) {
@@ -25,6 +28,21 @@ function getBearerToken(request: Request) {
   const authorization = request.headers.get("authorization") || "";
   if (!authorization.toLowerCase().startsWith("bearer ")) return "";
   return authorization.slice(7).trim();
+}
+
+function getJwtAssuranceLevel(accessToken: string) {
+  try {
+    const payloadPart = accessToken.split(".")[1] || "";
+    if (!payloadPart) return "";
+
+    const payload = JSON.parse(
+      Buffer.from(payloadPart, "base64url").toString("utf8")
+    ) as Record<string, unknown>;
+
+    return normalizeText(payload.aal, 20).toLowerCase();
+  } catch {
+    return "";
+  }
 }
 
 export async function authenticateGovernedFundUser(
@@ -66,7 +84,7 @@ export async function authenticateGovernedFundUser(
 
   let membershipQuery = supabaseAdmin
     .from("ventiq_organisation_members")
-    .select("organisation_id, status, is_primary")
+    .select("organisation_id, role, status, is_primary")
     .eq("user_id", user.id)
     .eq("status", "Active");
 
@@ -108,7 +126,15 @@ export async function authenticateGovernedFundUser(
       200
     ),
     organisationId,
+    role: normalizeText(membership.role, 80),
+    assuranceLevel: getJwtAssuranceLevel(accessToken),
   };
+}
+
+export function requireGovernedFundAal2(actor: GovernedFundActor) {
+  if (actor.assuranceLevel !== "aal2") {
+    throw new Error("AAL2_REQUIRED");
+  }
 }
 
 export async function listGovernedFunds(
@@ -160,6 +186,16 @@ export function governedFundAuthErrorResponse(error: unknown) {
       {
         error:
           "Your VENTIQ account does not have an active organisation context.",
+      },
+      { status: 403 }
+    );
+  }
+
+  if (message === "AAL2_REQUIRED") {
+    return NextResponse.json(
+      {
+        error:
+          "Multi-factor authentication (AAL2) is required for institutional onboarding.",
       },
       { status: 403 }
     );
