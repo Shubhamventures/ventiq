@@ -160,6 +160,112 @@ export default function InstitutionalOnboardingPage() {
     return result;
   }
 
+  async function approvalRequest(body: Record<string, unknown>) {
+    if (!accessToken) throw new Error("Please sign in before using the approval workflow.");
+
+    const response = await fetch("/api/admin/approval-workflow", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+
+    const result = (await response.json().catch(() => ({}))) as Record<string, any>;
+    if (!response.ok) throw new Error(result.error || "Approval workflow request failed.");
+    return result;
+  }
+
+  function approvalBlockers(current: BatchSnapshot | null) {
+    if (!current) return ["No batch is open."];
+
+    return current.rows
+      .filter((row) => {
+        const action = String(row.action_plan || "");
+        const status = String(row.row_status || "");
+        const validation = String(row.validation_status || "");
+        if (action === "Exclude" && status === "Excluded") return false;
+        return (
+          validation !== "Valid" ||
+          status !== "Ready" ||
+          !["Create Account", "Add Entitlement", "No Change"].includes(action)
+        );
+      })
+      .map((row) => `Source row ${Number(row.source_row_number || 0)} requires resolution.`);
+  }
+
+  const currentApprovalBlockers = approvalBlockers(snapshot);
+  const currentBatchStatus = String(snapshot?.batch?.status || "");
+  const currentApprovalRequestId = String(snapshot?.batch?.approval_request_id || "");
+  const hasActionableApprovalRows = Boolean(
+    snapshot?.rows?.some(
+      (row) =>
+        String(row.validation_status || "") === "Valid" &&
+        String(row.row_status || "") === "Ready" &&
+        ["Create Account", "Add Entitlement"].includes(String(row.action_plan || ""))
+    )
+  );
+  const canSubmitForApproval =
+    currentBatchStatus === "Validated" &&
+    !currentApprovalRequestId &&
+    currentApprovalBlockers.length === 0 &&
+    hasActionableApprovalRows;
+
+  async function submitForApproval() {
+    if (!snapshot) return;
+    if (!canSubmitForApproval) {
+      setMessage(
+        currentApprovalBlockers[0] ||
+          "This batch is not ready for approval submission."
+      );
+      return;
+    }
+
+    const batchId = String(snapshot.batch.id || "");
+    const batchLabel = String(snapshot.batch.batch_name || "Institutional onboarding batch");
+    if (!batchId) {
+      setMessage("The onboarding batch ID is missing.");
+      return;
+    }
+
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await approvalRequest({
+        action: "create_request",
+        sourceModule: "Fund Onboarding",
+        linkedRecordId: batchId,
+        linkedRecordType: "Stakeholder Access",
+        actionType: "Investor Invite",
+        actionTitle: `Institutional onboarding: ${batchLabel}`,
+        actionDescription:
+          "Approve the validated institutional onboarding batch and its governed account/entitlement plan.",
+        businessImpact:
+          "Approval authorises the staged invitation and entitlement plan only. Email dispatch, auth-user creation and entitlement activation remain separate downstream actions.",
+        priority: "High",
+      });
+
+      const refreshed = await apiRequest(undefined, batchId);
+      setSnapshot({
+        batch: refreshed.batch || {},
+        rows: refreshed.rows || [],
+        invitations: refreshed.invitations || [],
+        invitationRows: refreshed.invitationRows || [],
+      });
+      setMessage(
+        result.message ||
+          "Submitted for checker review. No invitation was sent and no entitlement was activated."
+      );
+      await refreshRecentBatches();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Approval submission failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function refreshRecentBatches() {
     const result = await apiRequest();
     setRecentBatches(Array.isArray(result.batches) ? result.batches : []);
@@ -310,7 +416,7 @@ export default function InstitutionalOnboardingPage() {
           <div className="top">
             <div>
               <p className="eyebrow">T2 Institutional Onboarding</p>
-              <h1>Stage and validate investor access before approval.</h1>
+              <h1>Stage, validate and govern institutional investor access.</h1>
               <p>
                 Create a governed onboarding batch, resolve funds, investor master records,
                 human identity and entitlement deltas, then prepare one draft invitation
@@ -323,7 +429,7 @@ export default function InstitutionalOnboardingPage() {
             </div>
           </div>
           <div className="guardrail">
-            Staging only. This page does not send email, create auth users, create fund/investor entitlements, or approve/activate access.
+            Validation and approval handoff only. This page never sends email, creates auth users, or activates fund/investor entitlements.
           </div>
           <div className="funds">
             {editableFunds.map((fund) => (
@@ -405,13 +511,37 @@ export default function InstitutionalOnboardingPage() {
             <div className="panel">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">Validated Batch</p>
+                  <p className="eyebrow">Governed Batch</p>
                   <h2>{String(snapshot.batch.batch_name || "Institutional onboarding batch")}</h2>
                   <p>
                     Status: <span className={`pill pill-${statusClass(snapshot.batch.status)}`}>{String(snapshot.batch.status || "")}</span>
                   </p>
+                  {currentApprovalRequestId && (
+                    <div className="hint">Approval request: {currentApprovalRequestId}</div>
+                  )}
+                </div>
+                <div className="actions">
+                  {currentBatchStatus === "Validated" && (
+                    <button
+                      className="button primary"
+                      disabled={busy || !canSubmitForApproval}
+                      onClick={() => void submitForApproval()}
+                      type="button"
+                    >
+                      {busy ? "Submitting..." : "Submit for Approval"}
+                    </button>
+                  )}
+                  <Link className="button secondary" href="/admin/audit-workflow">Open Approval Workflow</Link>
                 </div>
               </div>
+              {currentBatchStatus === "Validated" && !canSubmitForApproval && (
+                <div className="message">
+                  {currentApprovalBlockers[0] ||
+                    (!hasActionableApprovalRows
+                      ? "No account or entitlement change requires approval."
+                      : "This batch is not ready for approval submission.")}
+                </div>
+              )}
 
               <div className="stats">
                 <div className="stat"><span>Total rows</span><strong>{Number(snapshot.batch.total_rows || 0)}</strong></div>
@@ -450,8 +580,8 @@ export default function InstitutionalOnboardingPage() {
             <div className="panel">
               <div className="panel-head">
                 <div>
-                  <h2>Draft invitation identities</h2>
-                  <p>One human email may link to many ready entitlement rows. These are Draft records only; nothing has been dispatched.</p>
+                  <h2>Invitation identities</h2>
+                  <p>One human email may link to many governed entitlement rows. Approval may move these records from Draft to Approved, but dispatch remains a separate downstream action.</p>
                 </div>
               </div>
               <div className="table-wrap">

@@ -1,4 +1,5 @@
-﻿import { randomUUID } from "node:crypto";
+﻿import { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -14,6 +15,7 @@ type AuthorisedUser = {
   fullName: string;
   role: string;
   organisationId: string;
+  assuranceLevel: string;
 };
 
 const VIEW_ROLES = new Set([
@@ -106,6 +108,27 @@ function getBearerToken(request: NextRequest) {
   return authorization.slice(7).trim();
 }
 
+function getJwtAssuranceLevel(accessToken: string) {
+  try {
+    const payloadPart = accessToken.split(".")[1] || "";
+    if (!payloadPart) return "";
+
+    const payload = JSON.parse(
+      Buffer.from(payloadPart, "base64url").toString("utf8")
+    ) as Record<string, unknown>;
+
+    return normalizeText(payload.aal, 20).toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function requireOnboardingAal2(user: AuthorisedUser) {
+  if (user.assuranceLevel !== "aal2") {
+    throw new Error("AAL2_REQUIRED");
+  }
+}
+
 function normalizeText(value: unknown, maxLength = 500) {
   if (typeof value !== "string") return "";
   return value.trim().slice(0, maxLength);
@@ -189,6 +212,7 @@ async function authoriseRequest(
     fullName: normalizeText(profile.full_name || user.email || "VENTIQ User", 200),
     role,
     organisationId,
+    assuranceLevel: getJwtAssuranceLevel(accessToken),
   };
 }
 
@@ -213,10 +237,16 @@ function authErrorResponse(error: unknown) {
   if (
     message === "PROFILE_NOT_ACTIVE" ||
     message === "ROLE_NOT_ALLOWED" ||
-    message === "ORGANISATION_REQUIRED"
+    message === "ORGANISATION_REQUIRED" ||
+    message === "AAL2_REQUIRED"
   ) {
     return NextResponse.json(
-      { error: "Your account is not authorised for the VENTIQ approval workflow." },
+      {
+        error:
+          message === "AAL2_REQUIRED"
+            ? "Multi-factor authentication (AAL2) is required for governed institutional onboarding approvals."
+            : "Your account is not authorised for the VENTIQ approval workflow.",
+      },
       { status: 403 }
     );
   }
@@ -237,6 +267,45 @@ function approvalDomainErrorResponse(error: unknown) {
 
   if (message === "Compliance item not found.") {
     return NextResponse.json({ error: message }, { status: 404 });
+  }
+
+  if (message === "ONBOARDING_BATCH_NOT_FOUND") {
+    return NextResponse.json({ error: "Onboarding batch not found." }, { status: 404 });
+  }
+
+  if (
+    message === "ONBOARDING_EDIT_ACCESS_REQUIRED" ||
+    message === "ONBOARDING_APPROVAL_ACCESS_REQUIRED"
+  ) {
+    return NextResponse.json(
+      { error: "You do not have the governed fund access required for every fund in this onboarding batch." },
+      { status: 403 }
+    );
+  }
+
+  if (
+    message === "ONBOARDING_BATCH_NOT_VALIDATED" ||
+    message === "ONBOARDING_BATCH_REQUIRES_RESOLUTION" ||
+    message === "ONBOARDING_INVITATION_PLAN_INVALID" ||
+    message === "ONBOARDING_NO_ACTIONABLE_ROWS" ||
+    message === "ONBOARDING_APPROVAL_BINDING_MISMATCH" ||
+    message === "ONBOARDING_APPROVAL_ALREADY_IN_PROGRESS"
+  ) {
+    const labels: Record<string, string> = {
+      ONBOARDING_BATCH_NOT_VALIDATED:
+        "Only a Validated onboarding batch can enter maker-checker approval.",
+      ONBOARDING_BATCH_REQUIRES_RESOLUTION:
+        "Resolve all non-excluded review/invalid onboarding rows before approval submission.",
+      ONBOARDING_INVITATION_PLAN_INVALID:
+        "The draft invitation plan does not match the ready onboarding entitlement rows.",
+      ONBOARDING_NO_ACTIONABLE_ROWS:
+        "This onboarding batch contains no account or entitlement change requiring approval.",
+      ONBOARDING_APPROVAL_BINDING_MISMATCH:
+        "The onboarding batch is not bound to this approval request in the expected lifecycle state.",
+      ONBOARDING_APPROVAL_ALREADY_IN_PROGRESS:
+        "This onboarding batch already has an approval request in progress.",
+    };
+    return NextResponse.json({ error: labels[message] || message }, { status: 409 });
   }
 
   return null;
@@ -282,6 +351,942 @@ function isFundMemoryApprovalRecord(approval: Record<string, unknown>) {
     normalizeText(approval.source_module, 100) === "Document Studio" &&
     normalizeText(approval.linked_record_type, 100) === "Fund Memory Snapshot" &&
     normalizeText(approval.action_type, 100) === "Fund Memory Approval"
+  );
+}
+
+
+function isOnboardingApprovalRecord(approval: Record<string, unknown>) {
+  return (
+    normalizeText(approval.source_module, 100) === "Fund Onboarding" &&
+    normalizeText(approval.linked_record_type, 100) === "Stakeholder Access" &&
+    normalizeText(approval.action_type, 100) === "Investor Invite"
+  );
+}
+
+type OnboardingApprovalContext = {
+  batch: Record<string, any>;
+  rows: Record<string, any>[];
+  invitations: Record<string, any>[];
+  invitationRows: Record<string, any>[];
+  fundNames: string[];
+};
+
+async function getOnboardingApprovalContext(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  batchId: string,
+  requiredAccess: "edit" | "approve"
+): Promise<OnboardingApprovalContext> {
+  const { data: batch, error: batchError } = await supabase
+    .from("ventiq_onboarding_batches")
+    .select("*")
+    .eq("id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .maybeSingle();
+
+  if (batchError) {
+    throw new Error(`Unable to load onboarding batch: ${batchError.message}`);
+  }
+  if (!batch) throw new Error("ONBOARDING_BATCH_NOT_FOUND");
+
+  const { data: rows, error: rowsError } = await supabase
+    .from("ventiq_onboarding_rows")
+    .select("*")
+    .eq("batch_id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .order("source_row_number", { ascending: true });
+
+  if (rowsError) {
+    throw new Error(`Unable to load onboarding rows: ${rowsError.message}`);
+  }
+
+  const onboardingRows = (rows || []) as Record<string, any>[];
+  if (onboardingRows.length === 0) {
+    throw new Error("ONBOARDING_BATCH_REQUIRES_RESOLUTION");
+  }
+
+  const fundNames = Array.from(
+    new Set(
+      onboardingRows
+        .map((row) => normalizeText(row.fund_name, 240))
+        .filter(Boolean)
+    )
+  );
+
+  if (fundNames.length === 0) {
+    throw new Error("ONBOARDING_BATCH_REQUIRES_RESOLUTION");
+  }
+
+  const { data: accessRows, error: accessError } = await supabase
+    .from("ventiq_user_fund_access")
+    .select("fund_name,can_edit,can_approve,status")
+    .eq("organisation_id", user.organisationId)
+    .eq("user_id", user.userId)
+    .eq("status", "Active")
+    .in("fund_name", fundNames);
+
+  if (accessError) {
+    throw new Error(`Unable to verify onboarding fund access: ${accessError.message}`);
+  }
+
+  const accessByFund = new Map<string, Record<string, any>>();
+  for (const row of accessRows || []) {
+    accessByFund.set(normalizeText(row.fund_name, 240).toLowerCase(), row);
+  }
+
+  for (const fundName of fundNames) {
+    const access = accessByFund.get(fundName.toLowerCase());
+    const allowed =
+      requiredAccess === "approve"
+        ? Boolean(access?.can_approve)
+        : Boolean(access?.can_edit);
+    if (!access || !allowed) {
+      throw new Error(
+        requiredAccess === "approve"
+          ? "ONBOARDING_APPROVAL_ACCESS_REQUIRED"
+          : "ONBOARDING_EDIT_ACCESS_REQUIRED"
+      );
+    }
+  }
+
+  const { data: invitations, error: invitationsError } = await supabase
+    .from("ventiq_onboarding_invitations")
+    .select("*")
+    .eq("batch_id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .order("invitee_email", { ascending: true });
+
+  if (invitationsError) {
+    throw new Error(`Unable to load onboarding invitations: ${invitationsError.message}`);
+  }
+
+  const invitationIds = (invitations || [])
+    .map((row: any) => normalizeText(row.id, 100))
+    .filter(Boolean);
+
+  let invitationRows: Record<string, any>[] = [];
+  if (invitationIds.length > 0) {
+    const { data, error } = await supabase
+      .from("ventiq_onboarding_invitation_rows")
+      .select("*")
+      .in("invitation_id", invitationIds);
+
+    if (error) {
+      throw new Error(`Unable to load onboarding invitation links: ${error.message}`);
+    }
+    invitationRows = (data || []) as Record<string, any>[];
+  }
+
+  return {
+    batch: batch as Record<string, any>,
+    rows: onboardingRows,
+    invitations: (invitations || []) as Record<string, any>[],
+    invitationRows,
+    fundNames,
+  };
+}
+
+function assertOnboardingReadyForApproval(context: OnboardingApprovalContext) {
+  const batchStatus = normalizeText(context.batch.status, 80);
+  const approvalRequestId = normalizeText(context.batch.approval_request_id, 100);
+
+  if (batchStatus !== "Validated" || approvalRequestId) {
+    throw new Error("ONBOARDING_BATCH_NOT_VALIDATED");
+  }
+
+  const unresolved = context.rows.filter((row) => {
+    const validation = normalizeText(row.validation_status, 80);
+    const action = normalizeText(row.action_plan, 80);
+    const rowStatus = normalizeText(row.row_status, 80);
+    const resolvedExclusion = action === "Exclude" && rowStatus === "Excluded";
+
+    if (resolvedExclusion) return false;
+    return (
+      validation !== "Valid" ||
+      rowStatus !== "Ready" ||
+      !["Create Account", "Add Entitlement", "No Change"].includes(action)
+    );
+  });
+
+  if (unresolved.length > 0) {
+    throw new Error("ONBOARDING_BATCH_REQUIRES_RESOLUTION");
+  }
+
+  const actionableRows = context.rows.filter((row) => {
+    const validation = normalizeText(row.validation_status, 80);
+    const rowStatus = normalizeText(row.row_status, 80);
+    const action = normalizeText(row.action_plan, 80);
+    return (
+      validation === "Valid" &&
+      rowStatus === "Ready" &&
+      ["Create Account", "Add Entitlement"].includes(action)
+    );
+  });
+
+  if (actionableRows.length === 0) {
+    throw new Error("ONBOARDING_NO_ACTIONABLE_ROWS");
+  }
+
+  const invitationIds = new Set(
+    context.invitations.map((row) => normalizeText(row.id, 100)).filter(Boolean)
+  );
+
+  const invitationPlanIsDraft = context.invitations.every(
+    (row) =>
+      normalizeText(row.invitation_status, 80) === "Draft" &&
+      !normalizeText(row.sent_at, 100) &&
+      !normalizeText(row.activated_at, 100)
+  );
+
+  const actionableIds = new Set(
+    actionableRows.map((row) => normalizeText(row.id, 100)).filter(Boolean)
+  );
+  const linkedCounts = new Map<string, number>();
+  let unexpectedLink = false;
+
+  for (const link of context.invitationRows) {
+    const invitationId = normalizeText(link.invitation_id, 100);
+    const rowId = normalizeText(link.onboarding_row_id, 100);
+    if (!invitationIds.has(invitationId) || !actionableIds.has(rowId)) {
+      unexpectedLink = true;
+      continue;
+    }
+    linkedCounts.set(rowId, (linkedCounts.get(rowId) || 0) + 1);
+  }
+
+  const linksMatch = Array.from(actionableIds).every(
+    (rowId) => linkedCounts.get(rowId) === 1
+  );
+  const linkedInvitationIds = new Set(
+    context.invitationRows
+      .map((link) => normalizeText(link.invitation_id, 100))
+      .filter(Boolean)
+  );
+  const everyInvitationIsLinked = Array.from(invitationIds).every((invitationId) =>
+    linkedInvitationIds.has(invitationId)
+  );
+
+  if (
+    !invitationPlanIsDraft ||
+    unexpectedLink ||
+    !linksMatch ||
+    !everyInvitationIsLinked
+  ) {
+    throw new Error("ONBOARDING_INVITATION_PLAN_INVALID");
+  }
+}
+
+async function rollbackOnboardingSubmission(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  batchId: string,
+  approvalId: string
+) {
+  await supabase
+    .from("ventiq_onboarding_batches")
+    .update({
+      status: "Validated",
+      approval_request_id: null,
+      submitted_by: null,
+      submitted_at: null,
+    })
+    .eq("id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .eq("approval_request_id", approvalId);
+
+  await supabase
+    .from("ventiq_onboarding_rows")
+    .update({ row_status: "Ready" })
+    .eq("batch_id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .eq("row_status", "Pending Approval");
+}
+
+async function attachOnboardingApproval(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  batchId: string,
+  approvalId: string,
+  now: string
+) {
+  const { error: rowsError } = await supabase
+    .from("ventiq_onboarding_rows")
+    .update({ row_status: "Pending Approval" })
+    .eq("batch_id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .eq("validation_status", "Valid")
+    .eq("row_status", "Ready");
+
+  if (rowsError) {
+    throw new Error(`Unable to lock onboarding rows for approval: ${rowsError.message}`);
+  }
+
+  const { data: updatedBatch, error: batchError } = await supabase
+    .from("ventiq_onboarding_batches")
+    .update({
+      status: "Pending Approval",
+      approval_request_id: approvalId,
+      submitted_by: user.userId,
+      submitted_at: now,
+    })
+    .eq("id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .eq("status", "Validated")
+    .is("approval_request_id", null)
+    .select("id")
+    .maybeSingle();
+
+  if (batchError || !updatedBatch) {
+    await supabase
+      .from("ventiq_onboarding_rows")
+      .update({ row_status: "Ready" })
+      .eq("batch_id", batchId)
+      .eq("organisation_id", user.organisationId)
+      .eq("row_status", "Pending Approval");
+
+    throw new Error(
+      `Unable to bind onboarding batch to approval: ${
+        batchError?.message || "Batch changed before approval binding completed."
+      }`
+    );
+  }
+}
+
+async function createOnboardingApprovalRequest(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  input: {
+    linkedRecordId: string;
+    actionTitle: string;
+    actionDescription: string;
+    businessImpact: string;
+    priority: string;
+  }
+) {
+  requireOnboardingAal2(user);
+
+  const batchId = input.linkedRecordId;
+  if (!batchId) {
+    return NextResponse.json(
+      { error: "Institutional onboarding approval requires the exact onboarding batch ID." },
+      { status: 400 }
+    );
+  }
+
+  const context = await getOnboardingApprovalContext(supabase, user, batchId, "edit");
+  assertOnboardingReadyForApproval(context);
+
+  const { data: existingRequest, error: existingRequestError } = await supabase
+    .from("ventiq_approval_requests")
+    .select("id,approval_status")
+    .eq("organisation_id", user.organisationId)
+    .eq("linked_record_id", batchId)
+    .eq("linked_record_type", "Stakeholder Access")
+    .eq("action_type", "Investor Invite")
+    .in("approval_status", ["Pending Review", "Pending Approval"])
+    .limit(1)
+    .maybeSingle();
+
+  if (existingRequestError) {
+    throw new Error(
+      `Unable to inspect existing onboarding approval: ${existingRequestError.message}`
+    );
+  }
+  if (existingRequest) {
+    throw new Error("ONBOARDING_APPROVAL_ALREADY_IN_PROGRESS");
+  }
+
+  const now = new Date().toISOString();
+  const { data: approval, error: approvalError } = await supabase
+    .from("ventiq_approval_requests")
+    .insert({
+      organisation_id: user.organisationId,
+      source_module: "Fund Onboarding",
+      linked_record_id: batchId,
+      linked_record_type: "Stakeholder Access",
+      action_type: "Investor Invite",
+      action_title: input.actionTitle,
+      action_description: input.actionDescription,
+      requested_by_name: user.fullName,
+      requested_by_email: user.email,
+      maker_role: user.role,
+      checker_role: "checker",
+      approver_role: "finance_head / compliance_team / managing_partner",
+      priority: input.priority,
+      approval_status: "Pending Review",
+      current_step: "Checker Review",
+      business_impact: input.businessImpact || null,
+      requested_at: now,
+    })
+    .select("*")
+    .single();
+
+  if (approvalError || !approval) {
+    throw new Error(
+      `Unable to create onboarding approval request: ${
+        approvalError?.message || "No row returned"
+      }`
+    );
+  }
+
+  const { error: stepsError } = await supabase.from("ventiq_approval_steps").insert([
+    {
+      approval_request_id: approval.id,
+      step_order: 1,
+      step_name: "Maker Submitted",
+      assigned_role: user.role,
+      assigned_to_name: user.fullName,
+      assigned_to_email: user.email,
+      step_status: "Completed",
+      actioned_by_name: user.fullName,
+      actioned_by_email: user.email,
+      actioned_at: now,
+      comments: "Governed institutional onboarding batch submitted by authenticated maker.",
+    },
+    {
+      approval_request_id: approval.id,
+      step_order: 2,
+      step_name: "Checker Review",
+      assigned_role: "checker",
+      assigned_to_name: null,
+      assigned_to_email: null,
+      step_status: "Pending",
+    },
+    {
+      approval_request_id: approval.id,
+      step_order: 3,
+      step_name: "Final Approval",
+      assigned_role: "finance_head / compliance_team / managing_partner",
+      assigned_to_name: null,
+      assigned_to_email: null,
+      step_status: "Pending",
+    },
+  ]);
+
+  if (stepsError) {
+    await supabase.from("ventiq_approval_requests").delete().eq("id", approval.id);
+    throw new Error(`Unable to create onboarding approval steps: ${stepsError.message}`);
+  }
+
+  try {
+    await attachOnboardingApproval(supabase, user, batchId, String(approval.id), now);
+
+    await insertAuditLog(supabase, user, {
+      sourceModule: "Fund Onboarding",
+      linkedRecordId: batchId,
+      linkedRecordType: "Stakeholder Access",
+      eventType: "Approval Requested",
+      eventTitle: input.actionTitle,
+      eventDescription: `${input.actionDescription} Submitted for checker review by ${user.fullName}. No invitation was sent and no entitlement was activated.`,
+      riskLevel: input.priority,
+    });
+  } catch (error) {
+    await rollbackOnboardingSubmission(
+      supabase,
+      user,
+      batchId,
+      String(approval.id)
+    );
+    await supabase
+      .from("ventiq_approval_steps")
+      .delete()
+      .eq("approval_request_id", approval.id);
+    await supabase.from("ventiq_approval_requests").delete().eq("id", approval.id);
+    throw error;
+  }
+
+  return NextResponse.json(
+    {
+      message:
+        "Institutional onboarding batch submitted for checker review. No email was sent and no entitlement was activated.",
+      approval,
+    },
+    { status: 201 }
+  );
+}
+
+async function loadBoundOnboardingApprovalContext(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  approval: Record<string, any>
+) {
+  requireOnboardingAal2(user);
+  const batchId = normalizeText(approval.linked_record_id, 100);
+  if (!batchId) throw new Error("ONBOARDING_APPROVAL_BINDING_MISMATCH");
+
+  const context = await getOnboardingApprovalContext(
+    supabase,
+    user,
+    batchId,
+    "approve"
+  );
+
+  if (
+    normalizeText(context.batch.status, 80) !== "Pending Approval" ||
+    normalizeText(context.batch.approval_request_id, 100) !==
+      normalizeText(approval.id, 100)
+  ) {
+    throw new Error("ONBOARDING_APPROVAL_BINDING_MISMATCH");
+  }
+
+  return { batchId, context };
+}
+
+async function setOnboardingChangesRequested(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  batchId: string,
+  approvalId: string
+) {
+  const { error: rowsError } = await supabase
+    .from("ventiq_onboarding_rows")
+    .update({ row_status: "Ready" })
+    .eq("batch_id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .eq("row_status", "Pending Approval");
+
+  if (rowsError) {
+    throw new Error(`Unable to release onboarding rows after rejection: ${rowsError.message}`);
+  }
+
+  const { data: batch, error: batchError } = await supabase
+    .from("ventiq_onboarding_batches")
+    .update({ status: "Changes Requested" })
+    .eq("id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .eq("status", "Pending Approval")
+    .eq("approval_request_id", approvalId)
+    .select("id")
+    .maybeSingle();
+
+  if (batchError || !batch) {
+    await supabase
+      .from("ventiq_onboarding_rows")
+      .update({ row_status: "Pending Approval" })
+      .eq("batch_id", batchId)
+      .eq("organisation_id", user.organisationId)
+      .eq("row_status", "Ready")
+      .eq("validation_status", "Valid");
+    throw new Error(
+      `Unable to mark onboarding batch Changes Requested: ${
+        batchError?.message || "Batch changed before rejection completed."
+      }`
+    );
+  }
+}
+
+async function restoreOnboardingPendingApproval(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  batchId: string,
+  approvalId: string
+) {
+  await supabase
+    .from("ventiq_onboarding_batches")
+    .update({ status: "Pending Approval" })
+    .eq("id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .eq("approval_request_id", approvalId);
+
+  await supabase
+    .from("ventiq_onboarding_rows")
+    .update({ row_status: "Pending Approval" })
+    .eq("batch_id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .eq("row_status", "Ready")
+    .eq("validation_status", "Valid");
+
+  await supabase
+    .from("ventiq_onboarding_invitations")
+    .update({ invitation_status: "Draft" })
+    .eq("batch_id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .eq("invitation_status", "Approved");
+}
+
+async function setOnboardingApproved(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  batchId: string,
+  approvalId: string
+) {
+  const { error: invitationError } = await supabase
+    .from("ventiq_onboarding_invitations")
+    .update({ invitation_status: "Approved" })
+    .eq("batch_id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .eq("invitation_status", "Draft");
+
+  if (invitationError) {
+    throw new Error(`Unable to approve onboarding invitation plan: ${invitationError.message}`);
+  }
+
+  const { error: rowsError } = await supabase
+    .from("ventiq_onboarding_rows")
+    .update({ row_status: "Approved" })
+    .eq("batch_id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .eq("row_status", "Pending Approval")
+    .eq("validation_status", "Valid");
+
+  if (rowsError) {
+    await supabase
+      .from("ventiq_onboarding_invitations")
+      .update({ invitation_status: "Draft" })
+      .eq("batch_id", batchId)
+      .eq("organisation_id", user.organisationId)
+      .eq("invitation_status", "Approved");
+    throw new Error(`Unable to approve onboarding rows: ${rowsError.message}`);
+  }
+
+  const { data: batch, error: batchError } = await supabase
+    .from("ventiq_onboarding_batches")
+    .update({ status: "Approved" })
+    .eq("id", batchId)
+    .eq("organisation_id", user.organisationId)
+    .eq("status", "Pending Approval")
+    .eq("approval_request_id", approvalId)
+    .select("id")
+    .maybeSingle();
+
+  if (batchError || !batch) {
+    await supabase
+      .from("ventiq_onboarding_rows")
+      .update({ row_status: "Pending Approval" })
+      .eq("batch_id", batchId)
+      .eq("organisation_id", user.organisationId)
+      .eq("row_status", "Approved");
+    await supabase
+      .from("ventiq_onboarding_invitations")
+      .update({ invitation_status: "Draft" })
+      .eq("batch_id", batchId)
+      .eq("organisation_id", user.organisationId)
+      .eq("invitation_status", "Approved");
+    throw new Error(
+      `Unable to approve onboarding batch: ${
+        batchError?.message || "Batch changed before final approval completed."
+      }`
+    );
+  }
+}
+
+async function rollbackOnboardingDecision(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  batchId: string,
+  approvalId: string
+) {
+  await restoreOnboardingPendingApproval(
+    supabase,
+    user,
+    batchId,
+    approvalId
+  );
+}
+
+async function decideOnboardingApprovalRequest(
+  supabase: SupabaseAdmin,
+  user: AuthorisedUser,
+  approval: Record<string, any>,
+  decision: string
+) {
+  const { batchId } = await loadBoundOnboardingApprovalContext(
+    supabase,
+    user,
+    approval
+  );
+
+  const currentStep = normalizeText(approval.current_step, 80);
+  const now = new Date().toISOString();
+  const isApproved = decision === "Approved";
+
+  if (currentStep === "Checker Review") {
+    if (!CHECKER_REVIEW_ROLES.has(user.role)) {
+      return NextResponse.json(
+        { error: "Your role cannot perform checker review." },
+        { status: 403 }
+      );
+    }
+
+    const { error: checkerStepError } = await supabase
+      .from("ventiq_approval_steps")
+      .update({
+        step_status: isApproved ? "Completed" : "Rejected",
+        assigned_to_name: user.fullName,
+        assigned_to_email: user.email,
+        actioned_by_name: user.fullName,
+        actioned_by_email: user.email,
+        actioned_at: now,
+        comments: isApproved
+          ? "Checker review completed for governed institutional onboarding."
+          : "Governed institutional onboarding rejected during checker review.",
+      })
+      .eq("approval_request_id", approval.id)
+      .eq("step_order", 2)
+      .eq("step_status", "Pending");
+
+    if (checkerStepError) {
+      throw new Error(`Unable to update onboarding checker step: ${checkerStepError.message}`);
+    }
+
+    const { error: requestError } = await supabase
+      .from("ventiq_approval_requests")
+      .update(
+        isApproved
+          ? {
+              approval_status: "Pending Approval",
+              current_step: "Final Approval",
+              approved_at: null,
+              rejected_at: null,
+              updated_at: now,
+            }
+          : {
+              approval_status: "Rejected",
+              current_step: "Rejected",
+              approved_at: null,
+              rejected_at: now,
+              updated_at: now,
+            }
+      )
+      .eq("id", approval.id)
+      .eq("organisation_id", user.organisationId)
+      .eq("current_step", "Checker Review");
+
+    if (requestError) {
+      await supabase
+        .from("ventiq_approval_steps")
+        .update({
+          step_status: "Pending",
+          assigned_to_name: null,
+          assigned_to_email: null,
+          actioned_by_name: null,
+          actioned_by_email: null,
+          actioned_at: null,
+          comments: null,
+        })
+        .eq("approval_request_id", approval.id)
+        .eq("step_order", 2);
+      throw new Error(`Unable to update onboarding approval request: ${requestError.message}`);
+    }
+
+    try {
+      if (!isApproved) {
+        await setOnboardingChangesRequested(
+          supabase,
+          user,
+          batchId,
+          String(approval.id)
+        );
+
+        await supabase
+          .from("ventiq_approval_steps")
+          .update({
+            step_status: "Rejected",
+            comments:
+              "Final approval not reached because the checker rejected the onboarding request.",
+          })
+          .eq("approval_request_id", approval.id)
+          .eq("step_order", 3)
+          .eq("step_status", "Pending");
+      }
+
+      await insertAuditLog(supabase, user, {
+        sourceModule: "Fund Onboarding",
+        linkedRecordId: batchId,
+        linkedRecordType: "Stakeholder Access",
+        eventType: isApproved ? "Checker Approved" : "Checker Rejected",
+        eventTitle: `${normalizeText(approval.action_title, 240)} ${
+          isApproved ? "passed checker review" : "rejected by checker"
+        }`,
+        eventDescription: isApproved
+          ? `Institutional onboarding batch passed checker review by ${user.fullName} and moved to final approval. No invitation was sent and no entitlement was activated.`
+          : `Institutional onboarding batch was rejected during checker review by ${user.fullName} and moved to Changes Requested.`,
+        riskLevel: normalizeText(approval.priority, 40) || "Medium",
+      });
+    } catch (error) {
+      await supabase
+        .from("ventiq_approval_requests")
+        .update({
+          approval_status: "Pending Review",
+          current_step: "Checker Review",
+          approved_at: null,
+          rejected_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", approval.id)
+        .eq("organisation_id", user.organisationId);
+
+      await supabase
+        .from("ventiq_approval_steps")
+        .update({
+          step_status: "Pending",
+          assigned_to_name: null,
+          assigned_to_email: null,
+          actioned_by_name: null,
+          actioned_by_email: null,
+          actioned_at: null,
+          comments: null,
+        })
+        .eq("approval_request_id", approval.id)
+        .eq("step_order", 2);
+
+      await supabase
+        .from("ventiq_approval_steps")
+        .update({ step_status: "Pending", comments: null })
+        .eq("approval_request_id", approval.id)
+        .eq("step_order", 3);
+
+      if (!isApproved) {
+        await rollbackOnboardingDecision(
+          supabase,
+          user,
+          batchId,
+          String(approval.id)
+        );
+      }
+      throw error;
+    }
+
+    return NextResponse.json({
+      message: isApproved
+        ? "Institutional onboarding passed checker review and moved to final approval."
+        : "Institutional onboarding was rejected by checker and moved to Changes Requested.",
+    });
+  }
+
+  if (currentStep === "Final Approval") {
+    if (!FINAL_APPROVER_ROLES.has(user.role)) {
+      return NextResponse.json(
+        { error: "Your role cannot perform final approval." },
+        { status: 403 }
+      );
+    }
+
+    const { error: finalStepError } = await supabase
+      .from("ventiq_approval_steps")
+      .update({
+        step_status: isApproved ? "Completed" : "Rejected",
+        assigned_to_name: user.fullName,
+        assigned_to_email: user.email,
+        actioned_by_name: user.fullName,
+        actioned_by_email: user.email,
+        actioned_at: now,
+        comments: isApproved
+          ? "Final approval completed for governed institutional onboarding."
+          : "Final approval rejected for governed institutional onboarding.",
+      })
+      .eq("approval_request_id", approval.id)
+      .eq("step_order", 3)
+      .eq("step_status", "Pending");
+
+    if (finalStepError) {
+      throw new Error(`Unable to update onboarding final step: ${finalStepError.message}`);
+    }
+
+    const { error: requestError } = await supabase
+      .from("ventiq_approval_requests")
+      .update({
+        approval_status: decision,
+        current_step: isApproved ? "Completed" : "Rejected",
+        approved_at: isApproved ? now : null,
+        rejected_at: isApproved ? null : now,
+        updated_at: now,
+      })
+      .eq("id", approval.id)
+      .eq("organisation_id", user.organisationId)
+      .eq("current_step", "Final Approval");
+
+    if (requestError) {
+      await supabase
+        .from("ventiq_approval_steps")
+        .update({
+          step_status: "Pending",
+          assigned_to_name: null,
+          assigned_to_email: null,
+          actioned_by_name: null,
+          actioned_by_email: null,
+          actioned_at: null,
+          comments: null,
+        })
+        .eq("approval_request_id", approval.id)
+        .eq("step_order", 3);
+      throw new Error(`Unable to update onboarding approval request: ${requestError.message}`);
+    }
+
+    try {
+      if (isApproved) {
+        await setOnboardingApproved(
+          supabase,
+          user,
+          batchId,
+          String(approval.id)
+        );
+      } else {
+        await setOnboardingChangesRequested(
+          supabase,
+          user,
+          batchId,
+          String(approval.id)
+        );
+      }
+
+      await insertAuditLog(supabase, user, {
+        sourceModule: "Fund Onboarding",
+        linkedRecordId: batchId,
+        linkedRecordType: "Stakeholder Access",
+        eventType: decision,
+        eventTitle: `${normalizeText(approval.action_title, 240)} ${decision.toLowerCase()}`,
+        eventDescription: isApproved
+          ? `Institutional onboarding batch was approved by ${user.fullName} (${roleLabel(user.role)}). Invitation identities are approved but no email was sent and no entitlement was activated.`
+          : `Institutional onboarding batch was rejected by ${user.fullName} (${roleLabel(user.role)}) and moved to Changes Requested.`,
+        riskLevel: normalizeText(approval.priority, 40) || "Medium",
+      });
+    } catch (error) {
+      await supabase
+        .from("ventiq_approval_requests")
+        .update({
+          approval_status: "Pending Approval",
+          current_step: "Final Approval",
+          approved_at: null,
+          rejected_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", approval.id)
+        .eq("organisation_id", user.organisationId);
+
+      await rollbackOnboardingDecision(
+        supabase,
+        user,
+        batchId,
+        String(approval.id)
+      );
+
+      await supabase
+        .from("ventiq_approval_steps")
+        .update({
+          step_status: "Pending",
+          assigned_to_name: null,
+          assigned_to_email: null,
+          actioned_by_name: null,
+          actioned_by_email: null,
+          actioned_at: null,
+          comments: null,
+        })
+        .eq("approval_request_id", approval.id)
+        .eq("step_order", 3);
+      throw error;
+    }
+
+    return NextResponse.json({
+      message: isApproved
+        ? "Institutional onboarding received final approval. Invitations remain undispatched and entitlements remain inactive."
+        : "Institutional onboarding was rejected at final approval and moved to Changes Requested.",
+    });
+  }
+
+  return NextResponse.json(
+    { error: "This onboarding approval request is not awaiting an action." },
+    { status: 409 }
   );
 }
 
@@ -1193,12 +2198,42 @@ async function createRequest(
   }
 
   const requestedLinkedRecordId = normalizeText(body.linkedRecordId, 100);
+  const isOnboardingApprovalRequest =
+    sourceModule === "Fund Onboarding" &&
+    linkedRecordType === "Stakeholder Access" &&
+    actionType === "Investor Invite";
+  const touchesOnboardingApprovalDomain =
+    sourceModule === "Fund Onboarding" ||
+    linkedRecordType === "Stakeholder Access" ||
+    actionType === "Investor Invite";
+
+  if (touchesOnboardingApprovalDomain && !isOnboardingApprovalRequest) {
+    return NextResponse.json(
+      {
+        error:
+          "Institutional onboarding approvals must use Fund Onboarding / Stakeholder Access / Investor Invite together.",
+      },
+      { status: 400 }
+    );
+  }
+
+  if (isOnboardingApprovalRequest) {
+    return await createOnboardingApprovalRequest(supabase, user, {
+      linkedRecordId: requestedLinkedRecordId,
+      actionTitle,
+      actionDescription,
+      businessImpact,
+      priority,
+    });
+  }
+
+  const requestedLinkedRecordIdForGenericDomain = requestedLinkedRecordId;
   const requiresRealLinkedRecord =
     actionType === "Capital Call Approval" ||
     actionType === "Fund Memory Approval" ||
     actionType === "Compliance Item Approval";
   const linkedRecordId = requiresRealLinkedRecord
-    ? requestedLinkedRecordId
+    ? requestedLinkedRecordIdForGenericDomain
     : randomUUID();
 
   if (actionType === "Capital Call Approval") {
@@ -1519,6 +2554,15 @@ async function decideRequest(
     return NextResponse.json(
       { error: "Maker-checker control prevents a user from approving their own request." },
       { status: 403 }
+    );
+  }
+
+  if (isOnboardingApprovalRecord(approval as Record<string, unknown>)) {
+    return await decideOnboardingApprovalRequest(
+      supabase,
+      user,
+      approval as Record<string, any>,
+      decision
     );
   }
 
