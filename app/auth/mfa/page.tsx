@@ -60,6 +60,7 @@ export default function MfaPage() {
   const { loading, session, signOut, getDefaultRoute } = useVentiqAuth();
 
   const [nextRoute, setNextRoute] = useState("");
+  const [nextRouteReady, setNextRouteReady] = useState(false);
   const [mode, setMode] = useState<MfaMode>("checking");
   const [factorId, setFactorId] = useState("");
   const [qrCode, setQrCode] = useState("");
@@ -78,6 +79,7 @@ export default function MfaPage() {
         : "";
 
     setNextRoute(sanitizeNextRoute(requestedNext));
+    setNextRouteReady(true);
   }, []);
 
   const destination = useMemo(
@@ -127,7 +129,7 @@ export default function MfaPage() {
   }, []);
 
   useEffect(() => {
-    if (loading) {
+    if (loading || !nextRouteReady) {
       return;
     }
 
@@ -212,6 +214,7 @@ export default function MfaPage() {
     destination,
     establishPerimeter,
     loading,
+    nextRouteReady,
     router,
     session?.user?.id,
   ]);
