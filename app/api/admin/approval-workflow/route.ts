@@ -163,7 +163,7 @@ async function authoriseRequest(
 
   const { data: profile, error: profileError } = await supabase
     .from("ventiq_user_profiles")
-    .select("user_id, email, full_name, default_role, active_organisation_id, status")
+    .select("user_id, email, full_name, active_organisation_id, status")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -175,36 +175,65 @@ async function authoriseRequest(
     throw new Error("PROFILE_NOT_ACTIVE");
   }
 
-  let role = normalizeText(profile.default_role, 80);
-  let organisationId = normalizeText(profile.active_organisation_id, 80);
+  const requestedOrganisationId = normalizeText(
+    profile.active_organisation_id,
+    80
+  );
 
-  if (!VIEW_ROLES.has(role) || !organisationId) {
-    const { data: membership, error: membershipError } = await supabase
-      .from("ventiq_organisation_members")
-      .select("organisation_id, role, status, is_primary")
-      .eq("user_id", user.id)
-      .eq("status", "Active")
+  let membershipQuery = supabase
+    .from("ventiq_organisation_members")
+    .select("organisation_id, role, status, is_primary")
+    .eq("user_id", user.id)
+    .eq("status", "Active");
+
+  if (requestedOrganisationId) {
+    membershipQuery = membershipQuery.eq(
+      "organisation_id",
+      requestedOrganisationId
+    );
+  } else {
+    membershipQuery = membershipQuery
       .order("is_primary", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (membershipError) {
-      throw new Error(
-        `Unable to load organisation membership: ${membershipError.message}`
-      );
-    }
-
-    if (!VIEW_ROLES.has(role)) {
-      role = normalizeText(membership?.role, 80);
-    }
-
-    if (!organisationId) {
-      organisationId = normalizeText(membership?.organisation_id, 80);
-    }
+      .order("organisation_id", { ascending: true });
   }
 
-  if (!VIEW_ROLES.has(role)) throw new Error("ROLE_NOT_ALLOWED");
+  const { data: membership, error: membershipError } =
+    await membershipQuery.limit(1).maybeSingle();
+
+  if (membershipError) {
+    throw new Error(
+      `Unable to load organisation membership: ${membershipError.message}`
+    );
+  }
+
+  if (!membership) {
+    throw new Error("ORGANISATION_MEMBERSHIP_REQUIRED");
+  }
+
+  const organisationId = normalizeText(membership.organisation_id, 80);
+  const role = normalizeText(membership.role, 80);
+
   if (!organisationId) throw new Error("ORGANISATION_REQUIRED");
+  if (!VIEW_ROLES.has(role)) throw new Error("ROLE_NOT_ALLOWED");
+
+  const { data: organisation, error: organisationError } = await supabase
+    .from("ventiq_organisations")
+    .select("id, status")
+    .eq("id", organisationId)
+    .maybeSingle();
+
+  if (organisationError) {
+    throw new Error(
+      `Unable to load active organisation: ${organisationError.message}`
+    );
+  }
+
+  if (
+    !organisation ||
+    normalizeText(organisation.status, 40).toLowerCase() !== "active"
+  ) {
+    throw new Error("ORGANISATION_NOT_ACTIVE");
+  }
 
   return {
     userId: String(user.id),
@@ -238,6 +267,8 @@ function authErrorResponse(error: unknown) {
     message === "PROFILE_NOT_ACTIVE" ||
     message === "ROLE_NOT_ALLOWED" ||
     message === "ORGANISATION_REQUIRED" ||
+    message === "ORGANISATION_MEMBERSHIP_REQUIRED" ||
+    message === "ORGANISATION_NOT_ACTIVE" ||
     message === "AAL2_REQUIRED"
   ) {
     return NextResponse.json(
