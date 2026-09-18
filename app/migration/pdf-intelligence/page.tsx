@@ -467,7 +467,7 @@ export default function PdfIntelligencePage() {
       extractionPending: documents.filter((document) => document.extractionPending)
         .length,
       ocrRequired: documents.filter(
-        (document) => document.evidence.extractionMode === "ocr_required"
+        (document) => ["ocr_required", "mixed_text_visual_review"].includes(document.evidence.extractionMode)
       ).length,
       ocrCompleted: documents.filter(
         (document) => document.evidence.extractionMode === "ocr_completed"
@@ -944,7 +944,7 @@ export default function PdfIntelligencePage() {
       .filter(
         (document) =>
           !document.published &&
-          document.evidence.extractionMode === "ocr_required" &&
+          ["ocr_required", "mixed_text_visual_review"].includes(document.evidence.extractionMode) &&
           document.evidence.ocrRequiredPages.length > 0
       )
       .map((document) => document.id);
@@ -1287,11 +1287,6 @@ export default function PdfIntelligencePage() {
         (row) => row.status !== "MATCHED"
       ) || [];
 
-    if (reviewRows.length === 0) {
-      setMessage("This PDF has no inconsistency rows requiring resolution.");
-      return;
-    }
-
     const decisions = reviewRows.map((row) => {
       const draft = getResolutionInput(document, row);
 
@@ -1300,7 +1295,7 @@ export default function PdfIntelligencePage() {
         choice: draft.choice,
         correctedValue:
           draft.choice === "corrected"
-            ? Number(draft.correctedValue)
+            ? draft.correctedValue.trim()
             : null,
         note: draft.note.trim(),
       };
@@ -1344,6 +1339,7 @@ export default function PdfIntelligencePage() {
     try {
       await apiRequest({
         action: "save_resolution_draft",
+        confirmMatchedSource: reviewRows.length === 0,
         fundName: activeFundName,
         documentId: document.id,
         decisions,
@@ -2316,13 +2312,11 @@ export default function PdfIntelligencePage() {
           {documents.filter(
             (document) =>
               document.reconciliation &&
-              document.reconciliation.rows.some(
-                (row) => row.status !== "MATCHED"
-              )
+              document.reconciliation.rows.length > 0
           ).length === 0 ? (
             <div className="logic-note">
-              No inconsistencies require human resolution in the latest batch.
-              The current reconciled evidence is fully matched.
+              No reconciled financial evidence is available for confirmation.
+              Extract and reconcile the PDF evidence first.
             </div>
           ) : (
             <div style={{ display: "grid", gap: 18 }}>
@@ -2330,9 +2324,7 @@ export default function PdfIntelligencePage() {
                 .filter(
                   (document) =>
                     document.reconciliation &&
-                    document.reconciliation.rows.some(
-                      (row) => row.status !== "MATCHED"
-                    )
+                    document.reconciliation.rows.length > 0
                 )
                 .map((document) => {
                   const reviewRows = document.reconciliation!.rows.filter(
@@ -2356,7 +2348,7 @@ export default function PdfIntelligencePage() {
                         <span className="status-pill">
                           {document.resolutionDraft
                             ? "Draft pending checker"
-                            : "Resolution required"}
+                            : reviewRows.length === 0 ? "Source confirmation required" : "Resolution required"}
                         </span>
                       </div>
 
@@ -2521,6 +2513,9 @@ export default function PdfIntelligencePage() {
                         })}
                       </div>
 
+                      {reviewRows.length === 0 && (
+                        <div className="logic-note">Confirm that this PDF and its matched structured evidence belong to the displayed investor and period. Your identity, time and source evidence are retained for final approval.</div>
+                      )}
                       <div style={{ marginTop: 14 }}>
                         <button
                           className="monitor-btn monitor-btn-primary"
@@ -2533,7 +2528,7 @@ export default function PdfIntelligencePage() {
                         >
                           {savingResolutionId === document.id
                             ? "Saving Draft..."
-                            : "Save Resolution Draft"}
+                            : reviewRows.length === 0 ? "Confirm Matched Sources" : "Save Resolution Draft"}
                         </button>
                       </div>
 

@@ -26,6 +26,8 @@ const MAX_OCR_DOCUMENTS_PER_REQUEST = 2;
 const MAX_RECONCILIATION_DOCUMENTS_PER_REQUEST = 6;
 const MAX_FINANCIAL_DOCUMENTS_PER_REQUEST = 4;
 const MAX_FINANCIAL_TRANSACTION_PREVIEW = 12;
+const FINANCIAL_TOLERANCE = 0.01;
+const IDENTITY_REVIEW_SIGNAL = "PDF governed identity changed; fresh financial approval required";
 
 const FINANCIAL_PUBLISH_GATED_TYPES = new Set([
   "SOA / Account Statement",
@@ -188,6 +190,7 @@ type FinancialCandidateSidecar = {
 };
 
 type FinancialCandidateManifest = {
+  identity?: GovernedPdfIdentity;
   version: "A7.7-3";
   extractionStatus: "candidate";
   generatedAt: string;
@@ -250,6 +253,7 @@ type FinancialReconciliationSidecar = {
 };
 
 type FinancialReconciliationManifest = {
+  identity?: GovernedPdfIdentity;
   version: "A7.7-4A";
   generatedAt: string;
   reconciliationStatus: "candidate";
@@ -286,6 +290,7 @@ type ResolutionDecision = {
 };
 
 type ResolutionDraftSidecar = {
+  sourceConfirmation?: SourceConfirmation;
   version: "A7.7-5A";
   generatedAt: string;
   status: "draft_pending_checker";
@@ -301,6 +306,8 @@ type ResolutionDraftSidecar = {
 };
 
 type ResolutionDraftManifest = {
+  identity?: GovernedPdfIdentity;
+  sourceConfirmation?: SourceConfirmation;
   version: "A7.7-5A";
   generatedAt: string;
   status: "draft_pending_checker";
@@ -315,6 +322,7 @@ type ResolutionDraftManifest = {
 
 
 type CanonicalCandidateManifest = {
+  identity?: GovernedPdfIdentity;
   version: "A7.7-6A";
   createdAt: string;
   snapshotId: string;
@@ -372,6 +380,82 @@ type PdfDocumentRow = {
   created_at?: string | null;
   updated_at?: string | null;
 };
+
+type GovernedPdfIdentity = {
+  documentId: string;
+  investorId: string;
+  fundName: string;
+  periodLabel: string;
+  documentType: string;
+  sourceBucket: string;
+  sourcePath: string;
+};
+
+type SourceConfirmation = {
+  identity: GovernedPdfIdentity;
+  reconciliationSidecarPath: string;
+  confirmedByUserId: string;
+  confirmedByRole: string;
+  confirmedAt: string;
+};
+
+function governedPdfIdentity(row: PdfDocumentRow): GovernedPdfIdentity {
+  return {
+    documentId: row.id,
+    investorId: row.matched_investor_id || "",
+    fundName: row.fund_name || "",
+    periodLabel: row.period_label || "",
+    documentType: row.document_type || "",
+    sourceBucket: row.storage_bucket || "",
+    sourcePath: row.storage_path || "",
+  };
+}
+
+function identityMatches(row: PdfDocumentRow, identity?: GovernedPdfIdentity) {
+  const current = governedPdfIdentity(row);
+  return Boolean(identity) && Object.entries(current).every(
+    ([key, value]) => Boolean(value) && identity?.[key as keyof GovernedPdfIdentity] === value
+  );
+}
+
+function detachFinancialEvidence(signals: string[]) {
+  return withoutCanonicalCandidateSignal(withoutResolutionSignal(
+    withoutReconciliationSignal(withoutFinancialSignal(signals))
+  ));
+}
+
+function withoutIdentityReviewSignal(signals: string[]) {
+  return signals.filter((signal) => signal !== IDENTITY_REVIEW_SIGNAL);
+}
+
+function failedReprocessSignals(row: PdfDocumentRow) {
+  return [
+    ...withoutIdentityReviewSignal(detachFinancialEvidence(withoutOcrSignal(
+      withoutEvidenceSignal(parseSignals(row.match_signals))
+    ))),
+    ...(requiresFinancialPublicationApproval(row) ? [IDENTITY_REVIEW_SIGNAL] : []),
+  ];
+}
+
+function failedOcrSignals(row: PdfDocumentRow) {
+  return [
+    ...withoutIdentityReviewSignal(detachFinancialEvidence(withoutOcrSignal(
+      parseSignals(row.match_signals)
+    ))),
+    ...(requiresFinancialPublicationApproval(row) ? [IDENTITY_REVIEW_SIGNAL] : []),
+  ];
+}
+
+function reviewIdentityChanged(row: Pick<PdfDocumentRow, "matched_investor_id" | "period_label" | "document_type">,
+  investorId: string, periodLabel: string, documentType: string) {
+  return row.matched_investor_id !== investorId || row.period_label !== periodLabel || row.document_type !== documentType;
+}
+
+function eligibleForOcr(evidence: EvidenceManifest) {
+  return !evidence.pageLimitReached &&
+    ["ocr_required", "mixed_text_visual_review"].includes(evidence.extractionMode) &&
+    evidence.ocrRequiredPages.length > 0;
+}
 
 function noStoreJson(body: unknown, status = 200) {
   return NextResponse.json(body, {
@@ -1161,9 +1245,23 @@ function splitEvidencePages(text: string) {
   return pages;
 }
 
+function declaredCurrency(value: string, fallback = "INR") {
+  const match = value.match(/\b(?:Reporting\s+)?Currency\s*[-:]\s*(USD|EUR|GBP|INR)\b/i);
+  return match ? match[1].toUpperCase() : fallback;
+}
+
+function detectedCurrency(value: string, fallback = "INR") {
+  if (/\bUSD\b|\$/i.test(value)) return "USD";
+  if (/\bEUR\b|\u20ac/i.test(value)) return "EUR";
+  if (/\bGBP\b|\u00a3/i.test(value)) return "GBP";
+  if (/\bINR\b|Rs\.?|\u20b9/i.test(value)) return "INR";
+  return fallback;
+}
+
 function parseMoneyValue(value: string) {
   const cleaned = value
     .replace(/(?:INR|Rs\.?|â‚¹|\$)/gi, "")
+    .replace(/USD|EUR|GBP|\u20b9|\u20ac|\u00a3/gi, "")
     .replace(/,/g, "")
     .replace(/\s+/g, "")
     .trim();
@@ -1214,7 +1312,7 @@ function parseDateValue(value: string) {
   const month = localMonths[match[2].toLowerCase()];
   const year = Number(match[3]);
 
-  if (!month || day < 1 || day > 31 || year < 1900) return "";
+  if (!month || day < 1 || year < 1900 || day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return "";
 
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(
     2,
@@ -1244,13 +1342,15 @@ function findLabelCandidate(
 
     for (let index = 0; index < lines.length; index += 1) {
       const current = normalizeSearchText(lines[index]);
-      const aliasMatched = input.aliases.some(
-        (alias) => current === normalizeSearchText(alias)
+      const aliasMatched = input.aliases.find(
+        (alias) => current === normalizeSearchText(alias) || current.startsWith(`${normalizeSearchText(alias)}:`)
       );
 
       if (!aliasMatched) continue;
 
-      const rawValue = lines[index + 1] || "";
+      const rawValue = current === normalizeSearchText(aliasMatched)
+        ? lines[index + 1] || ""
+        : lines[index].slice(lines[index].indexOf(":") + 1).trim();
       if (!rawValue) continue;
 
       let normalizedValue: number | string | null = rawValue;
@@ -1269,11 +1369,13 @@ function findLabelCandidate(
         valueType: input.valueType,
         rawValue,
         normalizedValue,
-        currency: input.currency || "",
+        currency: input.valueType === "money"
+          ? detectedCurrency(rawValue, declaredCurrency(page.text, input.currency || "INR"))
+          : "",
         sourcePage: page.pageNumber,
         sourceExcerpt: compactExcerpt(`${lines[index]} ${rawValue}`),
         extractionMethod: "deterministic_label_match",
-        confidence: 100,
+        confidence: 85,
       };
     }
   }
@@ -1313,7 +1415,7 @@ function buildCheck(input: {
   return {
     key: input.key,
     label: input.label,
-    status: Math.abs(difference) < 0.01 ? "MATCHED" : "CONFLICT",
+    status: Math.abs(difference) < FINANCIAL_TOLERANCE ? "MATCHED" : "CONFLICT",
     summaryValue: input.summaryValue,
     reconstructedValue: input.reconstructedValue,
     difference,
@@ -1326,8 +1428,10 @@ function extractSoaTransactions(
   const transactions: FinancialCandidateTransaction[] = [];
 
   for (const page of pages) {
+    // Same five fixture columns, accepting whitespace/tab separators and the
+    // named-month date separators already supported by parseDateValue.
     const regex =
-      /(\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)-\d{4})\s*\n(Capital Call|Distribution)\s*\n([A-Za-z0-9._/-]+)\s*\n(?:INR|Rs\.?|â‚¹|\$)?\s*([\d,]+(?:\.\d+)?)\s*\n([^\n]+)/gi;
+      /(\d{1,2}[-/ ]+[A-Za-z]{3,9}[-/ ]+\d{4})\s+(Capital Call|Distribution)\s+([A-Za-z0-9._/-]+)\s+((?:INR|USD|EUR|GBP|Rs\.?|\u20b9|\$|\u20ac|\u00a3)?\s*[\d,]+(?:\.\d+)?)\s+(Investor Contribution|Paid to Investor|[^\n]+)/gi;
 
     let match: RegExpExecArray | null;
 
@@ -1349,7 +1453,7 @@ function extractSoaTransactions(
             : "other",
         reference: match[3],
         amount,
-        currency: "INR",
+        currency: detectedCurrency(match[4], declaredCurrency(page.text)),
         cashflowDirection: directionText.includes("contribution")
           ? "investor_contribution"
           : directionText.includes("paid to investor")
@@ -1358,7 +1462,7 @@ function extractSoaTransactions(
         sourcePage: page.pageNumber,
         sourceExcerpt: compactExcerpt(match[0]),
         extractionMethod: "deterministic_row_match",
-        confidence: 100,
+        confidence: 85,
       });
     }
   }
@@ -1599,11 +1703,41 @@ function extractFinancialCandidatesFromText(input: {
     })
   );
 
-  return {
-    fields,
-    transactions,
-    checks,
-  };
+  if (input.documentType.includes("Capital Call")) {
+    const before = findFieldValue(fields, "capital_called_before_notice");
+    const current = findFieldValue(fields, "current_capital_call");
+    checks.push(buildCheck({
+      key: "capital_call_notice_equation",
+      label: "Capital called before notice plus current call equals cumulative called",
+      summaryValue: findFieldValue(fields, "cumulative_capital_called"),
+      reconstructedValue: before !== null && current !== null ? before + current : null,
+    }));
+  }
+
+  const isSoa = input.documentType.includes("SOA") || input.documentType.includes("Account Statement");
+  const required = isSoa
+    ? ["reporting_date", "commitment_amount", "capital_called_to_date", "uncalled_capital", "distributions_to_date", "current_nav"]
+    : input.documentType.includes("Capital Call")
+      ? ["notice_date", "due_date", "commitment_amount", "capital_called_before_notice", "current_capital_call", "cumulative_capital_called", "remaining_uncalled_commitment"]
+      : [];
+  const missing = required.filter((key) => !fields.some((field) => field.key === key));
+  const rowMentions = pages.reduce((total, page) => total + (page.text.match(/\b(?:Capital Call|Distribution)\b/gi) || []).length, 0);
+  const incompleteRows = isSoa && (transactions.length === 0 || rowMentions > transactions.length || transactions.some((row) => row.cashflowDirection === "unknown"));
+  if (missing.length || incompleteRows || (fields.length === 0 && transactions.length === 0)) {
+    checks.push(buildCheck({
+      key: "extraction_completeness",
+      label: `Review needed: ${missing.length ? `missing required fields: ${missing.join(", ")}. ` : ""}${incompleteRows || fields.length === 0 ? "Incomplete or unsupported financial evidence." : ""}`,
+      summaryValue: null,
+      reconstructedValue: null,
+    }));
+  }
+
+  const currencies = new Set([...fields.filter((field) => field.valueType === "money").map((field) => field.currency), ...transactions.map((row) => row.currency)]);
+  if (currencies.size > 1) {
+    checks.forEach((check) => { check.status = "NOT_TESTED"; check.difference = null; });
+    checks.push(buildCheck({ key: "extraction_completeness", label: "Review needed: mixed currencies; no FX conversion performed", summaryValue: null, reconstructedValue: null }));
+  }
+  return { fields, transactions, checks };
 }
 
 async function loadFinancialSourceText(row: PdfDocumentRow) {
@@ -1622,6 +1756,8 @@ async function loadFinancialSourceText(row: PdfDocumentRow) {
   }
 
   if (
+    eligibleForOcr(evidence) ||
+    evidence.pageLimitReached ||
     evidence.extractionMode === "ocr_required" ||
     evidence.extractionMode === "page_limit_review" ||
     evidence.extractionMode === "pending"
@@ -1707,10 +1843,6 @@ async function extractFinancialCandidateSidecar(
     text,
   });
 
-  if (result.fields.length === 0 && result.transactions.length === 0) {
-    throw new Error("PDF_FINANCIAL_NO_CANDIDATES_FOUND");
-  }
-
   const generatedAt = new Date().toISOString();
   const storageBucket = normalizeText(row.storage_bucket, 200);
   const storagePath = normalizeText(row.storage_path, 1000);
@@ -1754,6 +1886,7 @@ async function extractFinancialCandidateSidecar(
   }
 
   const manifest: FinancialCandidateManifest = {
+    identity: governedPdfIdentity(row),
     version: "A7.7-3",
     extractionStatus: "candidate",
     generatedAt,
@@ -1772,7 +1905,7 @@ async function extractFinancialCandidateSidecar(
 
   const currentSignals = parseSignals(row.match_signals);
   const updatedSignals = [
-    ...withoutFinancialSignal(currentSignals),
+    ...withoutIdentityReviewSignal(detachFinancialEvidence(currentSignals)),
     `A7.7-3 structured financial candidates extracted`,
     `A7.7-3 candidate fields: ${result.fields.length}`,
     `A7.7-3 candidate transactions: ${result.transactions.length}`,
@@ -1855,13 +1988,14 @@ function buildReconciliationRow(input: {
   pdfSourceExcerpt: string;
   structuredValue: number | null;
   structuredSource: StructuredEvidenceRef | null;
-}): FinancialReconciliationRow {
+}): FinancialReconciliationRow | null {
+  if (input.pdfValue === null && input.structuredValue === null) return null;
   let status: ReconciliationStatus;
   let difference: number | null = null;
 
   if (input.pdfValue !== null && input.structuredValue !== null) {
     difference = input.pdfValue - input.structuredValue;
-    status = Math.abs(difference) <= 0.01 ? "MATCHED" : "CONFLICT";
+    status = Math.abs(difference) <= FINANCIAL_TOLERANCE ? "MATCHED" : "CONFLICT";
   } else if (input.pdfValue !== null) {
     status = "PDF-ONLY";
   } else {
@@ -1886,6 +2020,8 @@ function buildReconciliationRow(input: {
 }
 
 function normalizeStructuredNumber(value: unknown) {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !/^-?\d+(?:\.\d+)?$/.test(value.trim())) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -1999,6 +2135,11 @@ async function reconcileFinancialCandidates(
     throw new Error("PDF_RECONCILIATION_INVESTOR_MATCH_REQUIRED");
   }
 
+  if (!identityMatches(row, financial.identity)) throw new Error("PDF_FINANCIAL_IDENTITY_REVIEW_REQUIRED");
+  if (financial.fields.some((field) => field.valueType === "money" && field.currency !== "INR")) {
+    throw new Error("PDF_CURRENCY_REVIEW_REQUIRED: reconciliation supports INR only; no FX conversion performed");
+  }
+
   const reportingDateField = financial.fields.find(
     (candidate) => candidate.key === "reporting_date"
   );
@@ -2034,9 +2175,12 @@ async function reconcileFinancialCandidates(
 
   const documentType = normalizeText(row.document_type, 120);
   const rows: FinancialReconciliationRow[] = [];
+  function addRows(...candidates: Array<FinancialReconciliationRow | null>) {
+    rows.push(...candidates.filter((candidate): candidate is FinancialReconciliationRow => candidate !== null));
+  }
 
   function addCommitmentRow() {
-    rows.push(
+    addRows(
       buildReconciliationRow({
         key: "commitment_amount",
         label: "Commitment Amount",
@@ -2051,7 +2195,7 @@ async function reconcileFinancialCandidates(
   }
 
   function addCapitalCalledRow() {
-    rows.push(
+    addRows(
       buildReconciliationRow({
         key: "capital_called_to_date",
         label: "Capital Called Till Date",
@@ -2066,7 +2210,7 @@ async function reconcileFinancialCandidates(
   }
 
   function addUncalledRow() {
-    rows.push(
+    addRows(
       buildReconciliationRow({
         key: "uncalled_capital",
         label: "Uncalled Capital",
@@ -2088,7 +2232,7 @@ async function reconcileFinancialCandidates(
     addCapitalCalledRow();
     addUncalledRow();
 
-    rows.push(
+    addRows(
       buildReconciliationRow({
         key: "distributions_to_date",
         label: "Distributions Till Date",
@@ -2124,7 +2268,7 @@ async function reconcileFinancialCandidates(
     if (uncalled.value !== null) addUncalledRow();
 
     if (distributions.value !== null) {
-      rows.push(
+      addRows(
         buildReconciliationRow({
           key: "distributions_to_date",
           label: "Distributions Till Date",
@@ -2139,7 +2283,7 @@ async function reconcileFinancialCandidates(
     }
 
     if (currentNav.value !== null) {
-      rows.push(
+      addRows(
         buildReconciliationRow({
           key: "current_nav",
           label: "Current NAV",
@@ -2197,6 +2341,7 @@ async function reconcileFinancialCandidates(
   }
 
   const manifest: FinancialReconciliationManifest = {
+    identity: governedPdfIdentity(row),
     version: "A7.7-4A",
     generatedAt,
     reconciliationStatus: "candidate",
@@ -2217,7 +2362,7 @@ async function reconcileFinancialCandidates(
   };
 
   const updatedSignals = [
-    ...withoutResolutionSignal(withoutReconciliationSignal(signals)),
+    ...withoutCanonicalCandidateSignal(withoutResolutionSignal(withoutReconciliationSignal(signals))),
     `A7.7-4A field reconciliation completed`,
     `A7.7-4A MATCHED: ${manifest.matchedCount}`,
     `A7.7-4A CONFLICT: ${manifest.conflictCount}`,
@@ -2317,11 +2462,14 @@ async function prepareCanonicalSnapshot(
     throw new Error("PDF_RESOLUTION_DRAFT_REQUIRED");
   }
 
-  if (existingCandidate?.snapshotId) {
-    return existingCandidate;
+  if (reconciliation.rows.length === 0) throw new Error("PDF_RECONCILIATION_NO_COMPARABLE_FIELDS");
+  if (reconciliation.rows.every((candidate) => candidate.status === "MATCHED") &&
+      (!identityMatches(row, resolution.sourceConfirmation?.identity) ||
+       resolution.sourceConfirmation?.reconciliationSidecarPath !== reconciliation.sidecarPath ||
+       !resolution.sourceConfirmation?.confirmedByUserId || !resolution.sourceConfirmation?.confirmedAt)) {
+    throw new Error("PDF_MATCHED_SOURCE_CONFIRMATION_REQUIRED");
   }
-
-  if (resolution.unresolvedDecisionCount > 0) {
+  if (resolution.unresolvedDecisionCount > 0 || resolution.decisions.some((decision) => decision.choice === "unresolved")) {
     throw new Error(
       `PDF_CANONICAL_UNRESOLVED_ROWS: ${resolution.unresolvedDecisionCount}`
     );
@@ -2333,6 +2481,18 @@ async function prepareCanonicalSnapshot(
       .length
   ) {
     throw new Error("PDF_CANONICAL_RESOLUTION_PACKAGE_INCOMPLETE");
+  }
+
+  const financial = getFinancialManifest(signals);
+  if (!identityMatches(row, financial?.identity) || !identityMatches(row, reconciliation.identity) || !identityMatches(row, resolution.identity)) {
+    throw new Error("PDF_FINANCIAL_IDENTITY_REVIEW_REQUIRED");
+  }
+  if (financial?.checks.some((check) => check.key === "extraction_completeness" || check.status === "CONFLICT" || (check.key === "capital_call_notice_equation" && check.status === "NOT_TESTED"))) {
+    throw new Error("PDF_FINANCIAL_EXTRACTION_REVIEW_REQUIRED");
+  }
+  if (existingCandidate?.snapshotId) {
+    if (!identityMatches(row, existingCandidate.identity)) throw new Error("PDF_CANDIDATE_IDENTITY_MISMATCH");
+    return existingCandidate;
   }
 
   const periodLabel = normalizeText(row.period_label, 120);
@@ -2781,6 +2941,7 @@ async function prepareCanonicalSnapshot(
   const manifest: CanonicalCandidateManifest = {
     version: "A7.7-6A",
     createdAt: now,
+    identity: governedPdfIdentity(row),
     snapshotId: String(insertedSnapshotRow.id),
     baseSnapshotId: String(baseSnapshotRow.id),
     snapshotVersion: Number(
@@ -3068,7 +3229,7 @@ async function ocrDocument(
     throw new Error("PDF_EVIDENCE_MANIFEST_REQUIRED_BEFORE_OCR");
   }
 
-  if (evidence.extractionMode !== "ocr_required") {
+  if (!eligibleForOcr(evidence)) {
     throw new Error("PDF_DOCUMENT_DOES_NOT_REQUIRE_OCR");
   }
 
@@ -3266,7 +3427,7 @@ async function ocrDocument(
   };
 
   const signals = [
-    ...withoutOcrSignal(withoutEvidenceSignal(existingSignals)),
+    ...withoutIdentityReviewSignal(detachFinancialEvidence(withoutOcrSignal(withoutEvidenceSignal(existingSignals)))),
     ...typeResult.signals,
     ...investorResult.signals,
     ...periodResult.signals,
@@ -3446,6 +3607,7 @@ function requiresFinancialPublicationApproval(row: PdfDocumentRow) {
     FINANCIAL_PUBLISH_GATED_TYPES.has(
       normalizeText(row.document_type, 120)
     ) ||
+    signals.includes(IDENTITY_REVIEW_SIGNAL) ||
     Boolean(getFinancialManifest(signals)) ||
     Boolean(getReconciliationManifest(signals)) ||
     Boolean(getResolutionManifest(signals)) ||
@@ -3498,7 +3660,7 @@ async function buildPublicationGates(
     const { data, error } = await supabaseAdmin
       .from("investor_position_snapshots")
       .select(
-        "id, fund_name, investor_id, source_kind, source_document_id, approval_status, reconciliation_status, validation_status, superseded_at"
+        "id, fund_name, investor_id, reporting_period, source_kind, source_document_id, approval_status, reconciliation_status, validation_status, superseded_at"
       )
       .eq("fund_name", fundName)
       .in("id", Array.from(snapshotIds));
@@ -3569,6 +3731,10 @@ async function buildPublicationGates(
     }
 
     if (
+      !identityMatches(document, canonical.identity) ||
+      normalizeText(snapshot.investor_id, 100) !== document.matched_investor_id ||
+      normalizeText(snapshot.fund_name, 240) !== document.fund_name ||
+      normalizeText(snapshot.reporting_period, 120) !== document.period_label ||
       normalizeText(snapshot.source_document_id, 100) !== document.id ||
       normalizeText(snapshot.source_kind, 80) !== "document_intelligence"
     ) {
@@ -3806,7 +3972,7 @@ async function reprocessDocument(
 
   const matchedInvestor = investorResult.investor;
   const signals = [
-    ...extraction.extractionSignals,
+    ...withoutIdentityReviewSignal(extraction.extractionSignals),
     ...typeResult.signals,
     ...investorResult.signals,
     ...periodResult.signals,
@@ -3886,10 +4052,16 @@ async function handleReprocess(
         .filter(Boolean)
     : [];
 
-  const targetDocuments =
-    requestedIds.length > 0
-      ? documents.filter((document) => requestedIds.includes(document.id))
-      : documents.filter((document) => !getEvidenceManifest(parseSignals(document.match_signals)));
+  const publishedPaths = await publishedStoragePaths(fundName,
+    documents.map((document) => normalizeText(document.storage_path, 1000)).filter(Boolean));
+  if (documents.some((document) => requestedIds.includes(document.id) &&
+    publishedPaths.has(normalizeText(document.storage_path, 1000)))) {
+    return noStoreJson({ error: "Published PDFs cannot be reprocessed or OCR-mutated until a governed withdrawal/revocation flow exists." }, 409);
+  }
+  const targetDocuments = documents.filter((document) =>
+    !publishedPaths.has(normalizeText(document.storage_path, 1000)) &&
+    (requestedIds.length > 0 ? requestedIds.includes(document.id) :
+      !getEvidenceManifest(parseSignals(document.match_signals))));
 
   if (targetDocuments.length === 0) {
     return noStoreJson({
@@ -3927,13 +4099,12 @@ async function handleReprocess(
         error: errorMessage,
       });
 
-      const existingSignals = parseSignals(document.match_signals);
       await supabaseAdmin
         .from("pdf_intelligence_documents")
         .update({
           status: "Failed",
           match_signals: [
-            ...withoutEvidenceSignal(existingSignals),
+            ...failedReprocessSignals(document),
             `A7.7-2 server-side extraction failed: ${errorMessage}`,
           ],
           updated_at: new Date().toISOString(),
@@ -4001,13 +4172,21 @@ async function handleOcrLatest(
         .filter(Boolean)
     : [];
 
+  const publishedPaths = await publishedStoragePaths(fundName,
+    documents.map((document) => normalizeText(document.storage_path, 1000)).filter(Boolean));
+  if (documents.some((document) => requestedIds.includes(document.id) &&
+    publishedPaths.has(normalizeText(document.storage_path, 1000)))) {
+    return noStoreJson({ error: "Published PDFs cannot be reprocessed or OCR-mutated until a governed withdrawal/revocation flow exists." }, 409);
+  }
+
   const candidates = documents.filter((document) => {
+    if (publishedPaths.has(normalizeText(document.storage_path, 1000))) return false;
     const signals = parseSignals(document.match_signals);
     const evidence = getEvidenceManifest(signals);
     const ocr = getOcrManifest(signals);
 
     if (!evidence || ocr) return false;
-    if (evidence.extractionMode !== "ocr_required") return false;
+    if (!eligibleForOcr(evidence)) return false;
 
     return requestedIds.length === 0 || requestedIds.includes(document.id);
   });
@@ -4048,14 +4227,12 @@ async function handleOcrLatest(
         error: errorMessage,
       });
 
-      const existingSignals = parseSignals(document.match_signals);
-
       await supabaseAdmin
         .from("pdf_intelligence_documents")
         .update({
           status: "Review",
           match_signals: [
-            ...withoutOcrSignal(existingSignals),
+            ...failedOcrSignals(document),
             `A7.7-2K OCR failed: ${errorMessage}`,
             `A7.7-2K OCR failure retained in Review`,
           ],
@@ -4324,6 +4501,9 @@ async function handleResolutionDraft(
     );
   }
 
+  if (!identityMatches(document, reconciliation.identity)) {
+    return noStoreJson({ error: "Reconcile financial evidence for the current governed identity first." }, 409);
+  }
   const submitted = Array.isArray(body.decisions) ? body.decisions : [];
   const decisionInputs = submitted.filter(
     (candidate): candidate is DataRow =>
@@ -4334,11 +4514,11 @@ async function handleResolutionDraft(
     (row) => row.status !== "MATCHED"
   );
 
-  if (reviewRows.length === 0) {
+  if (reviewRows.length === 0 && (body.confirmMatchedSource !== true || reconciliation.rows.length === 0)) {
     return noStoreJson(
       {
         error:
-          "This PDF has no inconsistency rows requiring a human resolution draft.",
+          "Explicit source confirmation is required for a fully matched PDF.",
       },
       400
     );
@@ -4421,10 +4601,18 @@ async function handleResolutionDraft(
     });
   }
 
+  const sourceConfirmation: SourceConfirmation | undefined = reviewRows.length === 0 ? {
+    identity: governedPdfIdentity(document),
+    reconciliationSidecarPath: reconciliation.sidecarPath,
+    confirmedByUserId: actor.userId,
+    confirmedByRole: access.role,
+    confirmedAt: now,
+  } : undefined;
   const sidecarPath = `${reconciliation.sidecarPath}.ventiq-resolution-draft.json`;
 
   const sidecar: ResolutionDraftSidecar = {
     version: "A7.7-5A",
+    sourceConfirmation,
     generatedAt: now,
     status: "draft_pending_checker",
     documentId: document.id,
@@ -4457,7 +4645,9 @@ async function handleResolutionDraft(
   }
 
   const manifest: ResolutionDraftManifest = {
+    identity: governedPdfIdentity(document),
     version: "A7.7-5A",
+    sourceConfirmation,
     generatedAt: now,
     status: "draft_pending_checker",
     sidecarBucket: reconciliation.sidecarBucket,
@@ -4474,7 +4664,7 @@ async function handleResolutionDraft(
   };
 
   const updatedSignals = [
-    ...withoutResolutionSignal(signals),
+    ...withoutCanonicalCandidateSignal(withoutResolutionSignal(signals)),
     `A7.7-5A resolution draft saved`,
     `A7.7-5A resolved decisions: ${manifest.resolvedDecisionCount}`,
     `A7.7-5A unresolved decisions: ${manifest.unresolvedDecisionCount}`,
@@ -4605,6 +4795,10 @@ async function handleAttachApprovalRequest(
     );
   }
 
+  if (!identityMatches(document, candidate.identity)) {
+    return noStoreJson({ error: "Candidate identity no longer matches this PDF. Prepare fresh governed evidence." }, 409);
+  }
+
   const now = new Date().toISOString();
   const updated: CanonicalCandidateManifest = {
     ...candidate,
@@ -4675,7 +4869,7 @@ async function handleReview(
 
   const { data: document, error: documentError } = await supabaseAdmin
     .from("pdf_intelligence_documents")
-    .select("id, batch_id, fund_name, match_signals, confidence_score")
+    .select("id, batch_id, fund_name, match_signals, confidence_score, matched_investor_id, period_label, document_type, storage_path")
     .eq("id", documentId)
     .eq("fund_name", fundName)
     .maybeSingle();
@@ -4712,8 +4906,14 @@ async function handleReview(
       ? Math.max(Number(document.confidence_score || 0), 85)
       : Number(document.confidence_score || 0);
 
+  const identityChanged = reviewIdentityChanged(document, investorId, periodLabel, documentType);
+  if (identityChanged && document.storage_path &&
+    (await publishedStoragePaths(fundName, [document.storage_path])).has(document.storage_path)) {
+    return noStoreJson({ error: "Published identity cannot be changed until a governed withdrawal/revocation flow exists." }, 409);
+  }
   const reviewSignals = [
-    ...existingSignals,
+    ...(identityChanged ? withoutIdentityReviewSignal(detachFinancialEvidence(existingSignals)) : existingSignals),
+    ...(identityChanged && requiresFinancialPublicationApproval(document as PdfDocumentRow) ? [IDENTITY_REVIEW_SIGNAL] : []),
     `Manual PDF review by ${actor.fullName}`,
     `Corrected investor: ${investor.investor_name || investor.investor_code}`,
     `Corrected document type: ${documentType}`,
@@ -4994,7 +5194,7 @@ export async function GET(request: NextRequest) {
           (document) => document.extractionPending
         ).length,
         ocrRequired: apiDocuments.filter(
-          (document) => document.evidence.extractionMode === "ocr_required"
+          (document) => eligibleForOcr(document.evidence)
         ).length,
         ocrCompleted: apiDocuments.filter(
           (document) => document.evidence.extractionMode === "ocr_completed"
