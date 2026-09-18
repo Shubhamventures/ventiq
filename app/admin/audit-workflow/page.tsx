@@ -240,6 +240,7 @@ export default function AuditWorkflowPage() {
   const [formMessage, setFormMessage] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
 
   const applyWorkflowPayload = useCallback((payload: any) => {
     const nextApprovals = Array.isArray(payload?.approvals)
@@ -374,10 +375,83 @@ export default function AuditWorkflowPage() {
     return false;
   }
 
-  function actionStageLabel(approval: ApprovalRequest) {
-    if (approval.currentStep === "Checker Review") return "Checker decision";
-    if (approval.currentStep === "Final Approval") return "Final decision";
-    return "Completed";
+  function approvalStepsFor(approvalId: string) {
+    return approvalSteps
+      .filter((step) => step.approvalRequestId === approvalId)
+      .sort((a, b) => a.stepOrder - b.stepOrder);
+  }
+
+  function isOwnRequest(approval: ApprovalRequest) {
+    if (!actor) return false;
+    return approval.requestedByEmail.toLowerCase() === actor.email.toLowerCase();
+  }
+
+  function approvalDisplayTitle(approval: ApprovalRequest) {
+    const prefix = "Institutional onboarding:";
+    if (approval.actionTitle.toLowerCase().startsWith(prefix.toLowerCase())) {
+      return approval.actionTitle.slice(prefix.length).trim() || approval.actionTitle;
+    }
+    return approval.actionTitle;
+  }
+
+  function approvalDisplayKicker(approval: ApprovalRequest) {
+    return approval.actionTitle.toLowerCase().startsWith("institutional onboarding:")
+      ? "Institutional onboarding"
+      : approval.actionType || "Governed approval";
+  }
+
+  function workflowStatusLabel(approval: ApprovalRequest) {
+    if (approval.approvalStatus === "Approved") return "Approved";
+    if (approval.approvalStatus === "Rejected") return "Rejected";
+    if (approval.currentStep === "Checker Review") return "Awaiting Checker";
+    if (approval.currentStep === "Final Approval") return "Awaiting Final Approval";
+    return approval.approvalStatus;
+  }
+
+  function governanceStageState(
+    approval: ApprovalRequest,
+    stageName: "Maker Submitted" | "Checker Review" | "Final Approval"
+  ) {
+    const step = approvalStepsFor(approval.id).find((item) => item.stepName === stageName);
+    const status = step?.stepStatus.toLowerCase() || "";
+    if (status === "completed") return "complete";
+    if (status === "rejected") return "rejected";
+    if (
+      approval.currentStep === stageName &&
+      approval.approvalStatus !== "Approved" &&
+      approval.approvalStatus !== "Rejected"
+    ) return "current";
+    return "pending";
+  }
+
+  function governanceStageLabel(
+    stageName: "Maker Submitted" | "Checker Review" | "Final Approval",
+    state: string
+  ) {
+    if (stageName === "Maker Submitted") return "Maker submitted";
+    if (stageName === "Checker Review") return state === "complete" ? "Checker approved" : "Checker review";
+    return state === "complete" ? "Final approved" : "Final approval";
+  }
+
+  function governanceStagePerson(
+    approval: ApprovalRequest,
+    stageName: "Maker Submitted" | "Checker Review" | "Final Approval",
+    state: string
+  ) {
+    const step = approvalStepsFor(approval.id).find((item) => item.stepName === stageName);
+    if (step?.actionedByName) return step.actionedByName;
+    if (stageName === "Maker Submitted") return approval.requestedByName || "Recorded maker";
+    if (state === "current") return "Awaiting action";
+    return "Pending";
+  }
+
+  function governanceMessage(approval: ApprovalRequest, canAct: boolean) {
+    if (approval.approvalStatus === "Approved") return { tone: "complete", title: "Governance complete", detail: "The request completed maker, checker and final approval." };
+    if (approval.approvalStatus === "Rejected") return { tone: "rejected", title: "Request rejected", detail: "The approval workflow is closed for this request." };
+    if (isOwnRequest(approval)) return { tone: "locked", title: "Independent approval required", detail: "You submitted this request. Approval must be performed by another authorised user." };
+    if (canAct && approval.currentStep === "Checker Review") return { tone: "action", title: "Your checker review is required", detail: "Review the request evidence before approving or rejecting this stage." };
+    if (canAct && approval.currentStep === "Final Approval") return { tone: "action", title: "Your final approval is required", detail: "Checker review is complete. Perform the independent final decision." };
+    return { tone: "waiting", title: "Awaiting authorised reviewer", detail: "The request is waiting for an authorised user at the current governance stage." };
   }
 
   async function submitApprovalRequest(event: FormEvent<HTMLFormElement>) {
@@ -422,6 +496,7 @@ export default function AuditWorkflowPage() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload?.error || "Unable to create approval request.");
       setApprovalForm(emptyApprovalForm);
+      setShowCreateForm(false);
       setFormMessage("Approval request created and sent to checker review.");
       await loadWorkflowData();
     } catch (error) {
@@ -984,6 +1059,66 @@ export default function AuditWorkflowPage() {
             grid-column: auto;
           }
         }
+        .approval-list { display: grid; gap: 14px; }
+        .approval-request-card { border: 1px solid rgba(147,197,253,.14); background: rgba(6,14,31,.48); border-radius: 20px; padding: 18px; transition: border-color .16s ease, background .16s ease; }
+        .approval-request-card.is-selected { border-color: rgba(245,200,91,.42); background: rgba(12,24,48,.7); }
+        .approval-request-card:hover { border-color: rgba(147,197,253,.3); }
+        .approval-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+        .approval-card-kicker { color: #93c5fd; font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 7px; }
+        .approval-card-title { margin: 0; color: #f8fbff; font-size: 18px; line-height: 1.25; letter-spacing: -.025em; overflow-wrap: anywhere; }
+        .approval-card-meta { display: flex; flex-wrap: wrap; gap: 7px 12px; margin-top: 9px; color: #9db3d7; font-size: 12px; }
+        .approval-card-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex-shrink: 0; }
+        .status-awaiting-checker, .status-awaiting-final-approval { background: rgba(245,158,11,.18); color: #fde68a; }
+        .approval-stage-track { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin-top: 18px; }
+        .approval-stage { min-width: 0; border: 1px solid rgba(147,197,253,.12); border-radius: 16px; padding: 13px; background: rgba(2,6,23,.3); }
+        .approval-stage.complete { border-color: rgba(34,197,94,.25); background: rgba(22,163,74,.08); }
+        .approval-stage.current { border-color: rgba(245,200,91,.38); background: rgba(245,200,91,.08); }
+        .approval-stage.rejected { border-color: rgba(239,68,68,.28); background: rgba(239,68,68,.08); }
+        .approval-stage-top { display: flex; align-items: center; gap: 8px; }
+        .approval-stage-marker { display: inline-flex; align-items: center; justify-content: center; width: 23px; height: 23px; border-radius: 999px; border: 1px solid rgba(147,197,253,.2); color: #9db3d7; font-size: 12px; font-weight: 950; flex: 0 0 auto; }
+        .approval-stage.complete .approval-stage-marker { border-color: rgba(34,197,94,.34); background: rgba(22,163,74,.18); color: #bbf7d0; }
+        .approval-stage.current .approval-stage-marker { border-color: rgba(245,200,91,.42); background: rgba(245,200,91,.14); color: #fde68a; }
+        .approval-stage.rejected .approval-stage-marker { border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.14); color: #fecaca; }
+        .approval-stage-label { color: #eef5ff; font-size: 12px; font-weight: 900; line-height: 1.3; }
+        .approval-stage-person { display: block; margin-top: 9px; color: #c7d7f4; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+        .approval-stage-time { display: block; margin-top: 4px; color: #7890b7; font-size: 11px; }
+        .approval-requested-by { margin-top: 14px; color: #9db3d7; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+        .approval-requested-by strong { color: #eaf2ff; font-weight: 850; }
+        .approval-card-footer { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; margin-top: 14px; }
+        .approval-governance-note { display: grid; gap: 3px; min-width: 0; border-radius: 14px; padding: 11px 13px; border: 1px solid rgba(147,197,253,.12); background: rgba(2,6,23,.26); }
+        .approval-governance-note strong { color: #f8fbff; font-size: 12px; }
+        .approval-governance-note span { color: #9db3d7; font-size: 11px; line-height: 1.4; }
+        .approval-governance-note.locked { border-color: rgba(245,200,91,.24); background: rgba(245,200,91,.06); }
+        .approval-governance-note.action { border-color: rgba(96,165,250,.3); background: rgba(59,130,246,.08); }
+        .approval-governance-note.complete { border-color: rgba(34,197,94,.24); background: rgba(22,163,74,.06); }
+        .approval-governance-note.rejected { border-color: rgba(239,68,68,.24); background: rgba(239,68,68,.06); }
+        .approval-card-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+        .approval-action-button { border: 1px solid rgba(147,197,253,.2); background: rgba(10,24,49,.72); color: #eaf2ff; border-radius: 11px; padding: 9px 12px; font: inherit; font-size: 12px; font-weight: 850; cursor: pointer; }
+        .approval-action-button:hover { border-color: rgba(147,197,253,.42); background: rgba(18,40,78,.82); }
+        .approval-action-button.primary { border-color: rgba(96,165,250,.42); background: rgba(37,99,235,.28); color: #dbeafe; }
+        .approval-action-button.danger { border-color: rgba(248,113,113,.3); background: rgba(127,29,29,.2); color: #fecaca; }
+        .approval-action-button:disabled { opacity: .55; cursor: wait; }
+        .approval-detail-summary { display: grid; gap: 16px; }
+        .approval-detail-header { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 14px; align-items: start; padding: 16px; border-radius: 18px; border: 1px solid rgba(147,197,253,.14); background: rgba(2,6,23,.3); }
+        .approval-detail-header h3 { margin: 4px 0 0; color: #f8fbff; font-size: 19px; line-height: 1.3; }
+        .approval-detail-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; }
+        .approval-detail-field { min-width: 0; border: 1px solid rgba(147,197,253,.1); border-radius: 14px; padding: 12px; background: rgba(2,6,23,.22); }
+        .approval-detail-field span { display: block; color: #7890b7; font-size: 10px; font-weight: 900; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 6px; }
+        .approval-detail-field strong { display: block; color: #eaf2ff; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+        .approval-detail-copy { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+        .approval-detail-copy > div, .approval-evidence-step { border: 1px solid rgba(147,197,253,.1); border-radius: 14px; padding: 13px; background: rgba(2,6,23,.22); }
+        .approval-detail-copy strong { display: block; color: #c7d7f4; font-size: 11px; margin-bottom: 7px; }
+        .approval-detail-copy p, .approval-evidence-step p { margin: 0; color: #9db3d7; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+        .approval-evidence-track { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+        .approval-evidence-step h4 { margin: 8px 0 0; color: #eef5ff; font-size: 14px; }
+        .approval-evidence-step p { margin-top: 8px; font-size: 11px; line-height: 1.55; }
+        @container ventiq-workspace (max-width: 760px) {
+          .approval-card-head { flex-direction: column; }
+          .approval-card-badges { justify-content: flex-start; }
+          .approval-stage-track, .approval-detail-grid, .approval-detail-copy, .approval-evidence-track { grid-template-columns: 1fr; }
+          .approval-card-footer, .approval-detail-header { grid-template-columns: 1fr; }
+          .approval-card-actions { justify-content: flex-start; }
+        }
         @container ventiq-workspace (max-width: 1100px) {
           .summary-grid,
           .main-grid,
@@ -1001,6 +1136,229 @@ export default function AuditWorkflowPage() {
             justify-content: flex-start;
           }
         }
+        /* t2-ux1a1-density-refinement */
+        .workflow-page .hero {
+          padding: 24px 28px;
+          margin-bottom: 14px;
+        }
+        .workflow-page .hero-top {
+          align-items: center;
+          gap: 20px;
+        }
+        .workflow-page .hero h1 {
+          font-size: clamp(34px, 4vw, 52px);
+          line-height: 1.02;
+          margin-bottom: 10px;
+        }
+        .workflow-page .hero-copy {
+          max-width: 840px;
+          margin-top: 8px;
+          font-size: 15px;
+          line-height: 1.5;
+        }
+        .workflow-page .hero .actions {
+          gap: 8px;
+        }
+        .workflow-page .hero .primary-button,
+        .workflow-page .hero .secondary-button {
+          min-height: 42px;
+          padding: 9px 14px;
+          border-radius: 12px;
+          font-size: 12px;
+        }
+        .workflow-page .summary-grid {
+          grid-template-columns: repeat(6, minmax(100px, 1fr));
+          gap: 8px;
+          margin-top: 16px;
+        }
+        .workflow-page .stat-card {
+          padding: 12px 14px;
+          border-radius: 14px;
+        }
+        .workflow-page .stat-card span {
+          font-size: 10px;
+          margin-bottom: 5px;
+        }
+        .workflow-page .stat-card strong {
+          font-size: 20px;
+        }
+        .workflow-page .ribbon {
+          padding: 9px 12px;
+          margin-bottom: 14px;
+          border-radius: 12px;
+          border-color: rgba(147, 197, 253, 0.14);
+          background: rgba(9, 18, 36, 0.72);
+          color: #9db3d7;
+          font-size: 11px;
+          font-weight: 800;
+          line-height: 1.4;
+        }
+        .workflow-page .main-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 14px;
+          margin-bottom: 14px;
+        }
+        .workflow-page .main-grid > .panel {
+          order: 1;
+          margin-bottom: 0;
+        }
+        .workflow-page .main-grid > .form-card {
+          order: 2;
+          margin-bottom: 0;
+        }
+        .workflow-page .panel,
+        .workflow-page .form-card {
+          padding: 20px;
+          margin-bottom: 14px;
+        }
+        .workflow-page .form-card {
+          border-color: rgba(245, 200, 91, 0.18);
+        }
+        .workflow-page .form-card h2,
+        .workflow-page .panel-header h2 {
+          font-size: 22px;
+        }
+        .workflow-page .form-card p,
+        .workflow-page .panel-header p {
+          margin-top: 6px;
+          font-size: 13px;
+          line-height: 1.45;
+        }
+        .workflow-page .form-grid {
+          gap: 12px;
+          margin-top: 14px;
+        }
+        .workflow-page .field textarea {
+          min-height: 84px;
+        }
+        .workflow-page .form-card .primary-button {
+          min-width: 220px;
+          height: 46px;
+          font-size: 13px;
+        }
+        .queue-header-actions {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .queue-create-button {
+          white-space: nowrap;
+        }
+        .queue-message {
+          flex-basis: 100%;
+          margin-top: 2px;
+          text-align: right;
+        }
+        .workflow-page .approval-list {
+          gap: 10px;
+        }
+        .workflow-page .approval-request-card {
+          padding: 16px;
+          border-radius: 18px;
+        }
+        .workflow-page .approval-stage-track {
+          gap: 8px;
+          margin-top: 14px;
+        }
+        .workflow-page .approval-stage {
+          padding: 11px;
+          border-radius: 14px;
+        }
+        .workflow-page .approval-requested-by,
+        .workflow-page .approval-card-footer {
+          margin-top: 11px;
+        }
+        .workflow-page .approval-detail-summary {
+          gap: 12px;
+        }
+        .workflow-page .approval-detail-header {
+          padding: 13px;
+          border-radius: 15px;
+        }
+        .workflow-page .approval-detail-grid,
+        .workflow-page .approval-detail-copy,
+        .workflow-page .approval-evidence-track {
+          gap: 8px;
+        }
+        .workflow-page .approval-detail-field,
+        .workflow-page .approval-detail-copy > div,
+        .workflow-page .approval-evidence-step {
+          padding: 10px 11px;
+          border-radius: 12px;
+        }
+        .workflow-page .action-grid {
+          grid-template-columns: repeat(6, minmax(0, 1fr));
+          gap: 8px;
+        }
+        .workflow-page .action-card {
+          min-width: 0;
+          padding: 11px 12px;
+          border-radius: 14px;
+        }
+        .workflow-page .action-card span {
+          padding: 5px 7px;
+          margin-bottom: 7px;
+          font-size: 9px;
+        }
+        .workflow-page .action-card h3 {
+          font-size: 13px;
+          line-height: 1.3;
+          overflow-wrap: anywhere;
+        }
+        .workflow-page .audit-list {
+          gap: 7px;
+        }
+        .workflow-page .audit-item {
+          padding: 10px 12px;
+          border-radius: 13px;
+        }
+        .workflow-page .audit-item strong {
+          margin-bottom: 3px;
+          font-size: 13px;
+          line-height: 1.35;
+        }
+        .workflow-page .audit-item p {
+          font-size: 11px;
+          line-height: 1.4;
+        }
+        .compact-readonly-card {
+          padding: 15px 18px !important;
+        }
+        @container ventiq-workspace (max-width: 1100px) {
+          .workflow-page .summary-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+          .workflow-page .action-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+          .queue-header-actions {
+            justify-content: flex-start;
+          }
+        }
+        @container ventiq-workspace (max-width: 760px) {
+          .workflow-page .hero {
+            padding: 18px;
+          }
+          .workflow-page .hero h1 {
+            font-size: 34px;
+          }
+          .workflow-page .summary-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+          .workflow-page .action-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+          .queue-header-actions {
+            justify-content: flex-start;
+          }
+          .queue-message {
+            text-align: left;
+          }
+        }
+
 `}</style>
 
       <section className="workflow-shell">
@@ -1010,8 +1368,7 @@ export default function AuditWorkflowPage() {
               <p className="eyebrow">VENTIQ Control Layer</p>
               <h1>Audit Trail & Approval Workflow</h1>
               <p className="hero-copy">
-                Server-authorised maker-checker control for critical fund operations.
-                Browser users never write directly to the approval or audit tables.
+                Server-authorised maker-checker control and auditable approval evidence for critical fund operations.
               </p>
             </div>
             <div className="actions">
@@ -1032,12 +1389,13 @@ export default function AuditWorkflowPage() {
         </div>
 
         <div className="ribbon">
-          {loading ? "Loading secured workflow..." : dataMessage} · API-authorised access → maker submission → checker review → final approval → audit evidence
+          {loading ? "Loading secured workflow..." : dataMessage} | Maker submission | Checker review | Final approval | Audit evidence
         </div>
 
         <div className="main-grid">
           {capabilities.canCreate ? (
-            <form className="form-card" onSubmit={submitApprovalRequest}>
+            showCreateForm ? (
+              <form className="form-card" onSubmit={submitApprovalRequest}>
               <h2>Create Approval Request</h2>
               <p>
                 The signed-in user becomes the recorded maker. Name, email and role are resolved on the server and cannot be spoofed by the form.
@@ -1103,9 +1461,10 @@ export default function AuditWorkflowPage() {
                 <button className="primary-button" disabled={saving} type="submit">{saving ? "Creating..." : "Create Approval Request"}</button>
                 {formMessage && <div className="message">{formMessage}</div>}
               </div>
-            </form>
+              </form>
+            ) : null
           ) : (
-            <div className="form-card">
+            <div className="form-card compact-readonly-card">
               <h2>Read-only access</h2>
               <p>
                 {actor
@@ -1119,74 +1478,115 @@ export default function AuditWorkflowPage() {
             <div className="panel-header">
               <div>
                 <h2>Approval Queue</h2>
-                <p>Actions are enabled only when the signed-in user is authorised for the current workflow stage.</p>
+                <p>Governed requests scoped to your active organisation, with actions shown only when you can act.</p>
               </div>
-              {actionMessage && <span className="message">{actionMessage}</span>}
+              <div className="queue-header-actions">
+                <span className={`status-pill ${summary.pending > 0 ? "status-pending" : "status-approved"}`}>{summary.pending} pending</span>
+                {capabilities.canCreate && (
+                  <button
+                    className="approval-action-button primary queue-create-button"
+                    onClick={() => setShowCreateForm((value) => !value)}
+                    type="button"
+                  >
+                    {showCreateForm ? "Close request form" : "+ New approval request"}
+                  </button>
+                )}
+                {actionMessage && <div className="message queue-message">{actionMessage}</div>}
+              </div>
             </div>
 
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Action</th><th>Module</th><th>Priority</th><th>Status</th><th>Current Step</th><th>Requested By</th><th>Actions</th></tr></thead>
-                <tbody>
-                  {approvals.map((approval) => {
-                    const canAct = canActOnApproval(approval);
-                    return (
-                      <tr key={approval.id}>
-                        <td><strong>{approval.actionTitle}</strong><br /><span>{approval.actionType}</span></td>
-                        <td>{approval.sourceModule}</td>
-                        <td><span className={`status-pill status-${statusClass(approval.priority)}`}>{approval.priority}</span></td>
-                        <td><span className={`status-pill status-${statusClass(approval.approvalStatus)}`}>{approval.approvalStatus}</span></td>
-                        <td>{approval.currentStep}<br /><span>{actionStageLabel(approval)}</span></td>
-                        <td>{approval.requestedByName}<br /><span>{approval.requestedByEmail}</span></td>
-                        <td>
-                          <div className="actions">
-                            <button className="small-button" onClick={() => setSelectedApprovalId(approval.id)} type="button">View</button>
-                            <button className="small-button" disabled={saving || !canAct} onClick={() => updateApprovalStatus(approval, "Approved")} type="button">Approve</button>
-                            <button className="small-button danger" disabled={saving || !canAct} onClick={() => updateApprovalStatus(approval, "Rejected")} type="button">Reject</button>
+            <div className="approval-list">
+              {approvals.map((approval) => {
+                const canAct = canActOnApproval(approval);
+                const governance = governanceMessage(approval, canAct);
+                const steps = approvalStepsFor(approval.id);
+                const isSelected = selectedApprovalId === approval.id;
+                const stages = ["Maker Submitted", "Checker Review", "Final Approval"] as const;
+                return (
+                  <article className={`approval-request-card${isSelected ? " is-selected" : ""}`} key={approval.id}>
+                    <div className="approval-card-head">
+                      <div>
+                        <div className="approval-card-kicker">{approvalDisplayKicker(approval)}</div>
+                        <h3 className="approval-card-title">{approvalDisplayTitle(approval)}</h3>
+                        <div className="approval-card-meta">
+                          <span>{approval.sourceModule}</span><span>{approval.actionType}</span><span>Requested {formatDate(approval.requestedAt)}</span>
+                        </div>
+                      </div>
+                      <div className="approval-card-badges">
+                        <span className={`status-pill status-${statusClass(approval.priority)}`}>{approval.priority}</span>
+                        <span className={`status-pill status-${statusClass(workflowStatusLabel(approval))}`}>{workflowStatusLabel(approval)}</span>
+                      </div>
+                    </div>
+
+                    <div className="approval-stage-track">
+                      {stages.map((stageName) => {
+                        const state = governanceStageState(approval, stageName);
+                        const step = steps.find((item) => item.stepName === stageName);
+                        const marker = state === "complete" ? "\u2713" : state === "current" ? "\u25CF" : state === "rejected" ? "!" : "\u25CB";
+                        return (
+                          <div className={`approval-stage ${state}`} key={stageName}>
+                            <div className="approval-stage-top"><span className="approval-stage-marker">{marker}</span><span className="approval-stage-label">{governanceStageLabel(stageName, state)}</span></div>
+                            <span className="approval-stage-person">{governanceStagePerson(approval, stageName, state)}</span>
+                            {step?.actionedAt && <span className="approval-stage-time">{formatDate(step.actionedAt)}</span>}
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {!loading && approvals.length === 0 && (
-                    <tr><td colSpan={7}>No approval requests are visible for your organisation.</td></tr>
-                  )}
-                </tbody>
-              </table>
+                        );
+                      })}
+                    </div>
+
+                    <div className="approval-requested-by">Requested by <strong>{approval.requestedByName || "Recorded maker"}</strong>{approval.requestedByEmail ? ` | ${approval.requestedByEmail}` : ""}</div>
+                    <div className="approval-card-footer">
+                      <div className={`approval-governance-note ${governance.tone}`}><strong>{governance.title}</strong><span>{governance.detail}</span></div>
+                      <div className="approval-card-actions">
+                        <button className="approval-action-button" onClick={() => setSelectedApprovalId(approval.id)} type="button">{isSelected ? "Details selected" : "View details"}</button>
+                        {canAct && <>
+                          <button className="approval-action-button danger" disabled={saving} onClick={() => updateApprovalStatus(approval, "Rejected")} type="button">Reject</button>
+                          <button className="approval-action-button primary" disabled={saving} onClick={() => updateApprovalStatus(approval, "Approved")} type="button">{approval.currentStep === "Final Approval" ? "Final approve" : "Approve"}</button>
+                        </>}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+              {!loading && approvals.length === 0 && <div className="control-box"><strong>No approval requests</strong>No approval requests are visible for your active organisation.</div>}
             </div>
           </div>
         </div>
 
         <div className="panel">
           <div className="panel-header">
-            <div><h2>Selected Approval Evidence</h2><p>Shows the exact maker-checker path and the authenticated user who actioned each step.</p></div>
-            {selectedApproval && <span className={`status-pill status-${statusClass(selectedApproval.approvalStatus)}`}>{selectedApproval.approvalStatus}</span>}
+            <div><h2>Approval Details &amp; Evidence</h2><p>Decision context, governance path and authenticated action evidence for the selected request.</p></div>
+            {selectedApproval && <span className={`status-pill status-${statusClass(workflowStatusLabel(selectedApproval))}`}>{workflowStatusLabel(selectedApproval)}</span>}
           </div>
-
           {selectedApproval ? (
-            <>
-              <div className="control-box">
-                <strong>{selectedApproval.actionTitle}</strong>
-                {selectedApproval.actionDescription}<br /><br />Business impact: {selectedApproval.businessImpact || "Not provided"}
+            <div className="approval-detail-summary">
+              <div className="approval-detail-header">
+                <div><div className="approval-card-kicker">{approvalDisplayKicker(selectedApproval)}</div><h3>{approvalDisplayTitle(selectedApproval)}</h3></div>
+                <span className={`status-pill status-${statusClass(selectedApproval.priority)}`}>{selectedApproval.priority}</span>
               </div>
-              <div className="step-grid" style={{ marginTop: 16 }}>
-                {selectedSteps.map((step) => (
-                  <div className="step-card" key={step.id}>
-                    <span>Step {step.stepOrder}</span><h3>{step.stepName}</h3>
-                    <p>Assigned role: {step.assignedRole}<br />Assigned to: {step.assignedToName || "Role-based assignment"}<br />Status: {step.stepStatus}<br />Actioned by: {step.actionedByName || "Not actioned"}</p>
-                  </div>
-                ))}
+              <div className="approval-detail-grid">
+                <div className="approval-detail-field"><span>Source module</span><strong>{selectedApproval.sourceModule}</strong></div>
+                <div className="approval-detail-field"><span>Action</span><strong>{selectedApproval.actionType}</strong></div>
+                <div className="approval-detail-field"><span>Requested by</span><strong>{selectedApproval.requestedByName || "Recorded maker"}{selectedApproval.requestedByEmail ? ` | ${selectedApproval.requestedByEmail}` : ""}</strong></div>
+                <div className="approval-detail-field"><span>Linked record</span><strong>{selectedApproval.linkedRecordId || "Not linked"}</strong></div>
               </div>
-            </>
-          ) : (
-            <div className="control-box"><strong>No approval selected</strong>Create or select an approval request to see workflow evidence.</div>
-          )}
+              <div className="approval-detail-copy">
+                <div><strong>Decision context</strong><p>{selectedApproval.actionDescription || "No description provided."}</p></div>
+                <div><strong>Business impact</strong><p>{selectedApproval.businessImpact || "Not provided."}</p></div>
+              </div>
+              <div className="approval-evidence-track">
+                {selectedSteps.map((step) => <div className="approval-evidence-step" key={step.id}>
+                  <span className={`status-pill status-${statusClass(step.stepStatus)}`}>{step.stepStatus}</span><h4>{step.stepName}</h4>
+                  <p>Assigned role: {step.assignedRole || "Role-based"}<br />Assigned to: {step.assignedToName || "Role-based assignment"}<br />Actioned by: {step.actionedByName || "Not actioned"}{step.actionedByEmail ? ` | ${step.actionedByEmail}` : ""}<br />Actioned: {step.actionedAt ? formatDate(step.actionedAt) : "Pending"}</p>
+                </div>)}
+              </div>
+            </div>
+          ) : <div className="control-box"><strong>No approval selected</strong>Select View details on a governed request to inspect its decision evidence.</div>}
         </div>
 
         <div className="panel">
           <div className="panel-header"><div><h2>Critical Action Coverage</h2><p>Operational actions that can be routed into this enterprise control layer.</p></div></div>
           <div className="action-grid">
-            {criticalActions.map((action) => <div className="action-card" key={action}><span>Controlled action</span><h3>{action}</h3><p>Maker submission → checker review → final approval → evidence.</p></div>)}
+            {criticalActions.map((action) => <div className="action-card" key={action}><span>Controlled action</span><h3>{action}</h3></div>)}
           </div>
         </div>
 
