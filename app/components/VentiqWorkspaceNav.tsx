@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
-import { useVentiqAuth } from "../../lib/auth/AuthProvider";
+import {
+  getMembershipOrganisationName,
+  useVentiqAuth,
+} from "../../lib/auth/AuthProvider";
 import { useActiveFund } from "../../lib/useActiveFund";
 import {
   WORKSPACE_GROUPS,
@@ -35,9 +38,16 @@ export default function VentiqWorkspaceNav({
   const pathname = usePathname() || "/";
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [organisationSwitching, setOrganisationSwitching] =
+    useState(false);
+  const [organisationSwitchError, setOrganisationSwitchError] =
+    useState("");
   const {
     activeRole,
+    activeOrganisationId,
+    memberships,
     availableFundAccess,
+    switchActiveOrganisation,
     signOut,
   } = useVentiqAuth();
 
@@ -71,6 +81,35 @@ export default function VentiqWorkspaceNav({
     [availableFundAccess]
   );
 
+  const availableOrganisations = useMemo(
+    () =>
+      memberships
+        .filter(
+          (membership) =>
+            membership.status === "Active" &&
+            membership.ventiq_organisations?.status === "Active"
+        )
+        .map((membership) => ({
+          id: membership.organisation_id,
+          name: getMembershipOrganisationName(membership),
+          isPrimary: membership.is_primary,
+        }))
+        .sort((left, right) => {
+          if (left.isPrimary !== right.isPrimary) {
+            return left.isPrimary ? -1 : 1;
+          }
+
+          return left.name.localeCompare(right.name);
+        }),
+    [memberships]
+  );
+
+  const activeOrganisationLabel =
+    availableOrganisations.find(
+      (organisation) =>
+        organisation.id === activeOrganisationId
+    )?.name || "No organisation assigned";
+
   if (publicPaths.has(pathname)) {
     return <>{children}</>;
   }
@@ -81,6 +120,41 @@ export default function VentiqWorkspaceNav({
     (fundContextReady
       ? "No fund assigned"
       : "Loading fund…");
+
+  async function handleOrganisationChange(
+    organisationId: string
+  ) {
+    if (
+      !organisationId ||
+      organisationId === activeOrganisationId ||
+      organisationSwitching
+    ) {
+      return;
+    }
+
+    setOrganisationSwitchError("");
+    setOrganisationSwitching(true);
+
+    const result = await switchActiveOrganisation(
+      organisationId
+    );
+
+    if (result.error) {
+      setOrganisationSwitchError(result.error);
+      setOrganisationSwitching(false);
+
+      if (result.requiresMfa) {
+        router.push(
+          `/auth/mfa?next=${encodeURIComponent(pathname)}`
+        );
+      }
+
+      return;
+    }
+
+    setMobileOpen(false);
+    window.location.assign("/workspace");
+  }
 
   async function handleSignOut() {
     await signOut();
@@ -102,11 +176,34 @@ export default function VentiqWorkspaceNav({
         </div>
 
         <div className="ventiq-mobile-drawer-context">
+          <div className="ventiq-mobile-drawer-organisation">
+            <span>Organisation</span>
+            {availableOrganisations.length > 1 ? (
+              <select
+                aria-label="Select active organisation in navigation"
+                disabled={organisationSwitching}
+                onChange={(event) =>
+                  void handleOrganisationChange(event.target.value)
+                }
+                value={activeOrganisationId || ""}
+              >
+                {availableOrganisations.map((organisation) => (
+                  <option key={organisation.id} value={organisation.id}>
+                    {organisation.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <strong>{activeOrganisationLabel}</strong>
+            )}
+          </div>
+
           <div className="ventiq-mobile-drawer-fund">
             <span>Active fund</span>
             {availableFundNames.length > 1 ? (
               <select
                 aria-label="Select active fund in navigation"
+                disabled={organisationSwitching}
                 onChange={(event) =>
                   setActiveFundName(event.target.value)
                 }
@@ -122,6 +219,12 @@ export default function VentiqWorkspaceNav({
               <strong>{activeFundLabel}</strong>
             )}
           </div>
+
+          {organisationSwitchError && (
+            <p className="ventiq-context-error" role="alert">
+              {organisationSwitchError}
+            </p>
+          )}
 
           <button
             className="ventiq-mobile-drawer-signout"
@@ -188,12 +291,40 @@ export default function VentiqWorkspaceNav({
             >
               &#9776;
             </button>
+            <div className="ventiq-organisation-context">
+              <span>Organisation</span>
+              {availableOrganisations.length > 1 ? (
+                <select
+                  aria-label="Select active organisation"
+                  disabled={organisationSwitching}
+                  onChange={(event) =>
+                    void handleOrganisationChange(event.target.value)
+                  }
+                  value={activeOrganisationId || ""}
+                >
+                  {availableOrganisations.map((organisation) => (
+                    <option key={organisation.id} value={organisation.id}>
+                      {organisation.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <strong>{activeOrganisationLabel}</strong>
+              )}
+              {organisationSwitchError && (
+                <small className="ventiq-context-error" role="alert">
+                  {organisationSwitchError}
+                </small>
+              )}
+            </div>
+
             <div className="ventiq-fund-context">
               <span>Active fund</span>
               {availableFundNames.length > 1 ? (
                 <select
                   className="ventiq-desktop-fund-control"
                   aria-label="Select active fund"
+                  disabled={organisationSwitching}
                   onChange={(event) =>
                     setActiveFundName(event.target.value)
                   }
@@ -370,6 +501,7 @@ export default function VentiqWorkspaceNav({
         }
 
         .ventiq-fund-context span,
+        .ventiq-organisation-context span,
         .ventiq-account-context span {
           display: block;
           color: #7189a8;
@@ -380,6 +512,7 @@ export default function VentiqWorkspaceNav({
         }
 
         .ventiq-fund-context strong,
+        .ventiq-organisation-context strong,
         .ventiq-account-context strong {
           display: block;
           margin-top: 2px;
@@ -388,7 +521,8 @@ export default function VentiqWorkspaceNav({
           font-weight: 850;
         }
 
-        .ventiq-fund-context select {
+        .ventiq-fund-context select,
+        .ventiq-organisation-context select {
           display: block;
           margin-top: 2px;
           max-width: min(360px, 42vw);
@@ -401,6 +535,28 @@ export default function VentiqWorkspaceNav({
           font-size: 12px;
           font-weight: 850;
           cursor: pointer;
+        }
+
+        .ventiq-fund-context select:disabled,
+        .ventiq-organisation-context select:disabled {
+          opacity: 0.64;
+          cursor: progress;
+        }
+
+        .ventiq-organisation-context {
+          min-width: 190px;
+          max-width: min(300px, 32vw);
+        }
+
+        .ventiq-context-error {
+          display: block;
+          margin: 5px 0 0;
+          color: #ffb7b7;
+          font-size: 10px;
+          font-weight: 750;
+          line-height: 1.35;
+          text-transform: none;
+          letter-spacing: 0;
         }
 
         .ventiq-account-context {
@@ -504,6 +660,10 @@ export default function VentiqWorkspaceNav({
             height: 34px;
           }
 
+          .ventiq-organisation-context {
+            display: none;
+          }
+
           .ventiq-fund-context {
             min-width: 0;
             flex: 1 1 auto;
@@ -554,7 +714,8 @@ export default function VentiqWorkspaceNav({
             background: rgba(8, 30, 60, 0.5);
           }
 
-          .ventiq-mobile-drawer-fund span {
+          .ventiq-mobile-drawer-fund span,
+          .ventiq-mobile-drawer-organisation span {
             display: block;
             margin-bottom: 6px;
             color: #7891b0;
@@ -565,14 +726,17 @@ export default function VentiqWorkspaceNav({
           }
 
           .ventiq-mobile-drawer-fund select,
-          .ventiq-mobile-drawer-fund strong {
+          .ventiq-mobile-drawer-fund strong,
+          .ventiq-mobile-drawer-organisation select,
+          .ventiq-mobile-drawer-organisation strong {
             display: block;
             width: 100%;
             min-width: 0;
             max-width: 100%;
           }
 
-          .ventiq-mobile-drawer-fund select {
+          .ventiq-mobile-drawer-fund select,
+          .ventiq-mobile-drawer-organisation select {
             border: 1px solid rgba(126, 181, 242, 0.22);
             border-radius: 8px;
             background: rgba(7, 24, 49, 0.88);
@@ -583,7 +747,8 @@ export default function VentiqWorkspaceNav({
             font-weight: 850;
           }
 
-          .ventiq-mobile-drawer-fund strong {
+          .ventiq-mobile-drawer-fund strong,
+          .ventiq-mobile-drawer-organisation strong {
             color: #eef6ff;
             font-size: 13px;
             font-weight: 850;

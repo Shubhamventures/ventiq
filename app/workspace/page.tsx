@@ -18,6 +18,7 @@ export default function WorkspacePage() {
   const {
     profile,
     activeRole,
+    activeOrganisationId,
     memberships,
     availableFundAccess,
     activeFundName,
@@ -30,6 +31,16 @@ export default function WorkspacePage() {
         canRoleUseWorkspace(activeRole, workspace)
       ),
     [activeRole]
+  );
+
+  const activeMembership = useMemo(
+    () =>
+      memberships.find(
+        (membership) =>
+          membership.organisation_id ===
+          activeOrganisationId
+      ) ?? null,
+    [activeOrganisationId, memberships]
   );
 
   async function handleSignOut() {
@@ -77,8 +88,8 @@ export default function WorkspacePage() {
             <article>
               <span>Organisation</span>
               <strong>
-                {memberships[0]
-                  ? getMembershipOrganisationName(memberships[0])
+                {activeMembership
+                  ? getMembershipOrganisationName(activeMembership)
                   : "Not assigned"}
               </strong>
             </article>

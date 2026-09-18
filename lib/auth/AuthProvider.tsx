@@ -185,6 +185,9 @@ type VentiqAuthContextValue = {
 
   signOut: () => Promise<void>;
   refreshAccess: () => Promise<void>;
+  switchActiveOrganisation: (
+    organisationId: string
+  ) => Promise<{ error: string | null; requiresMfa: boolean }>;
   setActiveFundName: (fundName: string) => void;
 
   canUseRole: (
@@ -720,6 +723,93 @@ export function AuthProvider({
     []
   );
 
+  const switchActiveOrganisation = useCallback(
+    async (organisationId: string) => {
+      const targetOrganisationId = organisationId.trim();
+      const accessToken = session?.access_token ?? "";
+      const userId = session?.user?.id ?? "";
+
+      if (!targetOrganisationId || !accessToken || !userId) {
+        return {
+          error: "A valid VENTIQ session and organisation are required.",
+          requiresMfa: false,
+        };
+      }
+
+      const targetMembership = memberships.find(
+        (membership) =>
+          membership.organisation_id ===
+            targetOrganisationId &&
+          membership.status === "Active" &&
+          membership.ventiq_organisations?.status ===
+            "Active"
+      );
+
+      if (!targetMembership) {
+        return {
+          error:
+            "That organisation is not available to your active VENTIQ membership.",
+          requiresMfa: false,
+        };
+      }
+
+      if (targetOrganisationId === activeOrganisationId) {
+        return { error: null, requiresMfa: false };
+      }
+
+      let response: Response;
+
+      try {
+        response = await fetch("/api/organisation-context", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            expectedOrganisationId:
+              profile?.active_organisation_id ?? null,
+            targetOrganisationId,
+          }),
+        });
+      } catch {
+        return {
+          error:
+            "VENTIQ could not switch organisation context. Please try again.",
+          requiresMfa: false,
+        };
+      }
+
+      const payload = (await response
+        .json()
+        .catch(() => null)) as
+        | { error?: string }
+        | null;
+
+      if (!response.ok) {
+        return {
+          error:
+            payload?.error ||
+            "VENTIQ could not switch organisation context.",
+          requiresMfa: response.status === 428,
+        };
+      }
+
+      writeRequestedActiveFundName("");
+      await loadUserAccess(userId);
+
+      return { error: null, requiresMfa: false };
+    },
+    [
+      activeOrganisationId,
+      loadUserAccess,
+      memberships,
+      profile?.active_organisation_id,
+      session?.access_token,
+      session?.user?.id,
+    ]
+  );
+
   const signOut = useCallback(async () => {
     const client = supabase;
 
@@ -768,6 +858,7 @@ export function AuthProvider({
         signIn,
         signOut,
         refreshAccess,
+        switchActiveOrganisation,
         setActiveFundName,
         canUseRole,
         canAccessFund,
@@ -791,6 +882,7 @@ export function AuthProvider({
         profile,
         refreshAccess,
         session,
+        switchActiveOrganisation,
         setActiveFundName,
         signIn,
         signOut,
