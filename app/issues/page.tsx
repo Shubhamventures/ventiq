@@ -4,10 +4,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { useVentiqAuth } from "../../lib/auth/AuthProvider";
+import { projectPdfIssues, type PdfIssueApiResponse } from "../../lib/issues/pdfIssueProjection";
 import { useActiveFund } from "../../lib/useActiveFund";
 
 type IssueSeverity = "Blocking" | "Review";
-type IssueSource = "Data Intake" | "Calculation" | "Activation";
+type IssueSource = "Data Intake" | "Calculation" | "Activation" | "PDF Intelligence";
 
 type IssueRecord = {
   id: string;
@@ -207,6 +208,7 @@ export default function IssueCenterPage() {
     fundName: string;
     canonicalResult: IssueApiResponse | null;
     launchResult: LaunchApiResponse | null;
+    pdfResult: PdfIssueApiResponse | null;
     message: string;
   } | null>(null);
   const [severityFilter, setSeverityFilter] =
@@ -224,6 +226,7 @@ export default function IssueCenterPage() {
 
   const canonicalResult = activeLoadState?.canonicalResult ?? null;
   const launchResult = activeLoadState?.launchResult ?? null;
+  const pdfResult = activeLoadState?.pdfResult ?? null;
 
   const loading = canLoadIssues && activeLoadState === null;
 
@@ -260,10 +263,23 @@ export default function IssueCenterPage() {
           headers,
         }
       ),
-    ]).then(async ([canonicalFetch, launchFetch]) => {
+      fetch(
+        `/api/migration/pdf-intelligence?fundName=${encodeURIComponent(fundName)}`,
+        { method: "GET", cache: "no-store", headers }
+      ).then(async (response) => {
+        if (!response.ok) throw new Error("PDF request failed");
+        const result = (await response.json()) as PdfIssueApiResponse;
+        if (!Array.isArray(result.documents)) throw new Error("Invalid PDF response");
+        return result;
+      }),
+    ]).then(async ([canonicalFetch, launchFetch, pdfFetch]) => {
       const messages: string[] = [];
       let nextCanonicalResult: IssueApiResponse | null = null;
       let nextLaunchResult: LaunchApiResponse | null = null;
+      const nextPdfResult = pdfFetch.status === "fulfilled" ? pdfFetch.value : null;
+      if (pdfFetch.status === "rejected") {
+        messages.push("PDF Intelligence issues could not be loaded. Existing issue sources remain available.");
+      }
 
       if (canonicalFetch.status === "fulfilled") {
         const response = canonicalFetch.value;
@@ -304,6 +320,7 @@ export default function IssueCenterPage() {
         fundName,
         canonicalResult: nextCanonicalResult,
         launchResult: nextLaunchResult,
+        pdfResult: nextPdfResult,
         message: messages.join(" "),
       });
     });
@@ -316,15 +333,16 @@ export default function IssueCenterPage() {
   const issues = useMemo(() => {
     const canonicalIssues = canonicalResult?.issues ?? [];
     const launchIssues = buildLaunchIssues(launchResult, canonicalIssues);
+    const pdfIssues = projectPdfIssues(pdfResult?.documents ?? []);
 
-    return [...canonicalIssues, ...launchIssues].sort((left, right) => {
+    return [...canonicalIssues, ...launchIssues, ...pdfIssues].sort((left, right) => {
       if (left.severity !== right.severity) {
         return left.severity === "Blocking" ? -1 : 1;
       }
 
       return left.source.localeCompare(right.source);
     });
-  }, [canonicalResult, launchResult]);
+  }, [canonicalResult, launchResult, pdfResult]);
 
   const summary = useMemo(() => {
     const blocking = issues.filter(
@@ -362,7 +380,7 @@ export default function IssueCenterPage() {
             <h1>Issue Center</h1>
             <p>
               One fund-scoped view of canonical intake exceptions, calculation
-              reconciliation controls and activation or launch blockers. VENTIQ
+              reconciliation controls, PDF Intelligence exceptions and activation or launch blockers. VENTIQ
               does not resolve issues here silently; each item links back to its
               owning repair workspace.
             </p>
@@ -492,6 +510,7 @@ export default function IssueCenterPage() {
                 <option value="Data Intake">Data Intake</option>
                 <option value="Calculation">Calculation</option>
                 <option value="Activation">Activation</option>
+                <option value="PDF Intelligence">PDF Intelligence</option>
               </select>
             </div>
           </div>
@@ -503,7 +522,7 @@ export default function IssueCenterPage() {
               <strong>No open issues match the current filters.</strong>
               <span>
                 This view covers canonical intake validation, calculation
-                reconciliation, activation and stakeholder-launch blockers for
+                reconciliation, PDF Intelligence, activation and stakeholder-launch blockers for
                 the selected governed fund.
               </span>
             </div>
